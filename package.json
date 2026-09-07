@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "generate:batiment-13a": "node scripts/generate-batiment-13a.js"
   },
   "dependencies": {
     "@react-three/drei": "^9.114.3",

@@ -287,11 +287,14 @@ eyeball results in 3D rather than deciding blind.
 9. Whether/how to represent obstacles (pillars — visible as black cells in the Batiment 13A
    reference) and aisle direction/capacity in a future revision of the physical asset layer
    or in the simulation graph layer.
-10. How the full Batiment 13A layout gets digitized from the Excel source into
-    `warehouse.example.json`'s format at scale (hand transcription vs. a small
-    Excel-to-JSON conversion script) — not attempted yet, current example is a small
-    illustrative subset only. The new in-browser editor (§5.1 "Editor") is one viable path
-    now — hand-place/adjust slots and walls visually instead of writing JSON or a script.
+10. ~~How the full Batiment 13A layout gets digitized from the Excel source~~ Partly
+    addressed: `scripts/generate-batiment-13a.js` produces `schema/warehouse.batiment-13a.json`,
+    an *approximation* of the full layout (870 slots: N/L/K side blocks, the A/B/D-E/G row
+    bands, obstacle gaps, end-cap clusters, detached block Z) with block row/column counts
+    and positions estimated by eye from the reference screenshot, not measured — ids are
+    arbitrary, not the real WMS codes. Still open: an actual accurate digitization (from the
+    real Excel data, not eyeballed from a screenshot) — either by fixing up this generator
+    with real measurements, or hand-adjusting in the editor (§5.1 "Editor").
 11. Editor doesn't yet support adding/removing wall corners or whole new wall loops (only
     moving existing ones) — needed once someone actually digitizes a new building shape
     from scratch rather than adjusting the example.
@@ -299,6 +302,13 @@ eyeball results in 3D rather than deciding blind.
 ## 10. Decision Log
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
+
+- 2026-09-08 — Generated an approximate full-scale digitization of Batiment 13A (870 slots)
+  via `scripts/generate-batiment-13a.js` → `schema/warehouse.batiment-13a.json`, to stress
+  the format/viewer against something closer to the real building's size and irregularity
+  than the small hand-written example. Explicitly an eyeballed approximation (block
+  row/column counts and positions estimated from the reference screenshot, not measured;
+  ids arbitrary) — not a substitute for a real digitization. See open question 10.
 
 - 2026-09-08 — Added undo/redo to the editor (Ctrl+Z / Ctrl+Shift+Z, whole-warehouse
   history snapshots, one step per drag gesture or field edit) and made all edits snap to

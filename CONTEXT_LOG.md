@@ -83,3 +83,20 @@ top. This is a log of what happened each session — the current-state snapshot 
   updated; new decision log entry.
 - Next: unchanged from before this session's edits — simulation graph layer design,
   scenario parameters, or digitizing more of Batiment 13A.
+- Generated an approximate full-scale Batiment 13A layout (870 slots) matching the
+  reference screenshot's structure: `scripts/generate-batiment-13a.js` →
+  `schema/warehouse.batiment-13a.json`. Block row/column counts and positions (N/L/K side
+  blocks, A/B/D-E/G row bands with obstacle gaps, small end-cap clusters, detached block Z)
+  were estimated by eye from the screenshot, not measured from real data — ids are
+  arbitrary. Verified by loading it in the viewer (Playwright, `<input type=file>` fallback
+  since the File System Access picker can't be automated) and visually confirming the
+  overall shape/gaps/obstacles line up; also verified computationally that no block
+  bounding boxes overlap.
+- `warehouse.example.json` (the small hand-written one) stays the default the app loads —
+  this new file is an additional sample, opened via Load.
+- specs.md open question 10 updated to reflect this is a partial answer (an eyeballed
+  approximation), not a real digitization from actual measurements; decision log entry
+  added.
+- Next: an accurate Batiment 13A digitization would need real measurements (not a
+  screenshot estimate) — otherwise, same open items as before (simulation graph layer /
+  scenario parameters).
