@@ -1,8 +1,12 @@
 import { useMemo } from "react";
+import type { ThreeEvent } from "@react-three/fiber";
 import type { WallLoop } from "../types/warehouse";
+import { useEditor } from "../state/EditorContext";
 
 const WALL_HEIGHT = 3;
 const WALL_THICKNESS = 0.2;
+const HANDLE_RADIUS = 0.35;
+const HANDLE_Y = 0.15;
 
 interface WallSegment {
   key: string;
@@ -37,7 +41,33 @@ function segmentsForLoop(wall: WallLoop): WallSegment[] {
   });
 }
 
+function WallHandles({ wall }: { wall: WallLoop }) {
+  const { dragRef, orbitRef } = useEditor();
+
+  const startDrag = (index: number) => (e: ThreeEvent<PointerEvent>) => {
+    e.stopPropagation();
+    dragRef.current = { type: "wallPoint", wallId: wall.id, index };
+    if (orbitRef.current) orbitRef.current.enabled = false;
+  };
+
+  return (
+    <>
+      {wall.points.map((point, index) => (
+        <mesh
+          key={`${wall.id}-handle-${index}`}
+          position={[point.x, HANDLE_Y, -point.y]}
+          onPointerDown={startDrag(index)}
+        >
+          <sphereGeometry args={[HANDLE_RADIUS, 16, 16]} />
+          <meshStandardMaterial color="#f5a623" />
+        </mesh>
+      ))}
+    </>
+  );
+}
+
 export function Walls({ walls }: { walls: WallLoop[] }) {
+  const { mode } = useEditor();
   const segments = useMemo(() => walls.flatMap(segmentsForLoop), [walls]);
 
   return (
@@ -52,6 +82,7 @@ export function Walls({ walls }: { walls: WallLoop[] }) {
           <meshStandardMaterial color="#8a8f98" />
         </mesh>
       ))}
+      {mode === "edit" && walls.map((wall) => <WallHandles key={wall.id} wall={wall} />)}
     </group>
   );
 }

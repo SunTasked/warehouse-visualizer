@@ -104,6 +104,26 @@ before building anything on top of it. Implementation notes:
   the closing segment when `closed: true`), not a flat line — chosen for a more legible 3D
   read of the space, purely a rendering choice, not a schema requirement.
 
+#### Editor
+
+The viewer has an edit mode (toggle in the toolbar) for authoring/adjusting this format
+directly, instead of hand-editing JSON:
+- **Walls**: drag a corner (orange handle) to move it; both adjacent wall segments update
+  live. Adding/removing corners or whole new wall loops isn't supported yet — only
+  repositioning existing ones.
+- **Slots**: "Add Slot" then click the floor to place one (prompts for its id/location
+  code); click an existing slot to select it and edit id/x/y/rotationDeg in a side panel,
+  drag it to move it, or delete it.
+- Dragged/placed coordinates snap to a 0.05m grid to avoid raw floating-point noise from
+  raycasting.
+- **Save/load**: uses the File System Access API where available (Chrome/Edge) so repeated
+  saves overwrite the same file in place; falls back to a browser download (save) and an
+  `<input type="file">` picker (load) elsewhere. See `src/lib/file.ts`.
+- Implementation note: the camera/orbit target is computed once per mount, not on every
+  edit, so reshaping a wall doesn't yank the view out from under the user — see
+  `src/components/WarehouseScene.tsx`. Loading a different file remounts the scene (keyed
+  on `warehouse.id`) to reframe for a differently-sized building.
+
 ### 5.2 Simulation Graph Layer — nodes, edges, zones (future, partly decided)
 
 **Decided:**
@@ -197,6 +217,9 @@ eyeball results in 3D rather than deciding blind.
 
 - [x] **3D warehouse view (physical layer only)** — walls + slots render in 3D (§5.1);
       aisles/lanes/zones aren't part of this format yet (§5.2).
+- [x] **Warehouse editor** — edit mode lets you drag wall corners to reshape the building,
+      and create/move/rotate/rename/delete slots, directly in the 3D view; save/load to a
+      JSON file on disk (§5.1 "Editor").
 - [ ] **Simulation run** — given a warehouse model + scenario config, run the simulation and
       produce a trace.
 - [ ] **Path playback** — animate operator movement over simulated time (play/pause/scrub),
@@ -256,12 +279,22 @@ eyeball results in 3D rather than deciding blind.
 10. How the full Batiment 13A layout gets digitized from the Excel source into
     `warehouse.example.json`'s format at scale (hand transcription vs. a small
     Excel-to-JSON conversion script) — not attempted yet, current example is a small
-    illustrative subset only.
+    illustrative subset only. The new in-browser editor (§5.1 "Editor") is one viable path
+    now — hand-place/adjust slots and walls visually instead of writing JSON or a script.
+11. Editor doesn't yet support adding/removing wall corners or whole new wall loops (only
+    moving existing ones) — needed once someone actually digitizes a new building shape
+    from scratch rather than adjusting the example.
 
 ## 10. Decision Log
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-08 — Added a warehouse editor to the viewer: drag wall corners to reshape the
+  building, create/move/rotate/rename/delete slots, save/load to a JSON file (File System
+  Access API with a download/upload fallback). See §5.1 "Editor". Fixed a real bug found
+  while testing this: `addSlot`/`updateSlot` mutated an outer variable inside a
+  `setState` updater, which is impure — React 18 Strict Mode double-invokes updaters in
+  dev specifically to catch this, and it was silently causing duplicate-id false positives.
 - 2026-09-08 — Built the first 3D viewer (Vite + React + TypeScript + react-three-fiber, at
   the repo root; see README). Renders `schema/warehouse.example.json`: walls as extruded
   boxes, slots as thin labeled pads, on a 1m grid with orbit controls. Confirms

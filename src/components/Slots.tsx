@@ -1,13 +1,18 @@
 import { Text } from "@react-three/drei";
+import type { ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 import { useMemo } from "react";
 import type { Slot, SlotSize } from "../types/warehouse";
+import { useEditor } from "../state/EditorContext";
 
 const SLOT_HEIGHT = 0.06;
 const SLOT_COLOR = "#4d7cfe";
+const SLOT_SELECTED_COLOR = "#ff8c42";
 const SLOT_EDGE_COLOR = "#1f3a93";
 
 function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
+  const { mode, addSlotMode, selectedSlotId, setSelectedSlotId, dragRef, orbitRef } = useEditor();
+  const selected = selectedSlotId === slot.id;
   const rotationRad = THREE.MathUtils.degToRad(slot.rotationDeg ?? 0);
   const geometry = useMemo(
     () => new THREE.BoxGeometry(defaults.width, SLOT_HEIGHT, defaults.height),
@@ -15,10 +20,22 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
   );
   const edges = useMemo(() => new THREE.EdgesGeometry(geometry), [geometry]);
 
+  const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
+    if (mode !== "edit" || addSlotMode) return; // let the event fall through to the drag plane
+    e.stopPropagation();
+    setSelectedSlotId(slot.id);
+    dragRef.current = { type: "slot", slotId: slot.id };
+    if (orbitRef.current) orbitRef.current.enabled = false;
+  };
+
   return (
-    <group position={[slot.x, SLOT_HEIGHT / 2, -slot.y]} rotation={[0, rotationRad, 0]}>
+    <group
+      position={[slot.x, SLOT_HEIGHT / 2, -slot.y]}
+      rotation={[0, rotationRad, 0]}
+      onPointerDown={handlePointerDown}
+    >
       <mesh geometry={geometry}>
-        <meshStandardMaterial color={SLOT_COLOR} />
+        <meshStandardMaterial color={selected ? SLOT_SELECTED_COLOR : SLOT_COLOR} />
       </mesh>
       <lineSegments geometry={edges}>
         <lineBasicMaterial color={SLOT_EDGE_COLOR} />

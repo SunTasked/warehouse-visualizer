@@ -45,3 +45,24 @@ top. This is a log of what happened each session — the current-state snapshot 
 - Next: either digitize more of the real Batiment 13A layout into the format (open question
   10), or move to designing the simulation graph layer / scenario parameters (open
   questions 3, 8).
+- Added a warehouse editor to the viewer (edit mode toggle): drag wall corners to reshape
+  the building; "Add Slot" + click floor to create one (prompts for id); click a slot to
+  select/drag it, edit id/x/y/rotationDeg in a side panel, or delete it; Save/Load a JSON
+  file (File System Access API, with download/upload fallback for browsers without it).
+  New files: `src/state/EditorContext.tsx` (all editor state + mutations),
+  `src/components/DragPlane.tsx` (the invisible ground plane that makes dragging
+  continuous), `src/components/Toolbar.tsx`, `src/components/Inspector.tsx`,
+  `src/lib/file.ts`. `Walls.tsx`/`Slots.tsx` gained handles/selection.
+- Found and fixed a real bug during testing (Playwright + a dev-only console.log, not just
+  visual inspection): `addSlot`/`updateSlot` read/wrote an outer `let` variable from inside
+  a `setWarehouse` updater function. React 18 Strict Mode double-invokes updaters in dev to
+  catch exactly this impurity, which was causing spurious "id already exists" errors on
+  otherwise-valid adds. Fixed by reading `warehouse` directly for the pre-check instead of
+  inspecting `current` inside the updater. Also fixed the camera/orbit target being
+  recomputed (and re-applied by react-three-fiber) on every edit, which fought
+  OrbitControls — it's now computed once per mount; loading a different file remounts the
+  scene (keyed on `warehouse.id`) to get a fresh, appropriately-scaled camera framing.
+- specs.md updated: §5.1 has a new "Editor" subsection, §6 editor item checked off, open
+  questions 10-11 added/updated, decision log entry added.
+- Next: same open items as before (simulation graph layer design, scenario parameters, or
+  digitizing more of Batiment 13A — now easier via the editor itself).

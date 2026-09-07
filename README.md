@@ -6,8 +6,8 @@ rules, operator count, order profiles, ...), then renders the result in 3D — o
 paths, congestion points, and slot/aisle usage — to help identify slotting and
 aisle-management optimizations by comparing "what-if" scenarios.
 
-**Status:** early stage — a first 3D viewer renders the warehouse physical asset format
-(walls + slots, see `schema/`), the simulation engine doesn't exist yet. See
+**Status:** early stage — a first 3D viewer renders and edits the warehouse physical asset
+format (walls + slots, see `schema/`), the simulation engine doesn't exist yet. See
 [specs.md](specs.md) for the full spec and [CONTEXT_LOG.md](CONTEXT_LOG.md) for the
 session-by-session decision log — both are kept current by a dedicated
 [context-keeper agent](.claude/agents/context-keeper.md).
@@ -20,9 +20,16 @@ npm run dev
 ```
 
 Opens a 3D view of `schema/warehouse.example.json` (walls + slots) at
-`http://localhost:5173` — orbit/pan/zoom with the mouse. This exists to validate the
-physical asset format (specs.md §5.1) renders correctly before building anything on top of
-it; it does not run any simulation yet.
+`http://localhost:5173` — orbit/pan/zoom with the mouse. It does not run any simulation yet.
+
+Click **Editing** to edit the layout:
+- Drag an orange corner handle to reshape a wall.
+- **Add Slot**, then click the floor to place one (you'll be asked for its id/location
+  code).
+- Click a slot to select it — drag to move it, or use the side panel to edit its
+  id/x/y/rotation or delete it.
+- **Save**/**Load** read and write the warehouse JSON file (in Chrome/Edge, Save writes
+  back to the same file you loaded; other browsers download/upload instead).
 
 ## Planned stack
 

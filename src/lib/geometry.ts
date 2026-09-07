@@ -15,6 +15,11 @@ export function toSceneXZ(x: number, y: number): [number, number] {
   return [x, -y];
 }
 
+/** Inverse of toSceneXZ — used to turn a drag point on the ground plane back into warehouse coordinates. */
+export function fromSceneXZ(sceneX: number, sceneZ: number): Point {
+  return { x: sceneX, y: -sceneZ };
+}
+
 export interface Bounds {
   minX: number;
   maxX: number;
