@@ -17,3 +17,6 @@ top. This is a log of what happened each session — the current-state snapshot 
 - Next: either (a) design the scenario parameter set and simulation engine core (specs.md
   open question 3, which also fills in the rest of zone `rules` fields), or (b) scaffold
   the TS monorepo (frontend + engine + shared types/schema) using the §5 schema.
+- Repo committed and pushed to https://github.com/SunTasked/warehouse-visualizer (main).
+  Added MIT `LICENSE` (reuse allowed, must keep copyright/license notice), expanded
+  `README.md`, and broadened `.gitignore` for the eventual TS/React/Three.js monorepo.
