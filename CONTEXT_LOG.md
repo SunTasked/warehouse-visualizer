@@ -66,3 +66,20 @@ top. This is a log of what happened each session — the current-state snapshot 
   questions 10-11 added/updated, decision log entry added.
 - Next: same open items as before (simulation graph layer design, scenario parameters, or
   digitizing more of Batiment 13A — now easier via the editor itself).
+- Added undo/redo (Ctrl+Z / Ctrl+Shift+Z + toolbar buttons) and enforced that every wall
+  and slot edge lands on a whole-meter graduation mark. Design notes:
+  - History is a stack of whole `Warehouse` snapshots in `EditorContext`'s `state`
+    (`{warehouse, past, future}`), all updated via one pure `setState` call each (learned
+    from the earlier impure-updater bug — no nested setState-inside-setState, no outer
+    mutable variables).
+  - A drag or an inspector-field edit is ONE undo step, not one per pointermove/keystroke:
+    `beginChange()` snapshots history at gesture start (pointer-down on a handle, a field's
+    onFocus), then `mutateWarehouse()` applies the continuous updates without pushing more
+    history.
+  - Snapping (coordinates to the nearest integer, rotation to the nearest 90°) moved from
+    `DragPlane`'s own local snap constant into `updateWallPoint`/`addSlot`/`updateSlot`
+    themselves, so it's enforced regardless of entry point (drag vs. typed inspector field).
+- specs.md updated: §5.1 "Editor" describes undo/redo and snapping; §6 editor checklist item
+  updated; new decision log entry.
+- Next: unchanged from before this session's edits — simulation graph layer design,
+  scenario parameters, or digitizing more of Batiment 13A.

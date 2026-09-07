@@ -11,7 +11,7 @@ const SLOT_SELECTED_COLOR = "#ff8c42";
 const SLOT_EDGE_COLOR = "#1f3a93";
 
 function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
-  const { mode, addSlotMode, selectedSlotId, setSelectedSlotId, dragRef, orbitRef } = useEditor();
+  const { mode, addSlotMode, selectedSlotId, setSelectedSlotId, dragRef, orbitRef, beginChange } = useEditor();
   const selected = selectedSlotId === slot.id;
   const rotationRad = THREE.MathUtils.degToRad(slot.rotationDeg ?? 0);
   const geometry = useMemo(
@@ -24,6 +24,7 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
     if (mode !== "edit" || addSlotMode) return; // let the event fall through to the drag plane
     e.stopPropagation();
     setSelectedSlotId(slot.id);
+    beginChange();
     dragRef.current = { type: "slot", slotId: slot.id };
     if (orbitRef.current) orbitRef.current.enabled = false;
   };

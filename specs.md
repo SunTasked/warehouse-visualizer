@@ -114,8 +114,18 @@ directly, instead of hand-editing JSON:
 - **Slots**: "Add Slot" then click the floor to place one (prompts for its id/location
   code); click an existing slot to select it and edit id/x/y/rotationDeg in a side panel,
   drag it to move it, or delete it.
-- Dragged/placed coordinates snap to a 0.05m grid to avoid raw floating-point noise from
-  raycasting.
+- **All coordinates snap to whole meters** (edges must land on a graduation mark): dragged
+  or placed wall corners and slot centers round to the nearest integer, and slot rotation
+  rounds to the nearest 90°. Since a slot's footprint (4x2) has integer half-extents, an
+  integer center plus a 90°-multiple rotation keeps its corners on integers too. Enforced
+  centrally in `updateWallPoint`/`addSlot`/`updateSlot` (src/state/EditorContext.tsx), not
+  per input path, so it holds regardless of whether the edit came from a drag or a typed
+  field.
+- **Undo/redo**: Ctrl+Z / Ctrl+Shift+Z (or the toolbar buttons), tracked as a history of
+  whole warehouse snapshots. A full drag gesture or a full inspector-field edit (from focus
+  to the next edit) is one undo step, not one step per pointermove/keystroke — see
+  `beginChange`/`mutateWarehouse` in `src/state/EditorContext.tsx`. History resets on Load
+  (opening a different file isn't itself undoable).
 - **Save/load**: uses the File System Access API where available (Chrome/Edge) so repeated
   saves overwrite the same file in place; falls back to a browser download (save) and an
   `<input type="file">` picker (load) elsewhere. See `src/lib/file.ts`.
@@ -219,7 +229,8 @@ eyeball results in 3D rather than deciding blind.
       aisles/lanes/zones aren't part of this format yet (§5.2).
 - [x] **Warehouse editor** — edit mode lets you drag wall corners to reshape the building,
       and create/move/rotate/rename/delete slots, directly in the 3D view; save/load to a
-      JSON file on disk (§5.1 "Editor").
+      JSON file on disk; undo/redo; all edits snap to whole-meter/90° graduations (§5.1
+      "Editor").
 - [ ] **Simulation run** — given a warehouse model + scenario config, run the simulation and
       produce a trace.
 - [ ] **Path playback** — animate operator movement over simulated time (play/pause/scrub),
@@ -289,6 +300,10 @@ eyeball results in 3D rather than deciding blind.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-08 — Added undo/redo to the editor (Ctrl+Z / Ctrl+Shift+Z, whole-warehouse
+  history snapshots, one step per drag gesture or field edit) and made all edits snap to
+  whole meters (and slot rotation to 90°) so every wall/slot edge always lands on a
+  graduation mark, not just the newly-placed ones. See §5.1 "Editor".
 - 2026-09-08 — Added a warehouse editor to the viewer: drag wall corners to reshape the
   building, create/move/rotate/rename/delete slots, save/load to a JSON file (File System
   Access API with a download/upload fallback). See §5.1 "Editor". Fixed a real bug found

@@ -57,6 +57,12 @@
   background: #eef1f6;
 }
 
+.toolbar__btn:disabled {
+  cursor: default;
+  opacity: 0.45;
+  background: #ffffff;
+}
+
 .toolbar__btn--active {
   background: #4d7cfe;
   border-color: #4d7cfe;

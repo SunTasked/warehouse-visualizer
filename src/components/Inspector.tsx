@@ -2,7 +2,7 @@ import type { FocusEvent } from "react";
 import { useEditor } from "../state/EditorContext";
 
 export function Inspector() {
-  const { mode, warehouse, selectedSlotId, updateSlot, deleteSlot, setSelectedSlotId } = useEditor();
+  const { mode, warehouse, selectedSlotId, updateSlot, deleteSlot, setSelectedSlotId, beginChange } = useEditor();
   if (mode !== "edit" || !selectedSlotId) return null;
 
   const slot = warehouse.slots.find((s) => s.id === selectedSlotId);
@@ -32,15 +32,16 @@ export function Inspector() {
 
       <label className="inspector__field">
         <span>Id</span>
-        <input type="text" defaultValue={slot.id} key={slot.id} onBlur={handleIdBlur} />
+        <input type="text" defaultValue={slot.id} key={slot.id} onFocus={beginChange} onBlur={handleIdBlur} />
       </label>
 
       <label className="inspector__field">
         <span>X (m)</span>
         <input
           type="number"
-          step="0.1"
+          step="1"
           value={slot.x}
+          onFocus={beginChange}
           onChange={(e) => updateSlot(slot.id, { x: Number(e.target.value) })}
         />
       </label>
@@ -49,8 +50,9 @@ export function Inspector() {
         <span>Y (m)</span>
         <input
           type="number"
-          step="0.1"
+          step="1"
           value={slot.y}
+          onFocus={beginChange}
           onChange={(e) => updateSlot(slot.id, { y: Number(e.target.value) })}
         />
       </label>
@@ -61,6 +63,7 @@ export function Inspector() {
           type="number"
           step="90"
           value={slot.rotationDeg ?? 0}
+          onFocus={beginChange}
           onChange={(e) => updateSlot(slot.id, { rotationDeg: Number(e.target.value) })}
         />
       </label>

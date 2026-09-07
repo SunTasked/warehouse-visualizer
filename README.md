@@ -30,6 +30,10 @@ Click **Editing** to edit the layout:
   id/x/y/rotation or delete it.
 - **Save**/**Load** read and write the warehouse JSON file (in Chrome/Edge, Save writes
   back to the same file you loaded; other browsers download/upload instead).
+- **Ctrl+Z** / **Ctrl+Shift+Z** (or the Undo/Redo buttons) undo/redo edits, one drag or one
+  field edit at a time.
+- Every coordinate snaps to a whole meter and every rotation to 90°, so wall and slot edges
+  always land on a grid line.
 
 ## Planned stack
 

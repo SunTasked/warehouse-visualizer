@@ -1,11 +1,6 @@
 import type { ThreeEvent } from "@react-three/fiber";
 import { useEditor } from "../state/EditorContext";
 import { fromSceneXZ } from "../lib/geometry";
-import type { Point } from "../types/warehouse";
-
-const SNAP = 0.05; // meters — keeps dragged/placed coordinates from accumulating float noise
-const snap = (v: number) => Math.round(v / SNAP) * SNAP;
-const snapPoint = (p: Point): Point => ({ x: snap(p.x), y: snap(p.y) });
 
 /**
  * A large invisible ground-plane mesh, only present in edit mode. It's what
@@ -13,6 +8,10 @@ const snapPoint = (p: Point): Point => ({ x: snap(p.x), y: snap(p.y) });
  * handle or a slot) isn't what's tracked under the pointer — this plane is,
  * so movement keeps registering even once the pointer has moved off the
  * (small) handle mesh. See src/state/EditorContext.tsx's dragRef.
+ *
+ * Coordinates aren't snapped here — updateWallPoint/updateSlot/addSlot in
+ * EditorContext round to whole meters (and rotation to 90°) centrally, so
+ * every entry point (drag, inspector fields) enforces it consistently.
  */
 export function DragPlane() {
   const { mode, addSlotMode, dragRef, orbitRef, updateWallPoint, updateSlot, addSlot, setSelectedSlotId } =
@@ -28,7 +27,7 @@ export function DragPlane() {
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
     const target = dragRef.current;
     if (!target) return;
-    const point = snapPoint(fromSceneXZ(e.point.x, e.point.z));
+    const point = fromSceneXZ(e.point.x, e.point.z);
     if (target.type === "wallPoint") {
       updateWallPoint(target.wallId, target.index, point);
     } else {
@@ -41,7 +40,7 @@ export function DragPlane() {
       setSelectedSlotId(null);
       return;
     }
-    const point = snapPoint(fromSceneXZ(e.point.x, e.point.z));
+    const point = fromSceneXZ(e.point.x, e.point.z);
     const id = window.prompt("New slot id (location code)");
     if (!id) return;
     const added = addSlot(id, point.x, point.y);

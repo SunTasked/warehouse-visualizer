@@ -1,7 +1,8 @@
 import { useEditor } from "../state/EditorContext";
 
 export function Toolbar() {
-  const { mode, setMode, addSlotMode, setAddSlotMode, dirty, save, load } = useEditor();
+  const { mode, setMode, addSlotMode, setAddSlotMode, dirty, save, load, undo, redo, canUndo, canRedo } =
+    useEditor();
 
   const toggleMode = () => {
     const next = mode === "view" ? "edit" : "view";
@@ -22,6 +23,12 @@ export function Toolbar() {
             onClick={() => setAddSlotMode(!addSlotMode)}
           >
             {addSlotMode ? "Click floor to add slot…" : "Add Slot"}
+          </button>
+          <button className="toolbar__btn" disabled={!canUndo} onClick={undo} title="Undo (Ctrl+Z)">
+            Undo
+          </button>
+          <button className="toolbar__btn" disabled={!canRedo} onClick={redo} title="Redo (Ctrl+Shift+Z)">
+            Redo
           </button>
           <span className="toolbar__hint">Drag orange corners to reshape walls. Click a slot to select it.</span>
         </>
