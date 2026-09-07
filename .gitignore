@@ -1,11 +1,36 @@
+# dependencies
 node_modules/
+
+# build output
 dist/
+dist-ssr/
 build/
-coverage/
-.env
-.env.local
-*.log
-.DS_Store
-Thumbs.db
+out/
 .turbo/
 .next/
+.vite/
+storybook-static/
+*.tsbuildinfo
+
+# env
+.env
+.env.*.local
+.env.local
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+
+# test / coverage
+coverage/
+playwright-report/
+test-results/
+
+# editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
