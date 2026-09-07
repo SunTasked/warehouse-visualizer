@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/SunTasked/warehouse-visualizer/schema/warehouse.schema.json",
+  "title": "Warehouse Physical Asset Layout (v1)",
+  "description": "Physical layer of a warehouse: building walls and storage slot footprints. Coordinates are in meters (1 unit = 1m), origin at the bottom-left of the site, +X right, +Y up. This describes what physically exists, not the walkable/simulation graph (routing, lane direction/capacity) which is a separate, future layer.",
+  "type": "object",
+  "required": ["id", "name", "units", "walls", "slotDefaults", "slots"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for this warehouse/building."
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable name, e.g. \"Batiment 13A\"."
+    },
+    "units": {
+      "type": "string",
+      "enum": ["m"],
+      "description": "Fixed to meters for now; kept explicit so other units can be supported later without an ambiguous scale."
+    },
+    "walls": {
+      "type": "array",
+      "description": "One or more wall loops/polylines. Each is an ordered list of corner points. Supports irregular outlines, notches, and multiple disjoint structures (e.g. a detached annex) by using multiple entries.",
+      "items": { "$ref": "#/definitions/wallLoop" }
+    },
+    "slotDefaults": {
+      "$ref": "#/definitions/slotSize",
+      "description": "Default footprint applied to every slot for now (all slots are the same size: 4m x 2m)."
+    },
+    "slots": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/slot" }
+    }
+  },
+  "definitions": {
+    "point": {
+      "type": "object",
+      "required": ["x", "y"],
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "wallLoop": {
+      "type": "object",
+      "required": ["id", "closed", "points"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "closed": {
+          "type": "boolean",
+          "description": "If true, an implicit segment connects the last point back to the first, forming a closed polygon. If false, it's an open polyline."
+        },
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/definitions/point" }
+        }
+      }
+    },
+    "slotSize": {
+      "type": "object",
+      "required": ["width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Footprint size along the slot's local X axis (before rotation), in meters."
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Footprint size along the slot's local Y axis (before rotation), in meters."
+        }
+      }
+    },
+    "slot": {
+      "type": "object",
+      "required": ["id", "x", "y"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Real WMS location code (e.g. \"A01\"), used as the unique identifier."
+        },
+        "x": {
+          "type": "number",
+          "description": "Center point X coordinate, in meters."
+        },
+        "y": {
+          "type": "number",
+          "description": "Center point Y coordinate, in meters."
+        },
+        "rotationDeg": {
+          "type": "number",
+          "default": 0,
+          "description": "Counter-clockwise rotation of the slot footprint around its center point, in degrees. 0 = width (slotDefaults.width) along +X, height along +Y. Usually a multiple of 90, but not restricted to one."
+        }
+      }
+    }
+  }
+}

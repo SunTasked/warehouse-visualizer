@@ -1,0 +1,28 @@
+{
+  "id": "bat-13a",
+  "name": "Batiment 13A",
+  "units": "m",
+  "walls": [
+    {
+      "id": "envelope",
+      "closed": true,
+      "points": [
+        { "x": 0, "y": 0 },
+        { "x": 30, "y": 0 },
+        { "x": 30, "y": 20 },
+        { "x": 0, "y": 20 }
+      ]
+    }
+  ],
+  "slotDefaults": {
+    "width": 4,
+    "height": 2
+  },
+  "slots": [
+    { "id": "A01", "x": 4, "y": 18 },
+    { "id": "A02", "x": 8, "y": 18 },
+    { "id": "A03", "x": 12, "y": 18 },
+    { "id": "A04", "x": 16, "y": 18 },
+    { "id": "N01", "x": 2, "y": 10, "rotationDeg": 90 }
+  ]
+}

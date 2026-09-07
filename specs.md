@@ -58,14 +58,48 @@ using rules and parameters you define.
 
 ## 5. Warehouse Model (Layout Representation)
 
+The warehouse model is split into two layers that are deliberately kept separate:
+
+- **§5.1 Physical asset layer** — what's physically there: building walls and slot
+  footprints. Ground truth, typically hand-authored or digitized from a real source (e.g.
+  an existing warehouse's Excel/CAD export). **Decided and implemented** — see below.
+- **§5.2 Simulation graph layer** — the walkable/routable network (nodes, edges, lane
+  direction & capacity, zone rules) that the simulation engine actually runs against. Can
+  be derived from the physical layer plus authored aisle/routing info, or procedurally
+  generated for synthetic warehouses. Still mostly future work — see below.
+
+Keeping them separate means a real, irregular building (physical layer hand-digitized) and
+a synthetic one (physical + graph both procedurally generated) can share the same
+downstream tooling.
+
+### 5.1 Physical Asset Layer — walls & slots (decided, v1)
+
+Format: `schema/warehouse.schema.json` (JSON Schema, draft-07), example at
+`schema/warehouse.example.json`.
+
+- Coordinates in meters (1 unit = 1m), **origin at bottom-left, +X right, +Y up**.
+- `walls`: one or more named loops/polylines, each an ordered list of corner points, with a
+  `closed` flag (closed polygon vs. open polyline). Multiple entries support irregular
+  outlines, notches, interior walls, and disjoint structures (e.g. a detached annex) without
+  needing a more complex shape language.
+- `slots`: rectangular footprints, all the same size for now (`slotDefaults: { width: 4,
+  height: 2 }`, meters). Each slot stores its **center point** (`x`, `y`) plus an optional
+  `rotationDeg` (counter-clockwise, default 0) for slots not aligned with the default
+  width-along-X / height-along-Y orientation.
+- Slot `id` is the real WMS/location code (e.g. `"A01"`), not an arbitrary internal id —
+  keeps the model traceable back to the source system.
+- Deliberately excluded from v1: obstacles/pillars, aisle direction, zones. These are
+  visible in the reference warehouse (Batiment 13A) screenshot but are deferred to when we
+  design the simulation graph layer (§5.2) or a later physical-layer revision.
+
+This is the format the first web viewer (in progress) renders, to validate that it's
+sufficient to represent a real building before building anything on top of it.
+
+### 5.2 Simulation Graph Layer — nodes, edges, zones (future, partly decided)
+
 **Decided:**
-- No existing digital layout — we define our own format: a **node/edge graph** (slots,
-  intersections, dock/staging points, connected by directional/capacity-constrained lanes).
-- **Authored via a grid-based generator** for v1: layouts are produced from a small set of
-  parameters (aisle count, bays per aisle, spacing, etc.) rather than hand-built node by
-  node. The generator outputs the same node/edge JSON format described below, so a
-  hand-edited or differently-sourced layout stays compatible with everything downstream
-  (simulation engine, renderer) without schema changes.
+- A **node/edge graph** (slots, intersections, dock/staging points, connected by
+  directional/capacity-constrained lanes).
 - **Single-level for v1**: no vertical/shelf-level movement modeling. `z` exists on nodes
   for visual rack height only; the walkable graph is flat.
 - **Zones carry simulation rules**, not just labels/coloring (e.g. a speed modifier or
@@ -73,6 +107,14 @@ using rules and parameters you define.
   simulation engine design (open question 3 in §9) is fleshed out — the schema below
   reserves an open bag for that so zones don't need a schema change every time a new rule
   is added.
+- For **synthetic/procedurally-generated warehouses**, authored via a grid-based generator
+  (parameters in, node/edge graph out).
+
+**Open (revisited after seeing a real, irregular warehouse):** the grid generator alone
+cannot produce a routable graph for a real building like Batiment 13A (irregular outline,
+non-gridded aisle arrangement, obstacles). How the graph gets authored for a real,
+hand-digitized building — hand-authored directly, derived automatically from the physical
+layer plus some aisle-definition input, or something else — is still open; see §9.
 
 ### Schema (decided, v1)
 
@@ -189,16 +231,35 @@ eyeball results in 3D rather than deciding blind.
 2. Confirm intended users beyond yourself (§3).
 3. Exact scenario parameter set the simulation engine needs to support (order profiles,
    picking policy, operator behavior/speed, shift patterns, etc.) — needs its own design
-   pass. Also determines the rest of the per-zone `rules` fields in §5.
-4. Grid generator default parameter values and zone-assignment strategies (§5).
+   pass. Also determines the rest of the per-zone `rules` fields in §5.2.
+4. Grid generator default parameter values and zone-assignment strategies, for synthetic
+   warehouses (§5.2).
 5. Confirm react-three-fiber (vs. alternatives) once we prototype the 3D view (§7).
 6. Storage approach for models/configs/results — flat files vs. database (§7).
 7. Deployment target (§7).
+8. How the simulation graph layer (§5.2) gets authored for a real, hand-digitized building
+   like Batiment 13A, since the grid generator doesn't apply there.
+9. Whether/how to represent obstacles (pillars — visible as black cells in the Batiment 13A
+   reference) and aisle direction/capacity in a future revision of the physical asset layer
+   or in the simulation graph layer.
+10. How the full Batiment 13A layout gets digitized from the Excel source into
+    `warehouse.example.json`'s format at scale (hand transcription vs. a small
+    Excel-to-JSON conversion script) — not attempted yet, current example is a small
+    illustrative subset only.
 
 ## 10. Decision Log
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-07 — Split the warehouse model into a **physical asset layer** (walls + slots,
+  ground truth) and a **simulation graph layer** (nodes/edges/zones, routable network),
+  prompted by seeing a real reference warehouse (Batiment 13A) that's irregular and clearly
+  hand-digitized, not gridded. Finalized and implemented the physical asset layer as v1:
+  JSON Schema in `schema/warehouse.schema.json`, example in `schema/warehouse.example.json`.
+  Coordinates in meters, **origin bottom-left, +X right, +Y up**; slots are 4x2m rectangles
+  storing their center point, with an optional `rotationDeg`; slot `id` is the real WMS
+  location code. Obstacles, aisle direction, and zones are deliberately excluded from this
+  layer for now (see §9). Full detail in §5.1/§5.2.
 - 2026-09-07 — Warehouse model finalized as a node/edge graph, authored via a **grid-based
   generator** (parametric, but outputs the same graph format hand-authored/imported
   layouts would use). **Single-level** for v1 (no shelf/z-level walking). **Zones carry

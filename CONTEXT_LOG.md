@@ -20,3 +20,14 @@ top. This is a log of what happened each session — the current-state snapshot 
 - Repo committed and pushed to https://github.com/SunTasked/warehouse-visualizer (main).
   Added MIT `LICENSE` (reuse allowed, must keep copyright/license notice), expanded
   `README.md`, and broadened `.gitignore` for the eventual TS/React/Three.js monorepo.
+- User shared a screenshot of a real reference warehouse ("Batiment 13A", currently
+  described in an unwieldy Excel sheet): irregular outline, notches, a detached block,
+  black obstacle cells (pillars), and aisle-direction arrows. This showed the grid
+  generator alone can't represent a real building, so the warehouse model was split into a
+  **physical asset layer** (walls + slots — decided/implemented, specs.md §5.1) and a
+  **simulation graph layer** (nodes/edges/zones — future, specs.md §5.2). Wrote
+  `schema/warehouse.schema.json` + `schema/warehouse.example.json` (small illustrative
+  example, not the full Batiment 13A digitization). Full Batiment 13A digitization and the
+  simulation-graph authoring approach for real buildings are open (specs.md §9, items 8-10).
+- Next: build the web viewer for `schema/warehouse.example.json` to validate the physical
+  asset format renders correctly (this was the original ask alongside the schema).
