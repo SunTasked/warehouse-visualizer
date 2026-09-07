@@ -92,8 +92,17 @@ Format: `schema/warehouse.schema.json` (JSON Schema, draft-07), example at
   visible in the reference warehouse (Batiment 13A) screenshot but are deferred to when we
   design the simulation graph layer (§5.2) or a later physical-layer revision.
 
-This is the format the first web viewer (in progress) renders, to validate that it's
-sufficient to represent a real building before building anything on top of it.
+A first 3D viewer (React + react-three-fiber, at the repo root — see README "Running the
+viewer") renders this format, to validate that it's sufficient to represent a real building
+before building anything on top of it. Implementation notes:
+- Warehouse (x, y) maps to the scene's ground plane as scene (x, height, -y); height is
+  used only for wall extrusion (3m) and a thin slot pad (0.06m), not modeled in the format
+  itself (§5.1 is single-level/flat). This mapping was chosen so that `rotationDeg`
+  (warehouse-CCW) equals the Three.js `rotation.y` value directly, with no sign flip —
+  see `src/lib/geometry.ts` for the derivation.
+- Walls are rendered as extruded boxes per segment (consecutive point pairs in a loop, plus
+  the closing segment when `closed: true`), not a flat line — chosen for a more legible 3D
+  read of the space, purely a rendering choice, not a schema requirement.
 
 ### 5.2 Simulation Graph Layer — nodes, edges, zones (future, partly decided)
 
@@ -186,7 +195,8 @@ eyeball results in 3D rather than deciding blind.
 
 ## 6. Core Features / Visualizations
 
-- [ ] **3D warehouse view** — render the layout (racks, aisles, slots) in 3D.
+- [x] **3D warehouse view (physical layer only)** — walls + slots render in 3D (§5.1);
+      aisles/lanes/zones aren't part of this format yet (§5.2).
 - [ ] **Simulation run** — given a warehouse model + scenario config, run the simulation and
       produce a trace.
 - [ ] **Path playback** — animate operator movement over simulated time (play/pause/scrub),
@@ -234,7 +244,8 @@ eyeball results in 3D rather than deciding blind.
    pass. Also determines the rest of the per-zone `rules` fields in §5.2.
 4. Grid generator default parameter values and zone-assignment strategies, for synthetic
    warehouses (§5.2).
-5. Confirm react-three-fiber (vs. alternatives) once we prototype the 3D view (§7).
+5. ~~Confirm react-three-fiber (vs. alternatives) once we prototype the 3D view (§7).~~
+   Confirmed — the viewer is built on it, works well for this use case.
 6. Storage approach for models/configs/results — flat files vs. database (§7).
 7. Deployment target (§7).
 8. How the simulation graph layer (§5.2) gets authored for a real, hand-digitized building
@@ -251,6 +262,11 @@ eyeball results in 3D rather than deciding blind.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-08 — Built the first 3D viewer (Vite + React + TypeScript + react-three-fiber, at
+  the repo root; see README). Renders `schema/warehouse.example.json`: walls as extruded
+  boxes, slots as thin labeled pads, on a 1m grid with orbit controls. Confirms
+  react-three-fiber (open question 5) and validates the physical asset format (§5.1) end to
+  end — verified visually via a Playwright screenshot, no console errors.
 - 2026-09-07 — Split the warehouse model into a **physical asset layer** (walls + slots,
   ground truth) and a **simulation graph layer** (nodes/edges/zones, routable network),
   prompted by seeing a real reference warehouse (Batiment 13A) that's irregular and clearly

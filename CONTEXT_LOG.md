@@ -31,3 +31,17 @@ top. This is a log of what happened each session — the current-state snapshot 
   simulation-graph authoring approach for real buildings are open (specs.md §9, items 8-10).
 - Next: build the web viewer for `schema/warehouse.example.json` to validate the physical
   asset format renders correctly (this was the original ask alongside the schema).
+
+## 2026-09-08
+
+- Built the first 3D viewer: Vite + React + TypeScript + react-three-fiber, scaffolded at
+  the repo root (`package.json`, `src/`) — a single app, not a monorepo, since there's only
+  one piece of code so far. Renders `schema/warehouse.example.json` (walls as extruded
+  boxes, slots as labeled pads) with orbit controls on a 1m grid. `npm run dev` to view.
+  Verified with a Playwright screenshot (no console errors) — see specs.md §5.1 for the
+  coordinate-mapping/rotation implementation notes.
+- specs.md updated: §5.1 marked implemented, §6 3D-view item checked off (physical layer
+  only — no aisles/lanes/zones yet), open question 5 (react-three-fiber choice) resolved.
+- Next: either digitize more of the real Batiment 13A layout into the format (open question
+  10), or move to designing the simulation graph layer / scenario parameters (open
+  questions 3, 8).
