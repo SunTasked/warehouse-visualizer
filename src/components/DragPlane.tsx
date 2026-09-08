@@ -9,35 +9,59 @@ import { fromSceneXZ } from "../lib/geometry";
  * so movement keeps registering even once the pointer has moved off the
  * (small) handle mesh. See src/state/EditorContext.tsx's dragRef.
  *
- * Coordinates aren't snapped here — updateWallPoint/updateSlot/addSlot in
- * EditorContext round to whole meters (and rotation to 90°) centrally, so
- * every entry point (drag, inspector fields) enforces it consistently.
+ * Coordinates aren't snapped here — updateWallPoint/addSlot/updateSlots/
+ * applySlotPatches in EditorContext round to whole meters (and rotation to
+ * 90°) centrally, so every entry point (drag, inspector fields) enforces it
+ * consistently. Likewise, history is committed here (drag end), not per
+ * pointermove — see commit()/mutateWarehouse() in EditorContext.
  */
 export function DragPlane() {
-  const { mode, addSlotMode, dragRef, orbitRef, updateWallPoint, updateSlot, addSlot, setSelectedSlotId } =
-    useEditor();
+  const {
+    mode,
+    addSlotMode,
+    dragRef,
+    orbitRef,
+    updateWallPoint,
+    applySlotPatches,
+    addSlot,
+    clearSelection,
+    commit,
+  } = useEditor();
 
   if (mode !== "edit") return null;
 
   const endDrag = () => {
+    const target = dragRef.current;
     dragRef.current = null;
     if (orbitRef.current) orbitRef.current.enabled = true;
+    // A plain click (pointerdown immediately followed by pointerup, no
+    // intervening pointermove) shouldn't record a no-op "Move..." entry.
+    if (target && target.moved) commit(target.label);
   };
 
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
     const target = dragRef.current;
     if (!target) return;
+    target.moved = true;
     const point = fromSceneXZ(e.point.x, e.point.z);
     if (target.type === "wallPoint") {
       updateWallPoint(target.wallId, target.index, point);
-    } else {
-      updateSlot(target.slotId, point);
+      return;
     }
+    const dx = point.x - target.anchor.x;
+    const dy = point.y - target.anchor.y;
+    applySlotPatches(
+      target.ids.map((id) => {
+        const origin = target.origins[id];
+        return { id, x: origin.x + dx, y: origin.y + dy };
+      }),
+    );
   };
 
   const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
+    if (e.nativeEvent.button !== 0) return; // left button only — right button is for box-select
     if (!addSlotMode) {
-      setSelectedSlotId(null);
+      clearSelection();
       return;
     }
     const point = fromSceneXZ(e.point.x, e.point.z);

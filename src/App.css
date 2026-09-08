@@ -150,3 +150,75 @@
 .inspector__delete:hover {
   background: #fbdada;
 }
+
+.inspector__hint {
+  margin: 0 0 0.6rem;
+  font-size: 0.78rem;
+  color: #5a6270;
+}
+
+.selection-overlay__box {
+  position: absolute;
+  pointer-events: none;
+  border: 1px dashed #4d7cfe;
+  background: rgba(77, 124, 254, 0.12);
+  z-index: 5;
+}
+
+.history-panel {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  width: 220px;
+  max-height: calc(100% - 2rem);
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border: 1px solid #d7dbe3;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.12);
+  font-size: 0.85rem;
+  overflow: hidden;
+}
+
+.history-panel__header {
+  padding: 0.85rem 1rem 0.5rem;
+}
+
+.history-panel__header h2 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.history-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0.5rem 0.5rem;
+  overflow-y: auto;
+}
+
+.history-panel__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  font-size: 0.82rem;
+  color: #2a2f3a;
+  cursor: pointer;
+}
+
+.history-panel__item:hover {
+  background: #eef1f6;
+}
+
+.history-panel__item--current {
+  background: #4d7cfe;
+  color: #ffffff;
+}
+
+.history-panel__item--current:hover {
+  background: #4d7cfe;
+}

@@ -100,3 +100,34 @@ top. This is a log of what happened each session — the current-state snapshot 
 - Next: an accurate Batiment 13A digitization would need real measurements (not a
   screenshot estimate) — otherwise, same open items as before (simulation graph layer /
   scenario parameters).
+- Added multi-select, box-select, bulk update/delete, and a History panel:
+  - Selection is now `selectedSlotIds: Set<string>`. Ctrl/Cmd+click toggles membership;
+    plain click on an unselected slot replaces the selection; plain click-and-drag on a
+    slot that's already part of a multi-selection moves the whole group (computed via a
+    per-slot origin snapshot + one shared anchor/delta, not "set every slot to the same
+    point").
+  - Box-select (`src/components/SelectionOverlay.tsx`): right-click-drag draws a rectangle;
+    slot centers are projected to screen space via the live camera (`cameraRef`, captured
+    from `Canvas.onCreated`) to test containment. It listens on the canvas's *container*
+    div rather than rendering its own overlay layer, since a full-size div would either
+    block left-click scene interaction (`pointer-events: auto`) or never receive the
+    right-click at all (`pointer-events: none`) — native events from the canvas bubble up
+    to the container either way, so listening there costs nothing.
+  - Inspector now has a bulk mode (2+ slots selected): a Rotation field applied to all, and
+    "Delete N slots" — both single history entries.
+  - Undo/redo reworked from a past/future stack into a flat, labeled timeline (`entries` +
+    `cursor`) specifically so the new History panel can jump to *any* past entry, not just
+    step sequentially. `commit(label)` is called once per completed gesture (drag end,
+    field blur, or immediately for atomic actions like add/delete); `mutateWarehouse`
+    applies live updates without touching history in between.
+  - Two real bugs found and fixed while testing this (Playwright, not just visual
+    inspection): a plain click with zero pointer movement was still committing a spurious
+    "Move slot X" history entry (fixed with a `moved` flag, set only on an actual
+    pointermove, checked before committing in `DragPlane`'s `endDrag`); and — a test-script
+    bug, not an app bug, but worth remembering — Playwright's raw `page.mouse.click()` does
+    not support a `modifiers` option (only locator-based `.click()` does), so Ctrl+click
+    tests need `page.keyboard.down("Control")` / `up("Control")` around the raw click.
+  - specs.md §5.1 "Editor" rewritten to describe all of the above; §6 checklist and decision
+    log updated.
+- Next: same open items as always — simulation graph layer / scenario parameters, or an
+  accurate Batiment 13A digitization.

@@ -114,17 +114,34 @@ directly, instead of hand-editing JSON:
 - **Slots**: "Add Slot" then click the floor to place one (prompts for its id/location
   code); click an existing slot to select it and edit id/x/y/rotationDeg in a side panel,
   drag it to move it, or delete it.
+- **Multi-select**: Ctrl+click (Cmd+click on Mac) toggles a slot in/out of the selection;
+  right-click-drag draws a box (Windows-desktop style) and selects every slot whose center
+  falls inside it (Ctrl held = add to the current selection instead of replacing it).
+  Dragging any selected slot moves the whole group together (delta-based, computed from
+  each slot's original position, not "snap all to one point"). With 2+ slots selected, the
+  side panel switches to a bulk mode: a Rotation field that applies to every selected slot,
+  and a "Delete N slots" button — both single history entries regardless of N. See
+  `selectedSlotIds`/`selectMany`/`applySlotPatches`/`updateSlots`/`deleteSlots` in
+  `src/state/EditorContext.tsx`, and `src/components/SelectionOverlay.tsx` for the box-select
+  mechanics (screen-space rectangle, slot centers projected via the camera to test
+  containment — see that file for why it listens on the canvas's container instead of
+  rendering its own hit-testable overlay).
 - **All coordinates snap to whole meters** (edges must land on a graduation mark): dragged
   or placed wall corners and slot centers round to the nearest integer, and slot rotation
   rounds to the nearest 90°. Since a slot's footprint (4x2) has integer half-extents, an
   integer center plus a 90°-multiple rotation keeps its corners on integers too. Enforced
-  centrally in `updateWallPoint`/`addSlot`/`updateSlot` (src/state/EditorContext.tsx), not
-  per input path, so it holds regardless of whether the edit came from a drag or a typed
+  centrally in `EditorContext` (`updateWallPoint`/`addSlot`/`updateSlots`/`applySlotPatches`),
+  not per input path, so it holds regardless of whether the edit came from a drag or a typed
   field.
-- **Undo/redo**: Ctrl+Z / Ctrl+Shift+Z (or the toolbar buttons), tracked as a history of
-  whole warehouse snapshots. A full drag gesture or a full inspector-field edit (from focus
-  to the next edit) is one undo step, not one step per pointermove/keystroke — see
-  `beginChange`/`mutateWarehouse` in `src/state/EditorContext.tsx`. History resets on Load
+- **Undo/redo/History panel**: Ctrl+Z / Ctrl+Shift+Z (or the toolbar buttons), backed by a
+  flat, labeled timeline (`entries` + `cursor` in `EditorContext`) rather than a plain
+  stack — the History panel (toggle in the toolbar) lists every entry ("Move slot A01",
+  "Delete 3 slots", ...) and clicking one jumps straight to it (`jumpTo`), not just one step
+  at a time. A full drag gesture or a full inspector-field edit (from focus to blur) is one
+  entry, not one per pointermove/keystroke: `mutateWarehouse` applies the live, uncommitted
+  update, and `commit(label)` — called once at gesture end — is what actually appends to the
+  timeline. A plain click with no movement commits nothing (checked via a `moved` flag on
+  the drag target) rather than recording a no-op "Move..." entry. History resets on Load
   (opening a different file isn't itself undoable).
 - **Save/load**: uses the File System Access API where available (Chrome/Edge) so repeated
   saves overwrite the same file in place; falls back to a browser download (save) and an
@@ -228,9 +245,10 @@ eyeball results in 3D rather than deciding blind.
 - [x] **3D warehouse view (physical layer only)** — walls + slots render in 3D (§5.1);
       aisles/lanes/zones aren't part of this format yet (§5.2).
 - [x] **Warehouse editor** — edit mode lets you drag wall corners to reshape the building,
-      and create/move/rotate/rename/delete slots, directly in the 3D view; save/load to a
-      JSON file on disk; undo/redo; all edits snap to whole-meter/90° graduations (§5.1
-      "Editor").
+      and create/move/rotate/rename/delete slots (single or multi-select, via Ctrl+click or
+      a right-click-drag box) directly in the 3D view; bulk rotate/delete; save/load to a
+      JSON file on disk; undo/redo with a jumpable History panel; all edits snap to
+      whole-meter/90° graduations (§5.1 "Editor").
 - [ ] **Simulation run** — given a warehouse model + scenario config, run the simulation and
       produce a trace.
 - [ ] **Path playback** — animate operator movement over simulated time (play/pause/scrub),
@@ -303,6 +321,16 @@ eyeball results in 3D rather than deciding blind.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-08 — Added multi-select (Ctrl+click, right-click-drag box-select), bulk
+  update/delete, and a History panel. Undo/redo moved from a plain past/future stack to a
+  flat, labeled timeline (`entries` + `cursor`) so the History panel can jump to any past
+  state, not just step one at a time. See §5.1 "Editor". Fixed two bugs found while
+  building/testing this: (1) a plain click with no drag movement was committing a no-op
+  "Move..." history entry — fixed with a `moved` flag set on the first actual pointermove;
+  (2) box-select's screen-space hit-testing needed the live camera, added via
+  `cameraRef`/`Canvas.onCreated`. Also confirmed via testing that Playwright's raw
+  `page.mouse.click()` doesn't support a `modifiers` option (only locator-based clicks do)
+  — not an app bug, a test-authoring gotcha worth remembering.
 - 2026-09-08 — Generated an approximate full-scale digitization of Batiment 13A (870 slots)
   via `scripts/generate-batiment-13a.js` → `schema/warehouse.batiment-13a.json`, to stress
   the format/viewer against something closer to the real building's size and irregularity

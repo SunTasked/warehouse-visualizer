@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { useMemo } from "react";
 import type { Slot, SlotSize } from "../types/warehouse";
 import { useEditor } from "../state/EditorContext";
+import { fromSceneXZ } from "../lib/geometry";
 
 const SLOT_HEIGHT = 0.06;
 const SLOT_COLOR = "#4d7cfe";
@@ -11,8 +12,17 @@ const SLOT_SELECTED_COLOR = "#ff8c42";
 const SLOT_EDGE_COLOR = "#1f3a93";
 
 function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
-  const { mode, addSlotMode, selectedSlotId, setSelectedSlotId, dragRef, orbitRef, beginChange } = useEditor();
-  const selected = selectedSlotId === slot.id;
+  const {
+    mode,
+    addSlotMode,
+    warehouse,
+    selectedSlotIds,
+    toggleSlotSelection,
+    selectOnly,
+    dragRef,
+    orbitRef,
+  } = useEditor();
+  const selected = selectedSlotIds.has(slot.id);
   const rotationRad = THREE.MathUtils.degToRad(slot.rotationDeg ?? 0);
   const geometry = useMemo(
     () => new THREE.BoxGeometry(defaults.width, SLOT_HEIGHT, defaults.height),
@@ -22,10 +32,29 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
 
   const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
     if (mode !== "edit" || addSlotMode) return; // let the event fall through to the drag plane
+    if (e.nativeEvent.button !== 0) return; // right button is for box-select
     e.stopPropagation();
-    setSelectedSlotId(slot.id);
-    beginChange();
-    dragRef.current = { type: "slot", slotId: slot.id };
+
+    const additive = e.nativeEvent.ctrlKey || e.nativeEvent.metaKey;
+    if (additive) {
+      toggleSlotSelection(slot.id);
+      return; // Ctrl+click only builds the selection, it doesn't start a drag
+    }
+
+    // Dragging a slot that's already part of a multi-selection moves the
+    // whole group; otherwise this click selects just this one slot.
+    const dragIds =
+      selectedSlotIds.has(slot.id) && selectedSlotIds.size > 1 ? Array.from(selectedSlotIds) : [slot.id];
+    if (dragIds.length === 1) selectOnly(slot.id);
+
+    const anchor = fromSceneXZ(e.point.x, e.point.z);
+    const origins: Record<string, { x: number; y: number }> = {};
+    for (const id of dragIds) {
+      const s = warehouse.slots.find((s) => s.id === id);
+      if (s) origins[id] = { x: s.x, y: s.y };
+    }
+    const label = dragIds.length === 1 ? `Move slot ${dragIds[0]}` : `Move ${dragIds.length} slots`;
+    dragRef.current = { type: "slots", ids: dragIds, anchor, origins, label, moved: false };
     if (orbitRef.current) orbitRef.current.enabled = false;
   };
 

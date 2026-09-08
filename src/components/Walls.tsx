@@ -42,12 +42,12 @@ function segmentsForLoop(wall: WallLoop): WallSegment[] {
 }
 
 function WallHandles({ wall }: { wall: WallLoop }) {
-  const { dragRef, orbitRef, beginChange } = useEditor();
+  const { dragRef, orbitRef } = useEditor();
 
   const startDrag = (index: number) => (e: ThreeEvent<PointerEvent>) => {
+    if (e.nativeEvent.button !== 0) return; // right button is for box-select
     e.stopPropagation();
-    beginChange();
-    dragRef.current = { type: "wallPoint", wallId: wall.id, index };
+    dragRef.current = { type: "wallPoint", wallId: wall.id, index, label: "Move wall corner", moved: false };
     if (orbitRef.current) orbitRef.current.enabled = false;
   };
 

@@ -28,10 +28,16 @@ Click **Editing** to edit the layout:
   code).
 - Click a slot to select it — drag to move it, or use the side panel to edit its
   id/x/y/rotation or delete it.
+- **Ctrl+click** (Cmd+click on Mac) a slot to add/remove it from the selection.
+  **Right-click-drag** to box-select (like a Windows desktop rubber-band select) — hold
+  Ctrl while dragging to add to the current selection instead of replacing it. With
+  multiple slots selected, drag any one of them to move the whole group, use the side
+  panel's Rotation field to rotate them all at once, or delete them all together.
 - **Save**/**Load** read and write the warehouse JSON file (in Chrome/Edge, Save writes
   back to the same file you loaded; other browsers download/upload instead).
 - **Ctrl+Z** / **Ctrl+Shift+Z** (or the Undo/Redo buttons) undo/redo edits, one drag or one
-  field edit at a time.
+  field edit at a time. The **History** button opens a panel listing every past edit —
+  click any entry to jump straight to it, not just step one at a time.
 - Every coordinate snaps to a whole meter and every rotation to 90°, so wall and slot edges
   always land on a grid line.
 

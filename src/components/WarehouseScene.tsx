@@ -8,7 +8,7 @@ import { Slots } from "./Slots";
 import { DragPlane } from "./DragPlane";
 
 export function WarehouseScene() {
-  const { warehouse, orbitRef } = useEditor();
+  const { warehouse, orbitRef, cameraRef } = useEditor();
   const bounds = useMemo(() => computeBounds(warehouse), [warehouse]);
   const center = boundsCenter(bounds);
   const span = boundsSpan(bounds) || 20;
@@ -31,6 +31,9 @@ export function WarehouseScene() {
   return (
     <Canvas
       camera={{ position: initialView.cameraPosition, fov: 45, near: 0.1, far: initialView.far }}
+      onCreated={({ camera }) => {
+        cameraRef.current = camera;
+      }}
     >
       <color attach="background" args={["#eef1f6"]} />
       <ambientLight intensity={0.6} />

@@ -2,74 +2,100 @@ import type { FocusEvent } from "react";
 import { useEditor } from "../state/EditorContext";
 
 export function Inspector() {
-  const { mode, warehouse, selectedSlotId, updateSlot, deleteSlot, setSelectedSlotId, beginChange } = useEditor();
-  if (mode !== "edit" || !selectedSlotId) return null;
+  const { mode, warehouse, selectedSlotIds, updateSlots, renameSlot, deleteSlots, clearSelection, commit } =
+    useEditor();
+  if (mode !== "edit" || selectedSlotIds.size === 0) return null;
 
-  const slot = warehouse.slots.find((s) => s.id === selectedSlotId);
-  if (!slot) return null;
+  const ids = Array.from(selectedSlotIds);
 
-  const handleIdBlur = (e: FocusEvent<HTMLInputElement>) => {
-    const nextId = e.target.value.trim();
-    if (!nextId || nextId === slot.id) {
-      e.target.value = slot.id;
-      return;
-    }
-    const ok = updateSlot(slot.id, { id: nextId });
-    if (!ok) {
-      window.alert(`A slot with id "${nextId}" already exists.`);
-      e.target.value = slot.id;
-    }
-  };
+  if (ids.length === 1) {
+    const id = ids[0];
+    const slot = warehouse.slots.find((s) => s.id === id);
+    if (!slot) return null;
+
+    const handleIdBlur = (e: FocusEvent<HTMLInputElement>) => {
+      const nextId = e.target.value.trim();
+      if (!nextId || nextId === slot.id) {
+        e.target.value = slot.id;
+        return;
+      }
+      const ok = renameSlot(slot.id, nextId);
+      if (!ok) {
+        window.alert(`A slot with id "${nextId}" already exists.`);
+        e.target.value = slot.id;
+      } else {
+        commit(`Rename ${slot.id} to ${nextId}`);
+      }
+    };
+
+    const field = (key: "x" | "y" | "rotationDeg", label: string, step: string) => (
+      <label className="inspector__field">
+        <span>{label}</span>
+        <input
+          type="number"
+          step={step}
+          value={key === "rotationDeg" ? slot.rotationDeg ?? 0 : slot[key]}
+          onChange={(e) => updateSlots([slot.id], { [key]: Number(e.target.value) })}
+          onBlur={() => commit(key === "rotationDeg" ? `Rotate slot ${slot.id}` : `Move slot ${slot.id}`)}
+        />
+      </label>
+    );
+
+    return (
+      <div className="inspector">
+        <div className="inspector__header">
+          <h2>Slot</h2>
+          <button className="inspector__close" onClick={clearSelection} aria-label="Close">
+            ×
+          </button>
+        </div>
+
+        <label className="inspector__field">
+          <span>Id</span>
+          <input type="text" defaultValue={slot.id} key={slot.id} onBlur={handleIdBlur} />
+        </label>
+
+        {field("x", "X (m)", "1")}
+        {field("y", "Y (m)", "1")}
+        {field("rotationDeg", "Rotation (°)", "90")}
+
+        <button className="inspector__delete" onClick={() => deleteSlots([slot.id])}>
+          Delete slot
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="inspector">
       <div className="inspector__header">
-        <h2>Slot</h2>
-        <button className="inspector__close" onClick={() => setSelectedSlotId(null)} aria-label="Close">
+        <h2>{ids.length} slots selected</h2>
+        <button className="inspector__close" onClick={clearSelection} aria-label="Close">
           ×
         </button>
       </div>
 
       <label className="inspector__field">
-        <span>Id</span>
-        <input type="text" defaultValue={slot.id} key={slot.id} onFocus={beginChange} onBlur={handleIdBlur} />
-      </label>
-
-      <label className="inspector__field">
-        <span>X (m)</span>
-        <input
-          type="number"
-          step="1"
-          value={slot.x}
-          onFocus={beginChange}
-          onChange={(e) => updateSlot(slot.id, { x: Number(e.target.value) })}
-        />
-      </label>
-
-      <label className="inspector__field">
-        <span>Y (m)</span>
-        <input
-          type="number"
-          step="1"
-          value={slot.y}
-          onFocus={beginChange}
-          onChange={(e) => updateSlot(slot.id, { y: Number(e.target.value) })}
-        />
-      </label>
-
-      <label className="inspector__field">
-        <span>Rotation (°)</span>
+        <span>Rotation (° — applies to all)</span>
         <input
           type="number"
           step="90"
-          value={slot.rotationDeg ?? 0}
-          onFocus={beginChange}
-          onChange={(e) => updateSlot(slot.id, { rotationDeg: Number(e.target.value) })}
+          placeholder="—"
+          onChange={(e) => {
+            if (e.target.value === "") return;
+            updateSlots(ids, { rotationDeg: Number(e.target.value) });
+          }}
+          onBlur={(e) => {
+            if (e.target.value === "") return;
+            commit(`Rotate ${ids.length} slots`);
+          }}
         />
       </label>
 
-      <button className="inspector__delete" onClick={() => deleteSlot(slot.id)}>
-        Delete slot
+      <p className="inspector__hint">Drag any selected slot to move the whole group together.</p>
+
+      <button className="inspector__delete" onClick={() => deleteSlots(ids)}>
+        Delete {ids.length} slots
       </button>
     </div>
   );
