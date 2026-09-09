@@ -8,7 +8,7 @@ export function Inspector() {
     selectedSlotIds,
     updateSlots,
     setSlotDepth,
-    addPallet,
+    addPalletAuto,
     removePallet,
     setPalletItemCount,
     renameSlot,
@@ -84,19 +84,20 @@ export function Inspector() {
           />
         </label>
 
+        <button
+          className="inspector__small-btn inspector__add-pallet"
+          onClick={() => addPalletAuto(slot.id)}
+          title="Adds a pallet to whichever sub-slot needs it, deepest first"
+        >
+          + Pallet (deepest-first)
+        </button>
+
         {(slot.subSlots?.length ?? 0) > 0 && (
           <div className="inspector__subslots">
             {slot.subSlots!.map((subSlot, si) => (
               <div className="inspector__subslot" key={subSlot.id}>
                 <div className="inspector__subslot-header">
                   <span>{subSlot.id}</span>
-                  <button
-                    className="inspector__small-btn"
-                    onClick={() => addPallet(slot.id, si)}
-                    title="Add a pallet on top of this sub-slot's stack"
-                  >
-                    + Pallet
-                  </button>
                 </div>
                 {subSlot.pallets.length === 0 && <p className="inspector__hint">Empty.</p>}
                 {subSlot.pallets.map((pallet, pi) => (

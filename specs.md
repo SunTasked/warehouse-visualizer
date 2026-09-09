@@ -106,27 +106,41 @@ before building anything on top of it. Implementation notes:
 
 #### Storage subdivision (sub-slots, pallets, items)
 
-A slot's footprint can be subdivided along its depth axis (`slotDefaults.height`)
-into **sub-slots** — one per depth position, front-to-back (e.g. a slot with depth 4
-has 4 sub-slots). Within one sub-slot, **pallets** stack vertically (rack tiers); each
-pallet holds 1-10 **items** (individual units, e.g. tires) laid out side by side along
-the slot's width. Hierarchy: **Slot → Sub-slot → Pallet → Item**. See the type
-definitions in `src/types/warehouse.ts` and `schema/warehouse.schema.json`
-(`slot.subSlots`, optional — omitted/empty means depth 1, no storage detail
-authored yet).
+A slot's depth (`subSlots.length`) multiplies its footprint rather than subdividing
+it — a depth-3 slot occupies 3x the standard `slotDefaults` footprint, front-to-back,
+not that same footprint split three ways. `subSlots[0]` always sits exactly where a
+depth-1 slot's footprint would (so `slot.x`/`y` never move as depth changes); each
+further sub-slot is appended outward from there. Within one sub-slot, **pallets**
+stack vertically (rack tiers); each pallet holds 1-10 **items** (individual units, e.g.
+tires) laid out side by side along the slot's width. Hierarchy: **Slot → Sub-slot →
+Pallet → Item**. See the type definitions in `src/types/warehouse.ts` and
+`schema/warehouse.schema.json` (`slot.subSlots`, optional — omitted/empty means depth
+1, no storage detail authored yet).
 
 Rendering (`src/components/Rack.tsx`, wired into `src/components/Slots.tsx`) is
-schematic, not to real-world scale: a blue post-and-rail rack frame per stocked
-sub-slot, sized to its depth-cell footprint, with one tier per pallet and a row of
-torus "tires" per tier (item count controls both the count and, since row width is
-fixed, each tire's radius). Empty sub-slots (no pallets) render only a thin divider
-line, no rack — matching the reference screenshot's "#N/A" cells.
+schematic, not to real-world scale: a blue rack frame per stocked sub-slot, sized to
+its depth-cell footprint, with one tier per pallet. Each level is a *closed* rectangle
+of rails connecting all four corner posts (not just front/back bars) so the structure
+reads as one physical, operable shelf. Tires resize to always span the full pallet
+width (a partial pallet has fewer, larger-spaced tires, not a half-empty row). Empty
+sub-slots (no pallets) render only a thin divider line, no rack — matching the
+reference screenshot's "#N/A" cells. A slot's id label sits *outside* its footprint, at
+the fixed entry edge (the side that doesn't move as depth changes — see below); that
+space is assumed to be the aisle an operator uses to access the slot, so no other
+slot's footprint will occupy it. The outer edge of a whole slot's footprint renders in
+solid black (vs. the pale sub-slot dividers), for a clear "these cells belong together,
+that's a different slot" contrast.
 
 Editable in the Inspector when a single slot is selected: a Depth field (resizes
 `subSlots`, preserving existing content when growing, dropping the deepest sub-slots
-when shrinking) and, per sub-slot, "+ Pallet" / remove-pallet buttons and a per-pallet
-item-count field (clamped 1-10). See `setSlotDepth`/`addPallet`/`removePallet`/
-`setPalletItemCount` in `src/state/EditorContext.tsx`.
+when shrinking), a single slot-level "+ Pallet" button, and a per-pallet item-count
+field (clamped 1-10) plus a remove button, listed per sub-slot. The "+ Pallet" button
+enforces **fill deepest-first**: it always adds to whichever sub-slot currently has the
+fewest pallets (ties broken toward the deepest/highest-index one) — so repeated clicks
+fill tier 1 of every sub-slot back-to-front before starting tier 2, rather than piling
+pallets onto one sub-slot while a deeper one sits empty. Removal stays manual/per-pallet
+(picking which tier to remove isn't automated). See `setSlotDepth`/`addPalletAuto`/
+`removePallet`/`setPalletItemCount` in `src/state/EditorContext.tsx`.
 
 #### Editor
 
@@ -349,6 +363,16 @@ eyeball results in 3D rather than deciding blind.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-10 — Revised the storage-subdivision rendering per user feedback on the initial
+  version: (1) a slot's depth now *multiplies* its footprint (each sub-slot a full
+  `slotDefaults` cell) instead of splitting one footprint into smaller cells — `subSlots[0]`
+  keeps the legacy (depth-1) position, extra depth extends outward from there; (2) tires
+  resize to always span the full pallet width (reverting an earlier fixed-size/left-packed
+  attempt that left an oddly half-empty rail); (3) each rack tier is now a fully connected
+  closed rail rectangle, not two floating bars; (4) "+ Pallet" is a single slot-level button
+  that fills sub-slots deepest-first (fewest-pallets-wins, ties toward the deepest); (5) a
+  slot's id label moved outside its footprint to the fixed entry edge, and the outer-edge
+  outline is solid black. See §5.1 "Storage subdivision".
 - 2026-09-09 — Added a storage-content hierarchy inside a slot: **Slot → Sub-slot
   (depth position) → Pallet (vertical rack tier) → Item (individual unit, e.g. a
   tire, 1-10 per pallet)**. Sub-slots subdivide the slot along its depth axis

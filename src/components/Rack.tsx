@@ -11,23 +11,39 @@ const RACK_COLOR = "#2a52c9";
 const TIRE_COLOR = "#171717";
 const TIRE_ROUGHNESS = 0.85;
 
-function Rail({ y, halfWidth, halfDepth }: { y: number; halfWidth: number; halfDepth: number }) {
-  const geometry = useMemo(
+// A closed rectangle of rails at one level boundary, connecting all four
+// corner posts — reads as one physical, operable shelf rather than two
+// floating bars.
+function RailFrame({ y, halfWidth, halfDepth }: { y: number; halfWidth: number; halfDepth: number }) {
+  const lengthwise = useMemo(
     () => new THREE.BoxGeometry(halfWidth * 2, RAIL_THICKNESS, RAIL_THICKNESS),
     [halfWidth],
   );
+  const crosswise = useMemo(
+    () => new THREE.BoxGeometry(RAIL_THICKNESS, RAIL_THICKNESS, halfDepth * 2),
+    [halfDepth],
+  );
   return (
     <>
-      <mesh geometry={geometry} position={[0, y, -halfDepth]}>
+      <mesh geometry={lengthwise} position={[0, y, -halfDepth]}>
         <meshStandardMaterial color={RACK_COLOR} />
       </mesh>
-      <mesh geometry={geometry} position={[0, y, halfDepth]}>
+      <mesh geometry={lengthwise} position={[0, y, halfDepth]}>
+        <meshStandardMaterial color={RACK_COLOR} />
+      </mesh>
+      <mesh geometry={crosswise} position={[-halfWidth, y, 0]}>
+        <meshStandardMaterial color={RACK_COLOR} />
+      </mesh>
+      <mesh geometry={crosswise} position={[halfWidth, y, 0]}>
         <meshStandardMaterial color={RACK_COLOR} />
       </mesh>
     </>
   );
 }
 
+// Tires resize to always span the full pallet width, from one edge to the
+// other — a partial pallet has fewer, larger-spaced tires rather than a
+// half-empty row.
 function TireRow({ y, halfWidth, pallet }: { y: number; halfWidth: number; pallet: Pallet }) {
   const count = pallet.items.length;
   const spacing = (halfWidth * 2) / Math.max(count, 1);
@@ -97,7 +113,7 @@ export function Rack({
         </mesh>
       ))}
       {Array.from({ length: pallets.length + 1 }).map((_, level) => (
-        <Rail key={level} y={level * LEVEL_HEIGHT} halfWidth={halfWidth} halfDepth={halfDepth} />
+        <RailFrame key={level} y={level * LEVEL_HEIGHT} halfWidth={halfWidth} halfDepth={halfDepth} />
       ))}
       {pallets.map((pallet, level) => (
         <TireRow key={pallet.id} y={level * LEVEL_HEIGHT} halfWidth={halfWidth} pallet={pallet} />

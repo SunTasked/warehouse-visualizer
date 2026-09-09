@@ -89,11 +89,11 @@
         },
         "x": {
           "type": "number",
-          "description": "Center point X coordinate, in meters."
+          "description": "Center point X coordinate (in meters) when depth is 1. With subSlots present, anchors subSlots[0]'s own full-size footprint instead — additional sub-slots extend the footprint outward from there, so this point doesn't move as depth changes."
         },
         "y": {
           "type": "number",
-          "description": "Center point Y coordinate, in meters."
+          "description": "Center point Y coordinate (in meters) when depth is 1. See x for the subSlots case."
         },
         "rotationDeg": {
           "type": "number",
@@ -102,7 +102,7 @@
         },
         "subSlots": {
           "type": "array",
-          "description": "Depth subdivision of the slot (front-to-back). Depth = array length. Omitted/empty = depth 1, no storage detail authored yet.",
+          "description": "Depth subdivision of the slot (front-to-back), each entry occupying its own full slotDefaults footprint (a depth-3 slot spans 3x the standard footprint, not the standard footprint split three ways). Depth = array length. Omitted/empty = depth 1, no storage detail authored yet.",
           "items": { "$ref": "#/definitions/subSlot" }
         }
       }

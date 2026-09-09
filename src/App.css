@@ -157,6 +157,13 @@
   color: #5a6270;
 }
 
+.inspector__add-pallet {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.6rem;
+  text-align: center;
+}
+
 .inspector__subslots {
   max-height: 260px;
   overflow-y: auto;

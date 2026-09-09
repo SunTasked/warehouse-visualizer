@@ -82,8 +82,8 @@ interface EditorContextValue {
   applySlotPatches: (patches: { id: string; x: number; y: number }[]) => void;
   /** Resizes a slot's depth (number of sub-slots). Live-mutate only — caller commits. */
   setSlotDepth: (slotId: string, depth: number) => void;
-  /** Adds a pallet (one item) to the top of a sub-slot's stack. Commits immediately. */
-  addPallet: (slotId: string, subSlotIndex: number) => void;
+  /** Adds a pallet to whichever sub-slot needs it per the deepest-first fill rule. Commits immediately. */
+  addPalletAuto: (slotId: string) => void;
   /** Removes one pallet from a sub-slot. Commits immediately. */
   removePallet: (slotId: string, subSlotIndex: number, palletIndex: number) => void;
   /** Resizes one pallet's item count (1-10). Live-mutate only — caller commits. */
@@ -272,20 +272,35 @@ export function EditorProvider({
     [mutateWarehouse],
   );
 
-  // Adds a new pallet (one item) to the top of a sub-slot's stack. A discrete
-  // click, like addSlot/deleteSlots — commits immediately.
-  const addPallet = useCallback(
-    (slotId: string, subSlotIndex: number) => {
+  // Adds a new pallet (one item) to a slot, enforcing "fill deepest-first":
+  // targets whichever sub-slot currently has the fewest pallets, breaking
+  // ties toward the deepest (highest-index) one. Repeated calls fill tier 1
+  // of every sub-slot from the back forward, then tier 2, and so on — never
+  // piling a second tier onto one sub-slot while a deeper one is still
+  // completely empty. A discrete click, like addSlot/deleteSlots — commits
+  // immediately.
+  const addPalletAuto = useCallback(
+    (slotId: string) => {
       mutateWarehouse((current) => ({
         ...current,
-        slots: current.slots.map((s) =>
-          s.id !== slotId
-            ? s
-            : mapSubSlot(s, subSlotIndex, (ss) => {
-                const palletId = `${ss.id}-P${ss.pallets.length + 1}`;
-                return { ...ss, pallets: [...ss.pallets, { id: palletId, items: [{ id: `${palletId}-I1` }] }] };
-              }),
-        ),
+        slots: current.slots.map((s) => {
+          if (s.id !== slotId) return s;
+          const subSlots = s.subSlots ?? [{ id: `${s.id}.1`, pallets: [] }];
+          let targetIndex = 0;
+          let fewest = Infinity;
+          subSlots.forEach((ss, i) => {
+            if (ss.pallets.length <= fewest) {
+              fewest = ss.pallets.length;
+              targetIndex = i; // later (deeper) indices win ties
+            }
+          });
+          const nextSubSlots = subSlots.map((ss, i) => {
+            if (i !== targetIndex) return ss;
+            const palletId = `${ss.id}-P${ss.pallets.length + 1}`;
+            return { ...ss, pallets: [...ss.pallets, { id: palletId, items: [{ id: `${palletId}-I1` }] }] };
+          });
+          return { ...s, subSlots: nextSubSlots };
+        }),
       }));
       commit(`Add pallet to ${slotId}`);
     },
@@ -437,7 +452,7 @@ export function EditorProvider({
       updateSlots,
       applySlotPatches,
       setSlotDepth,
-      addPallet,
+      addPalletAuto,
       removePallet,
       setPalletItemCount,
       renameSlot,
@@ -470,7 +485,7 @@ export function EditorProvider({
       updateSlots,
       applySlotPatches,
       setSlotDepth,
-      addPallet,
+      addPalletAuto,
       removePallet,
       setPalletItemCount,
       renameSlot,

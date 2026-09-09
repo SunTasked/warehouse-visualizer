@@ -4,6 +4,37 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-10
+
+- Revised the storage-subdivision feature per user feedback (two screenshots + written
+  critique of the first pass). Also retroactively covers an unlogged mid-session rework from
+  the tail end of 2026-09-09's work (depth now multiplies the footprint instead of splitting
+  it, sub-slots anchored at `subSlots[0]`, pale-vs-black divider contrast) — that work
+  happened but was never written up here or in specs.md's decision log before this entry.
+  Today's changes on top of that: tires span the full pallet width again (undoing a
+  fixed-size/left-packed attempt that looked half-empty), rack tiers are now fully connected
+  rail rectangles, "+ Pallet" is a single slot-level button enforcing deepest-first fill, id
+  labels moved outside the footprint to the fixed entry edge, outline is solid black. Full
+  detail in specs.md §5.1 "Storage subdivision" and its decision log entry.
+- Entered formal Plan Mode for this request (multi-area ask: pallet/rack rendering, slot
+  display, and a new view-mode hover/click-to-zoom drill-down through Slot → sub-slot →
+  pallet). Asked 3 clarifying questions first (recorded as decisions): pallets auto-fill via
+  one button using deepest-first/fewest-pallets-wins logic; "blur the rest" is dim +
+  desaturate (no new render-pipeline dependency); the new hover/zoom interaction is
+  **View-mode only**, Edit mode unchanged. Verified `@react-three/drei`'s `CameraControls`
+  (and its `camera-controls` peer dep) is already installed — no new npm package needed for
+  the smooth zoom. Plan saved at the session's plan-mode plan file; approved by the user.
+- This entry covers Milestones 1-2 of that plan (pallet/rack rendering + slot display).
+  Milestones 3-4 (view-focus state, hover card, camera drill-down, dimming, rollback/Escape)
+  are still in progress this same session — see the next entry once done, or this repo's git
+  log if this log hasn't caught up yet.
+- Changed: `src/components/Rack.tsx` (full-width tire sizing, connected `RailFrame`),
+  `src/state/EditorContext.tsx` (`addPallet` → `addPalletAuto`), `src/components/
+  Inspector.tsx` (single slot-level "+ Pallet" button), `src/components/Slots.tsx` (label
+  repositioned outside the footprint, edge color black), `src/App.css` (new button style).
+- Verified visually via the same ad hoc Playwright screenshot workflow as 2026-09-09 (ports/
+  scripts unchanged); `tsc --noEmit` clean.
+
 ## 2026-09-09
 
 - Added a storage-content hierarchy inside a slot — **Slot → Sub-slot → Pallet → Item**
