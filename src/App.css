@@ -304,3 +304,40 @@
 .history-panel__item--current:hover {
   background: #4d7cfe;
 }
+
+.hover-card {
+  position: absolute;
+  z-index: 20;
+  width: 200px;
+  padding: 0.6rem 0.75rem;
+  background: #ffffff;
+  border: 1px solid #d7dbe3;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.16);
+  font-size: 0.8rem;
+  pointer-events: none;
+}
+
+.hover-card__title {
+  font-weight: 700;
+  margin-bottom: 0.35rem;
+}
+
+.hover-card__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #2a2f3a;
+  margin-bottom: 0.15rem;
+}
+
+.hover-card__row span:first-child {
+  color: #5a6270;
+}
+
+.hover-card__hint {
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  color: #5a6270;
+  font-style: italic;
+}

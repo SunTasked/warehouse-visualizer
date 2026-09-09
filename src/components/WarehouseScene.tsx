@@ -1,14 +1,58 @@
 import { Canvas } from "@react-three/fiber";
-import { Grid, OrbitControls } from "@react-three/drei";
-import { useMemo, useState } from "react";
+import { Grid, OrbitControls, CameraControls } from "@react-three/drei";
+import { useEffect, useMemo, useState } from "react";
 import { boundsCenter, boundsSpan, computeBounds, toSceneXZ } from "../lib/geometry";
+import { slotWorldBox, subSlotWorldBox, palletWorldBox } from "../lib/focusBounds";
 import { useEditor } from "../state/EditorContext";
+import { useViewFocus } from "../state/ViewFocusContext";
 import { Walls } from "./Walls";
 import { Slots } from "./Slots";
 import { DragPlane } from "./DragPlane";
 
+const FIT_PADDING = { paddingLeft: 1, paddingRight: 1, paddingTop: 1, paddingBottom: 1 };
+
+// Drives the view-mode camera drill-down: whenever `focus` changes, smoothly
+// fits the CameraControls to the relevant slot/sub-slot/pallet box (computed
+// analytically by focusBounds.ts), or back out to the original overview
+// framing. A no-op in edit mode (cameraControlsRef stays null there — see
+// the conditional OrbitControls/CameraControls render below).
+function FocusCameraDriver({
+  initialView,
+}: {
+  initialView: { cameraPosition: [number, number, number]; target: [number, number, number] };
+}) {
+  const { warehouse } = useEditor();
+  const { focus, cameraControlsRef } = useViewFocus();
+
+  useEffect(() => {
+    const controls = cameraControlsRef.current;
+    if (!controls) return;
+
+    if (focus.level === "overview") {
+      const [px, py, pz] = initialView.cameraPosition;
+      const [tx, ty, tz] = initialView.target;
+      void controls.setLookAt(px, py, pz, tx, ty, tz, true);
+      return;
+    }
+
+    const slot = warehouse.slots.find((s) => s.id === focus.slotId);
+    if (!slot) return;
+
+    const box =
+      focus.level === "slot"
+        ? slotWorldBox(slot, warehouse.slotDefaults)
+        : focus.level === "subslot"
+          ? subSlotWorldBox(slot, warehouse.slotDefaults, focus.subSlotIndex!)
+          : palletWorldBox(slot, warehouse.slotDefaults, focus.subSlotIndex!, focus.palletIndex!);
+    void controls.fitToBox(box, true, FIT_PADDING);
+  }, [focus, warehouse, initialView, cameraControlsRef]);
+
+  return null;
+}
+
 export function WarehouseScene() {
-  const { warehouse, orbitRef, cameraRef } = useEditor();
+  const { mode, warehouse, orbitRef, cameraRef } = useEditor();
+  const { back, cameraControlsRef } = useViewFocus();
   const bounds = useMemo(() => computeBounds(warehouse), [warehouse]);
   const center = boundsCenter(bounds);
   const span = boundsSpan(bounds) || 20;
@@ -34,6 +78,9 @@ export function WarehouseScene() {
       onCreated={({ camera }) => {
         cameraRef.current = camera;
       }}
+      onPointerMissed={() => {
+        if (mode === "view") back();
+      }}
     >
       <color attach="background" args={["#eef1f6"]} />
       <ambientLight intensity={0.6} />
@@ -54,7 +101,14 @@ export function WarehouseScene() {
       <Slots slots={warehouse.slots} defaults={warehouse.slotDefaults} />
       <DragPlane />
 
-      <OrbitControls ref={orbitRef} target={initialView.target} makeDefault />
+      {mode === "edit" ? (
+        <OrbitControls ref={orbitRef} target={initialView.target} makeDefault />
+      ) : (
+        <>
+          <CameraControls ref={cameraControlsRef} makeDefault />
+          <FocusCameraDriver initialView={initialView} />
+        </>
+      )}
     </Canvas>
   );
 }

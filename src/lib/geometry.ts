@@ -1,4 +1,4 @@
-import type { Point, Warehouse } from "../types/warehouse";
+import type { Point, Slot, SlotSize, Warehouse } from "../types/warehouse";
 
 /**
  * Warehouse coordinates are 2D: meters, origin bottom-left, +X right, +Y up
@@ -49,4 +49,36 @@ export function boundsCenter(bounds: Bounds): { x: number; y: number } {
 
 export function boundsSpan(bounds: Bounds): number {
   return Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+}
+
+export interface SlotFootprint {
+  /** subSlots.length, defaulting to 1 when absent. */
+  depth: number;
+  /** One sub-slot's depth-axis extent — always the un-multiplied slotDefaults.height. */
+  cellDepth: number;
+  /** The whole (possibly depth-multiplied) footprint's depth-axis extent. */
+  totalDepth: number;
+  /**
+   * Local Z (pre-rotation) of the whole footprint's center, relative to the
+   * slot group's own position — which is anchored to subSlots[0], not the
+   * footprint's center. 0 when depth is 1. See specs.md §5.1 "Storage
+   * subdivision" and Slots.tsx for the derivation.
+   */
+  footprintCenterZ: number;
+}
+
+/**
+ * Depth-driven footprint math shared by the slot renderer (Slots.tsx) and
+ * anything that needs to compute a slot's world extent without rendering it
+ * (e.g. src/lib/focusBounds.ts for camera framing).
+ */
+export function slotFootprint(slot: Slot, defaults: SlotSize): SlotFootprint {
+  const depth = slot.subSlots?.length ?? 1;
+  const cellDepth = defaults.height;
+  return {
+    depth,
+    cellDepth,
+    totalDepth: cellDepth * depth,
+    footprintCenterZ: ((depth - 1) * cellDepth) / 2,
+  };
 }

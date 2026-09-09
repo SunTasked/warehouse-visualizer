@@ -4,10 +4,12 @@ import * as THREE from "three";
 import { useMemo } from "react";
 import type { Slot, SlotSize } from "../types/warehouse";
 import { useEditor } from "../state/EditorContext";
-import { fromSceneXZ } from "../lib/geometry";
+import { useViewFocus } from "../state/ViewFocusContext";
+import { fromSceneXZ, slotFootprint } from "../lib/geometry";
+import { slotEmphasis, emphasisColor } from "../lib/emphasis";
 import { Rack } from "./Rack";
 
-const SLOT_HEIGHT = 0.06;
+export const SLOT_HEIGHT = 0.06;
 const SLOT_COLOR = "#4d7cfe";
 const SLOT_SELECTED_COLOR = "#ff8c42";
 // Bold/dark: the outer edge of a whole slot (drawn once per slot, around its
@@ -43,9 +45,11 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
     dragRef,
     orbitRef,
   } = useEditor();
+  const { focus, setHover, focusSlot, focusSubSlot } = useViewFocus();
   const selected = selectedSlotIds.has(slot.id);
+  const emphasis = slotEmphasis(focus, slot.id);
+  const padColor = emphasisColor(selected ? SLOT_SELECTED_COLOR : SLOT_COLOR, emphasis);
   const rotationRad = THREE.MathUtils.degToRad(slot.rotationDeg ?? 0);
-  const depth = slot.subSlots?.length ?? 1;
   // Each sub-slot is a full slotDefaults footprint (not a fraction of one) —
   // a depth-3 slot occupies 3x the standard 4x2 space, not the same 4x2
   // split three ways. Sub-slot 0 always sits exactly where a depth-1 slot's
@@ -53,16 +57,35 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
   // unchanged); each further sub-slot i is appended at local Z = i * cellDepth,
   // so slot.x/y — the group's own position — stays anchored to sub-slot 0
   // regardless of depth, and added depth only extends the far side.
-  const cellDepth = defaults.height;
-  const totalDepth = cellDepth * depth;
-  const footprintCenterZ = ((depth - 1) * cellDepth) / 2;
+  const { depth, cellDepth, totalDepth, footprintCenterZ } = slotFootprint(slot, defaults);
   const geometry = useMemo(
     () => new THREE.BoxGeometry(defaults.width, SLOT_HEIGHT, totalDepth),
     [defaults.width, totalDepth],
   );
   const edges = useMemo(() => new THREE.EdgesGeometry(geometry), [geometry]);
 
+  const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {
+    if (mode !== "view") return;
+    setHover({ slotId: slot.id, x: e.nativeEvent.clientX, y: e.nativeEvent.clientY });
+  };
+
+  const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
+    if (mode !== "view") return;
+    setHover({ slotId: slot.id, x: e.nativeEvent.clientX, y: e.nativeEvent.clientY });
+  };
+
+  const handlePointerOut = () => {
+    if (mode !== "view") return;
+    setHover(null);
+  };
+
   const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
+    if (mode === "view") {
+      if (e.nativeEvent.button !== 0) return;
+      e.stopPropagation();
+      focusSlot(slot.id);
+      return;
+    }
     if (mode !== "edit" || addSlotMode) return; // let the event fall through to the drag plane
     if (e.nativeEvent.button !== 0) return; // right button is for box-select
     e.stopPropagation();
@@ -95,10 +118,13 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
       position={[slot.x, SLOT_HEIGHT / 2, -slot.y]}
       rotation={[0, rotationRad, 0]}
       onPointerDown={handlePointerDown}
+      onPointerOver={handlePointerOver}
+      onPointerMove={handlePointerMove}
+      onPointerOut={handlePointerOut}
     >
       <group position={[0, 0, footprintCenterZ]}>
         <mesh geometry={geometry}>
-          <meshStandardMaterial color={selected ? SLOT_SELECTED_COLOR : SLOT_COLOR} />
+          <meshStandardMaterial color={padColor} />
         </mesh>
         <lineSegments geometry={edges}>
           <lineBasicMaterial color={SLOT_EDGE_COLOR} />
@@ -120,9 +146,27 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
         ))}
       {slot.subSlots?.map((subSlot, i) => {
         if (subSlot.pallets.length === 0) return null;
+        const handleSubSlotPointerDown = (e: ThreeEvent<PointerEvent>) => {
+          // Reachable once this slot is focused at any drill-down level —
+          // mirrors "select a slot space only if pallets are on it" (empty
+          // sub-slots render no Rack at all, so there's nothing to click).
+          if (mode !== "view" || focus.slotId !== slot.id) return;
+          e.stopPropagation();
+          focusSubSlot(slot.id, i);
+        };
         return (
-          <group key={subSlot.id} position={[0, SLOT_HEIGHT / 2, i * cellDepth]}>
-            <Rack cellWidth={defaults.width} cellDepth={cellDepth} pallets={subSlot.pallets} />
+          <group
+            key={subSlot.id}
+            position={[0, SLOT_HEIGHT / 2, i * cellDepth]}
+            onPointerDown={handleSubSlotPointerDown}
+          >
+            <Rack
+              slotId={slot.id}
+              subSlotIndex={i}
+              cellWidth={defaults.width}
+              cellDepth={cellDepth}
+              pallets={subSlot.pallets}
+            />
           </group>
         );
       })}

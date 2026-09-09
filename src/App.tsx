@@ -2,11 +2,13 @@ import { useRef } from "react";
 import warehouseData from "../schema/warehouse.example.json";
 import type { Warehouse } from "./types/warehouse";
 import { EditorProvider, useEditor } from "./state/EditorContext";
+import { ViewFocusProvider } from "./state/ViewFocusContext";
 import { WarehouseScene } from "./components/WarehouseScene";
 import { Toolbar } from "./components/Toolbar";
 import { Inspector } from "./components/Inspector";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SelectionOverlay } from "./components/SelectionOverlay";
+import { HoverCard } from "./components/HoverCard";
 import "./App.css";
 
 const initialWarehouse = warehouseData as Warehouse;
@@ -32,6 +34,7 @@ function AppShell() {
         <Inspector />
         <HistoryPanel />
         <SelectionOverlay containerRef={sceneRef} />
+        <HoverCard />
       </div>
     </div>
   );
@@ -40,7 +43,9 @@ function AppShell() {
 export default function App() {
   return (
     <EditorProvider initialWarehouse={initialWarehouse}>
-      <AppShell />
+      <ViewFocusProvider>
+        <AppShell />
+      </ViewFocusProvider>
     </EditorProvider>
   );
 }

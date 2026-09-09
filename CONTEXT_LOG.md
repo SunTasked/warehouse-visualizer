@@ -6,6 +6,27 @@ top. This is a log of what happened each session — the current-state snapshot 
 
 ## 2026-09-10
 
+- Finished Milestones 3-4 of the plan referenced below: a view-mode-only hover card
+  (`src/components/HoverCard.tsx`) and a click-to-zoom drill-down through
+  Slot → sub-slot → pallet, with dimming and rollback. New:
+  `src/state/ViewFocusContext.tsx` (focus state, separate from `EditorContext`),
+  `src/lib/focusBounds.ts` (analytical world-space boxes for `fitToBox`, no ref
+  registry), `src/lib/emphasis.ts` (dim/full color logic). Changed: `WarehouseScene.tsx`
+  (swaps `OrbitControls` for drei's `CameraControls` in view mode only), `Slots.tsx`
+  (hover handlers, slot/sub-slot click routing, dimming), `Rack.tsx` (per-tier click
+  target + dimming, took `slotId`/`subSlotIndex` props), `Walls.tsx` (click-to-roll-back
+  + dimming). Also factored the depth/footprint math shared by `Slots.tsx` and
+  `focusBounds.ts` into `slotFootprint()` in `src/lib/geometry.ts`, to avoid the two
+  drifting apart.
+- Verified via Playwright with a temporary console.log of the focus state (removed
+  before committing): overview → slot → sub-slot → pallet → overview (Escape) all
+  transitioned correctly in one pass; wall-click-triggers-rollback confirmed separately.
+  Clicking a different slot while zoomed in re-targets directly to it (by design — not
+  literally "rolls back first"). Confirmed edit mode (Inspector, drag, selection) is
+  unaffected by any of this. Not yet checked against the full 870-slot Batiment 13A file
+  — see specs.md open question 12.
+- Full design in specs.md §5.1 "View mode: hover card + click-to-zoom drill-down"; §6 and
+  the decision log updated there too.
 - Revised the storage-subdivision feature per user feedback (two screenshots + written
   critique of the first pass). Also retroactively covers an unlogged mid-session rework from
   the tail end of 2026-09-09's work (depth now multiplies the footprint instead of splitting

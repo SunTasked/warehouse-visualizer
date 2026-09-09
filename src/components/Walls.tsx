@@ -2,11 +2,14 @@ import { useMemo } from "react";
 import type { ThreeEvent } from "@react-three/fiber";
 import type { WallLoop } from "../types/warehouse";
 import { useEditor } from "../state/EditorContext";
+import { useViewFocus } from "../state/ViewFocusContext";
+import { sceneEmphasis, emphasisColor } from "../lib/emphasis";
 
 const WALL_HEIGHT = 3;
 const WALL_THICKNESS = 0.2;
 const HANDLE_RADIUS = 0.35;
 const HANDLE_Y = 0.15;
+const WALL_COLOR = "#8a8f98";
 
 interface WallSegment {
   key: string;
@@ -69,7 +72,15 @@ function WallHandles({ wall }: { wall: WallLoop }) {
 
 export function Walls({ walls }: { walls: WallLoop[] }) {
   const { mode } = useEditor();
+  const { focus, back } = useViewFocus();
   const segments = useMemo(() => walls.flatMap(segmentsForLoop), [walls]);
+  const wallColor = emphasisColor(WALL_COLOR, sceneEmphasis(focus));
+
+  const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
+    if (mode !== "view") return;
+    e.stopPropagation();
+    back();
+  };
 
   return (
     <group>
@@ -78,9 +89,10 @@ export function Walls({ walls }: { walls: WallLoop[] }) {
           key={segment.key}
           position={segment.position}
           rotation={[0, segment.rotationY, 0]}
+          onPointerDown={handlePointerDown}
         >
           <boxGeometry args={[segment.length, WALL_HEIGHT, WALL_THICKNESS]} />
-          <meshStandardMaterial color="#8a8f98" />
+          <meshStandardMaterial color={wallColor} />
         </mesh>
       ))}
       {mode === "edit" && walls.map((wall) => <WallHandles key={wall.id} wall={wall} />)}

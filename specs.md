@@ -142,6 +142,33 @@ pallets onto one sub-slot while a deeper one sits empty. Removal stays manual/pe
 (picking which tier to remove isn't automated). See `setSlotDepth`/`addPalletAuto`/
 `removePallet`/`setPalletItemCount` in `src/state/EditorContext.tsx`.
 
+#### View mode: hover card + click-to-zoom drill-down
+
+View mode (the toolbar's default, non-editing state) has its own interaction model,
+independent of edit mode's click-to-select/drag: hovering a slot shows an HTML info
+card (`src/components/HoverCard.tsx`) with its id, position, depth, and an occupancy
+summary (sub-slots stocked, total pallets/items). Clicking a slot smoothly zooms the
+camera to frame it and dims everything else (a plain color desaturation toward gray —
+instant, not a real depth-of-field blur — see `src/lib/emphasis.ts`); if that slot has
+any stocked sub-slots, clicking one drills the camera in further and lets you then click
+a pallet tier to zoom in once more. Clicking a different slot at any point re-targets
+directly to it; clicking empty floor or a wall, or pressing Escape, backs out (one level
+per click, or straight to the overview on Escape). Empty sub-slots have no rack rendered
+at all, so they're never selectable — "select a slot space only if pallets are on it"
+falls out of that naturally rather than needing an extra check.
+
+State lives in a new `src/state/ViewFocusContext.tsx` (deliberately separate from
+`EditorContext` — this is view-mode navigation UI state, not warehouse data), tracking
+`focus: {level: "overview"|"slot"|"subslot"|"pallet", ...ids}`. The camera itself swaps
+from `OrbitControls` (edit mode, unchanged) to drei's `CameraControls` (view mode only)
+in `WarehouseScene.tsx` — never both at once, and since they share the same underlying
+Three.js camera object, switching modes doesn't reset framing. `CameraControls.fitToBox`
+does the smooth zoom, given a world-space box computed *analytically* (not read off
+rendered meshes) by `src/lib/focusBounds.ts`, reusing the exact depth/footprint math
+`Slots.tsx` renders with. `@react-three/drei`'s `CameraControls` (and its
+`camera-controls` peer dependency) was already installed — no new npm package was
+needed.
+
 #### Editor
 
 The viewer has an edit mode (toggle in the toolbar) for authoring/adjusting this format
@@ -287,10 +314,14 @@ eyeball results in 3D rather than deciding blind.
       a right-click-drag box) directly in the 3D view; bulk rotate/delete; save/load to a
       JSON file on disk; undo/redo with a jumpable History panel; all edits snap to
       whole-meter/90° graduations (§5.1 "Editor").
-- [x] **Slot storage subdivision & visualization** — a slot's depth can be split into
-      sub-slots, each holding vertically-stacked pallets of 1-10 items (tires); rendered as
-      a schematic rack-and-tire model, editable in the Inspector (§5.1 "Storage
-      subdivision").
+- [x] **Slot storage subdivision & visualization** — a slot's depth multiplies its
+      footprint into sub-slots, each holding vertically-stacked pallets of 1-10 items
+      (tires); rendered as a schematic, fully-connected rack-and-tire model, editable in
+      the Inspector (§5.1 "Storage subdivision").
+- [x] **View-mode hover card + click-to-zoom drill-down** — hover a slot for an info card;
+      click to smoothly zoom in (dimming the rest) through Slot → sub-slot → pallet;
+      click away or Escape to back out (§5.1 "View mode: hover card + click-to-zoom
+      drill-down").
 - [ ] **Simulation run** — given a warehouse model + scenario config, run the simulation and
       produce a trace.
 - [ ] **Path playback** — animate operator movement over simulated time (play/pause/scrub),
@@ -358,11 +389,26 @@ eyeball results in 3D rather than deciding blind.
 11. Editor doesn't yet support adding/removing wall corners or whole new wall loops (only
     moving existing ones) — needed once someone actually digitizes a new building shape
     from scratch rather than adjusting the example.
+12. The view-mode hover card/click-to-zoom drill-down (§5.1) was only verified against the
+    5-slot example file — not checked against the full 870-slot Batiment 13A dataset. The
+    per-slot hover/focus checks are cheap conditionals so likely fine, but not confirmed.
 
 ## 10. Decision Log
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-10 — Added a view-mode-only hover card + click-to-zoom drill-down through
+  Slot → sub-slot → pallet (`src/state/ViewFocusContext.tsx`, `src/lib/focusBounds.ts`,
+  `src/lib/emphasis.ts`, `src/components/HoverCard.tsx`), on top of the same day's
+  pallet/rack rendering rework. Camera swaps from `OrbitControls` (edit mode) to drei's
+  `CameraControls` (view mode) in `WarehouseScene.tsx`, using `fitToBox` against
+  analytically-computed world boxes rather than object refs. Confirmed via
+  AskUserQuestion before building: pallets auto-fill deepest-first via one button
+  (already covered by the entry below); "blur the rest" is an instant dim/desaturate, no
+  new render-pipeline dependency; the whole drill-down is View-mode only, Edit mode
+  unchanged. Entered formal Plan Mode for this multi-area request; plan approved before
+  implementation. See §5.1 "View mode: hover card + click-to-zoom drill-down" and open
+  question 12 (untested against the full 870-slot dataset).
 - 2026-09-10 — Revised the storage-subdivision rendering per user feedback on the initial
   version: (1) a slot's depth now *multiplies* its footprint (each sub-slot a full
   `slotDefaults` cell) instead of splitting one footprint into smaller cells — `subSlots[0]`
