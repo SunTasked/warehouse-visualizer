@@ -2,8 +2,20 @@ import type { FocusEvent } from "react";
 import { useEditor } from "../state/EditorContext";
 
 export function Inspector() {
-  const { mode, warehouse, selectedSlotIds, updateSlots, renameSlot, deleteSlots, clearSelection, commit } =
-    useEditor();
+  const {
+    mode,
+    warehouse,
+    selectedSlotIds,
+    updateSlots,
+    setSlotDepth,
+    addPallet,
+    removePallet,
+    setPalletItemCount,
+    renameSlot,
+    deleteSlots,
+    clearSelection,
+    commit,
+  } = useEditor();
   if (mode !== "edit" || selectedSlotIds.size === 0) return null;
 
   const ids = Array.from(selectedSlotIds);
@@ -58,6 +70,61 @@ export function Inspector() {
         {field("x", "X (m)", "1")}
         {field("y", "Y (m)", "1")}
         {field("rotationDeg", "Rotation (°)", "90")}
+
+        <label className="inspector__field">
+          <span>Depth (sub-slots)</span>
+          <input
+            type="number"
+            min={1}
+            max={12}
+            step={1}
+            value={slot.subSlots?.length ?? 1}
+            onChange={(e) => setSlotDepth(slot.id, Number(e.target.value))}
+            onBlur={() => commit(`Set depth of ${slot.id}`)}
+          />
+        </label>
+
+        {(slot.subSlots?.length ?? 0) > 0 && (
+          <div className="inspector__subslots">
+            {slot.subSlots!.map((subSlot, si) => (
+              <div className="inspector__subslot" key={subSlot.id}>
+                <div className="inspector__subslot-header">
+                  <span>{subSlot.id}</span>
+                  <button
+                    className="inspector__small-btn"
+                    onClick={() => addPallet(slot.id, si)}
+                    title="Add a pallet on top of this sub-slot's stack"
+                  >
+                    + Pallet
+                  </button>
+                </div>
+                {subSlot.pallets.length === 0 && <p className="inspector__hint">Empty.</p>}
+                {subSlot.pallets.map((pallet, pi) => (
+                  <div className="inspector__pallet" key={pallet.id}>
+                    <span className="inspector__pallet-label">{pallet.id}</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      step={1}
+                      value={pallet.items.length}
+                      onChange={(e) => setPalletItemCount(slot.id, si, pi, Number(e.target.value))}
+                      onBlur={() => commit(`Set item count on ${pallet.id}`)}
+                    />
+                    <span className="inspector__pallet-unit">items</span>
+                    <button
+                      className="inspector__small-btn inspector__small-btn--danger"
+                      onClick={() => removePallet(slot.id, si, pi)}
+                      title="Remove this pallet"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
 
         <button className="inspector__delete" onClick={() => deleteSlots([slot.id])}>
           Delete slot

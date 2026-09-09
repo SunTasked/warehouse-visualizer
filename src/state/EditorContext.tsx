@@ -11,7 +11,7 @@ import {
 } from "react";
 import type { Camera } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
-import type { Point, Slot, Warehouse } from "../types/warehouse";
+import type { Point, Slot, SubSlot, Warehouse } from "../types/warehouse";
 import { loadWarehouse, saveWarehouse } from "../lib/file";
 
 export type Mode = "view" | "edit";
@@ -39,6 +39,14 @@ interface FileHandleLike {
 const snapCoord = (v: number): number => Math.round(v);
 const snapRotation = (deg: number): number => Math.round(deg / 90) * 90;
 const snapPoint = (p: Point): Point => ({ x: snapCoord(p.x), y: snapCoord(p.y) });
+
+const MAX_DEPTH = 12;
+const MAX_ITEMS_PER_PALLET = 10;
+
+function mapSubSlot(slot: Slot, subSlotIndex: number, fn: (subSlot: SubSlot) => SubSlot): Slot {
+  if (!slot.subSlots) return slot;
+  return { ...slot, subSlots: slot.subSlots.map((ss, i) => (i === subSlotIndex ? fn(ss) : ss)) };
+}
 
 export interface HistoryEntry {
   warehouse: Warehouse;
@@ -72,6 +80,14 @@ interface EditorContextValue {
   updateSlots: (ids: string[], patch: Partial<Omit<Slot, "id">>) => void;
   /** Applies a per-slot position patch (a different x/y per id) — used for group dragging. Live-mutate only. */
   applySlotPatches: (patches: { id: string; x: number; y: number }[]) => void;
+  /** Resizes a slot's depth (number of sub-slots). Live-mutate only — caller commits. */
+  setSlotDepth: (slotId: string, depth: number) => void;
+  /** Adds a pallet (one item) to the top of a sub-slot's stack. Commits immediately. */
+  addPallet: (slotId: string, subSlotIndex: number) => void;
+  /** Removes one pallet from a sub-slot. Commits immediately. */
+  removePallet: (slotId: string, subSlotIndex: number, palletIndex: number) => void;
+  /** Resizes one pallet's item count (1-10). Live-mutate only — caller commits. */
+  setPalletItemCount: (slotId: string, subSlotIndex: number, palletIndex: number, count: number) => void;
   /** Renames a single slot's id, checking for collisions and following the selection. Live-mutate only — caller commits. */
   renameSlot: (id: string, newId: string) => boolean;
   deleteSlots: (ids: string[]) => void;
@@ -233,6 +249,91 @@ export function EditorProvider({
     [mutateWarehouse],
   );
 
+  // Resizes a slot's depth (its subSlots array), preserving existing
+  // sub-slots' content when growing and dropping the deepest ones when
+  // shrinking. Live-mutate only — caller commits (mirrors the x/y/rotationDeg
+  // inspector fields: live on change, one history entry on blur).
+  const setSlotDepth = useCallback(
+    (slotId: string, depth: number) => {
+      const clamped = Math.max(1, Math.min(MAX_DEPTH, Math.round(depth)));
+      mutateWarehouse((current) => ({
+        ...current,
+        slots: current.slots.map((s) => {
+          if (s.id !== slotId) return s;
+          const existing = s.subSlots ?? [{ id: `${s.id}.1`, pallets: [] }];
+          const next = existing.slice(0, clamped);
+          while (next.length < clamped) {
+            next.push({ id: `${s.id}.${next.length + 1}`, pallets: [] });
+          }
+          return { ...s, subSlots: next };
+        }),
+      }));
+    },
+    [mutateWarehouse],
+  );
+
+  // Adds a new pallet (one item) to the top of a sub-slot's stack. A discrete
+  // click, like addSlot/deleteSlots — commits immediately.
+  const addPallet = useCallback(
+    (slotId: string, subSlotIndex: number) => {
+      mutateWarehouse((current) => ({
+        ...current,
+        slots: current.slots.map((s) =>
+          s.id !== slotId
+            ? s
+            : mapSubSlot(s, subSlotIndex, (ss) => {
+                const palletId = `${ss.id}-P${ss.pallets.length + 1}`;
+                return { ...ss, pallets: [...ss.pallets, { id: palletId, items: [{ id: `${palletId}-I1` }] }] };
+              }),
+        ),
+      }));
+      commit(`Add pallet to ${slotId}`);
+    },
+    [mutateWarehouse, commit],
+  );
+
+  const removePallet = useCallback(
+    (slotId: string, subSlotIndex: number, palletIndex: number) => {
+      mutateWarehouse((current) => ({
+        ...current,
+        slots: current.slots.map((s) =>
+          s.id !== slotId
+            ? s
+            : mapSubSlot(s, subSlotIndex, (ss) => ({
+                ...ss,
+                pallets: ss.pallets.filter((_, pi) => pi !== palletIndex),
+              })),
+        ),
+      }));
+      commit(`Remove pallet from ${slotId}`);
+    },
+    [mutateWarehouse, commit],
+  );
+
+  // Resizes one pallet's item count (1-10). Live-mutate only — caller commits on blur.
+  const setPalletItemCount = useCallback(
+    (slotId: string, subSlotIndex: number, palletIndex: number, count: number) => {
+      const clamped = Math.max(1, Math.min(MAX_ITEMS_PER_PALLET, Math.round(count)));
+      mutateWarehouse((current) => ({
+        ...current,
+        slots: current.slots.map((s) =>
+          s.id !== slotId
+            ? s
+            : mapSubSlot(s, subSlotIndex, (ss) => ({
+                ...ss,
+                pallets: ss.pallets.map((p, pi) => {
+                  if (pi !== palletIndex) return p;
+                  const items = p.items.slice(0, clamped);
+                  while (items.length < clamped) items.push({ id: `${p.id}-I${items.length + 1}` });
+                  return { ...p, items };
+                }),
+              })),
+        ),
+      }));
+    },
+    [mutateWarehouse],
+  );
+
   const renameSlot = useCallback(
     (id: string, newId: string): boolean => {
       const trimmed = newId.trim();
@@ -335,6 +436,10 @@ export function EditorProvider({
       addSlot,
       updateSlots,
       applySlotPatches,
+      setSlotDepth,
+      addPallet,
+      removePallet,
+      setPalletItemCount,
       renameSlot,
       deleteSlots,
       commit,
@@ -364,6 +469,10 @@ export function EditorProvider({
       addSlot,
       updateSlots,
       applySlotPatches,
+      setSlotDepth,
+      addPallet,
+      removePallet,
+      setPalletItemCount,
       renameSlot,
       deleteSlots,
       commit,

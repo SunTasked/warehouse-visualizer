@@ -5,11 +5,24 @@ import { useMemo } from "react";
 import type { Slot, SlotSize } from "../types/warehouse";
 import { useEditor } from "../state/EditorContext";
 import { fromSceneXZ } from "../lib/geometry";
+import { Rack } from "./Rack";
 
 const SLOT_HEIGHT = 0.06;
 const SLOT_COLOR = "#4d7cfe";
 const SLOT_SELECTED_COLOR = "#ff8c42";
 const SLOT_EDGE_COLOR = "#1f3a93";
+const DIVIDER_COLOR = "#1f3a93";
+
+// Draws the boundary between two adjacent sub-slots (depth subdivision),
+// running across the slot's width at local Z = z.
+function DepthDivider({ z, width }: { z: number; width: number }) {
+  const geometry = useMemo(() => new THREE.BoxGeometry(width * 0.96, 0.01, 0.03), [width]);
+  return (
+    <mesh geometry={geometry} position={[0, SLOT_HEIGHT / 2 + 0.005, z]}>
+      <meshStandardMaterial color={DIVIDER_COLOR} />
+    </mesh>
+  );
+}
 
 function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
   const {
@@ -29,6 +42,8 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
     [defaults.width, defaults.height],
   );
   const edges = useMemo(() => new THREE.EdgesGeometry(geometry), [geometry]);
+  const depth = slot.subSlots?.length ?? 1;
+  const cellDepth = defaults.height / depth;
 
   const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
     if (mode !== "edit" || addSlotMode) return; // let the event fall through to the drag plane
@@ -80,6 +95,19 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
       >
         {slot.id}
       </Text>
+      {depth > 1 &&
+        Array.from({ length: depth - 1 }).map((_, i) => (
+          <DepthDivider key={i} z={-defaults.height / 2 + cellDepth * (i + 1)} width={defaults.width} />
+        ))}
+      {slot.subSlots?.map((subSlot, i) => {
+        if (subSlot.pallets.length === 0) return null;
+        const z = -defaults.height / 2 + cellDepth * (i + 0.5);
+        return (
+          <group key={subSlot.id} position={[0, SLOT_HEIGHT / 2, z]}>
+            <Rack cellWidth={defaults.width} cellDepth={cellDepth} pallets={subSlot.pallets} />
+          </group>
+        );
+      })}
     </group>
   );
 }

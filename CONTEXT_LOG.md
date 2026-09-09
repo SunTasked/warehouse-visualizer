@@ -4,6 +4,26 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-09
+
+- Added a storage-content hierarchy inside a slot — **Slot → Sub-slot → Pallet → Item**
+  (sub-slots = depth subdivision, pallets stack vertically, items = 1-10 per pallet, e.g.
+  tires) — prompted by a top-view reference screenshot (AN01 depth 2, AN02 depth 4) and a
+  tire-rack photo for the visual target. Full design/rationale in specs.md §5.1 "Storage
+  subdivision"; §6 and decision log updated there too.
+- New: `src/components/Rack.tsx` (rack frame + torus "tire" rendering). Changed:
+  `src/types/warehouse.ts`, `schema/warehouse.schema.json` (added `Item`/`Pallet`/`SubSlot`,
+  optional `slot.subSlots`), `src/state/EditorContext.tsx` (`setSlotDepth`/`addPallet`/
+  `removePallet`/`setPalletItemCount`), `src/components/Inspector.tsx` (Depth field +
+  per-sub-slot pallet/item controls), `src/components/Slots.tsx` (depth dividers + rack
+  wiring), `schema/warehouse.example.json` (demo data on A01/A02).
+- Verified end-to-end with a headless-browser (Playwright) pass: rack/tire rendering on
+  A01/A02, depth resize, add/remove pallet, item-count clamp to 10 — all worked, no console
+  errors. No project skill existed yet for running this app; used an ad hoc Playwright
+  script rather than `chromium-cli` (not installed in this environment).
+- Next: unchanged from before this session — simulation graph layer / scenario parameters,
+  or an accurate Batiment 13A digitization (specs.md §9).
+
 ## 2026-09-07
 
 - Project kicked off. Templated `specs.md` and `.claude/agents/context-keeper.md`.

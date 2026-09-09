@@ -157,6 +157,81 @@
   color: #5a6270;
 }
 
+.inspector__subslots {
+  max-height: 260px;
+  overflow-y: auto;
+  margin-bottom: 0.6rem;
+  padding-right: 0.2rem;
+}
+
+.inspector__subslot {
+  padding: 0.4rem 0.5rem;
+  margin-bottom: 0.4rem;
+  background: #f4f6fa;
+  border: 1px solid #e2e6ee;
+  border-radius: 6px;
+}
+
+.inspector__subslot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.3rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #2a3244;
+}
+
+.inspector__pallet {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: #5a6270;
+}
+
+.inspector__pallet-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector__pallet input {
+  width: 2.6rem;
+  padding: 0.15rem 0.3rem;
+  border: 1px solid #c7ccd6;
+  border-radius: 4px;
+  font-size: 0.78rem;
+}
+
+.inspector__pallet-unit {
+  flex: none;
+}
+
+.inspector__small-btn {
+  padding: 0.15rem 0.4rem;
+  border: 1px solid #c7ccd6;
+  border-radius: 4px;
+  background: #ffffff;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.inspector__small-btn:hover {
+  background: #eef1f6;
+}
+
+.inspector__small-btn--danger {
+  border-color: #e0a3a3;
+  color: #c0392b;
+}
+
+.inspector__small-btn--danger:hover {
+  background: #fdecea;
+}
+
 .selection-overlay__box {
   position: absolute;
   pointer-events: none;

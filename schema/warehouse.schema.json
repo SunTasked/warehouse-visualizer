@@ -99,7 +99,47 @@
           "type": "number",
           "default": 0,
           "description": "Counter-clockwise rotation of the slot footprint around its center point, in degrees. 0 = width (slotDefaults.width) along +X, height along +Y. Usually a multiple of 90, but not restricted to one."
+        },
+        "subSlots": {
+          "type": "array",
+          "description": "Depth subdivision of the slot (front-to-back). Depth = array length. Omitted/empty = depth 1, no storage detail authored yet.",
+          "items": { "$ref": "#/definitions/subSlot" }
         }
+      }
+    },
+    "subSlot": {
+      "type": "object",
+      "required": ["id", "pallets"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "pallets": {
+          "type": "array",
+          "description": "Stacked bottom-to-top; pallets[0] is the lowest tier.",
+          "items": { "$ref": "#/definitions/pallet" }
+        }
+      }
+    },
+    "pallet": {
+      "type": "object",
+      "required": ["id", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": { "$ref": "#/definitions/item" }
+        }
+      }
+    },
+    "item": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" }
       }
     }
   }

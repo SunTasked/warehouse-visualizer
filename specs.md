@@ -104,6 +104,30 @@ before building anything on top of it. Implementation notes:
   the closing segment when `closed: true`), not a flat line — chosen for a more legible 3D
   read of the space, purely a rendering choice, not a schema requirement.
 
+#### Storage subdivision (sub-slots, pallets, items)
+
+A slot's footprint can be subdivided along its depth axis (`slotDefaults.height`)
+into **sub-slots** — one per depth position, front-to-back (e.g. a slot with depth 4
+has 4 sub-slots). Within one sub-slot, **pallets** stack vertically (rack tiers); each
+pallet holds 1-10 **items** (individual units, e.g. tires) laid out side by side along
+the slot's width. Hierarchy: **Slot → Sub-slot → Pallet → Item**. See the type
+definitions in `src/types/warehouse.ts` and `schema/warehouse.schema.json`
+(`slot.subSlots`, optional — omitted/empty means depth 1, no storage detail
+authored yet).
+
+Rendering (`src/components/Rack.tsx`, wired into `src/components/Slots.tsx`) is
+schematic, not to real-world scale: a blue post-and-rail rack frame per stocked
+sub-slot, sized to its depth-cell footprint, with one tier per pallet and a row of
+torus "tires" per tier (item count controls both the count and, since row width is
+fixed, each tire's radius). Empty sub-slots (no pallets) render only a thin divider
+line, no rack — matching the reference screenshot's "#N/A" cells.
+
+Editable in the Inspector when a single slot is selected: a Depth field (resizes
+`subSlots`, preserving existing content when growing, dropping the deepest sub-slots
+when shrinking) and, per sub-slot, "+ Pallet" / remove-pallet buttons and a per-pallet
+item-count field (clamped 1-10). See `setSlotDepth`/`addPallet`/`removePallet`/
+`setPalletItemCount` in `src/state/EditorContext.tsx`.
+
 #### Editor
 
 The viewer has an edit mode (toggle in the toolbar) for authoring/adjusting this format
@@ -249,6 +273,10 @@ eyeball results in 3D rather than deciding blind.
       a right-click-drag box) directly in the 3D view; bulk rotate/delete; save/load to a
       JSON file on disk; undo/redo with a jumpable History panel; all edits snap to
       whole-meter/90° graduations (§5.1 "Editor").
+- [x] **Slot storage subdivision & visualization** — a slot's depth can be split into
+      sub-slots, each holding vertically-stacked pallets of 1-10 items (tires); rendered as
+      a schematic rack-and-tire model, editable in the Inspector (§5.1 "Storage
+      subdivision").
 - [ ] **Simulation run** — given a warehouse model + scenario config, run the simulation and
       produce a trace.
 - [ ] **Path playback** — animate operator movement over simulated time (play/pause/scrub),
@@ -321,6 +349,14 @@ eyeball results in 3D rather than deciding blind.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-09 — Added a storage-content hierarchy inside a slot: **Slot → Sub-slot
+  (depth position) → Pallet (vertical rack tier) → Item (individual unit, e.g. a
+  tire, 1-10 per pallet)**. Sub-slots subdivide the slot along its depth axis
+  (`slotDefaults.height`); pallets stack vertically within a sub-slot. Rendered
+  schematically as a blue rack frame with tires drawn as tori (`src/components/
+  Rack.tsx`), editable via a Depth field + per-sub-slot pallet/item controls in the
+  Inspector. `slot.subSlots` is optional in the schema (omitted = depth 1, no detail
+  authored). See §5.1 "Storage subdivision".
 - 2026-09-08 — Added multi-select (Ctrl+click, right-click-drag box-select), bulk
   update/delete, and a History panel. Undo/redo moved from a plain past/future stack to a
   flat, labeled timeline (`entries` + `cursor`) so the History panel can jump to any past
