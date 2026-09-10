@@ -2,25 +2,30 @@ import { Canvas } from "@react-three/fiber";
 import { Grid, OrbitControls, CameraControls } from "@react-three/drei";
 import { useEffect, useMemo, useState } from "react";
 import { boundsCenter, boundsSpan, computeBounds, toSceneXZ } from "../lib/geometry";
-import { slotWorldBox, subSlotWorldBox, palletWorldBox, buildingWorldBox } from "../lib/focusBounds";
+import {
+  slotWorldBox,
+  subSlotWorldBox,
+  palletWorldBox,
+  buildingWorldBox,
+  plantWorldBox,
+  frameBox,
+} from "../lib/focusBounds";
 import { useEditor } from "../state/EditorContext";
 import { useViewFocus } from "../state/ViewFocusContext";
 import { Walls, WALL_HEIGHT } from "./Walls";
 import { Slots } from "./Slots";
 import { DragPlane } from "./DragPlane";
 
-const FIT_PADDING = { paddingLeft: 1, paddingRight: 1, paddingTop: 1, paddingBottom: 1 };
-
 // Drives the view-mode camera drill-down: whenever `focus` changes, smoothly
-// fits the CameraControls to the relevant slot/sub-slot/pallet box (computed
-// analytically by focusBounds.ts), or back out to the original overview
-// framing. A no-op in edit mode (cameraControlsRef stays null there — see
-// the conditional OrbitControls/CameraControls render below).
-function FocusCameraDriver({
-  initialView,
-}: {
-  initialView: { cameraPosition: [number, number, number]; target: [number, number, number] };
-}) {
+// moves the CameraControls to a fixed-angle shot of the relevant box
+// (computed analytically by focusBounds.ts) — plant/warehouse from directly
+// above, slot/slot-space/pallet from a fixed above-and-to-the-side angle —
+// via frameBox(), never `fitToBox` (which dollies along whatever direction
+// the camera already happens to be facing, so the angle wouldn't be
+// consistent from one click to the next). A no-op in edit mode
+// (cameraControlsRef stays null there — see the conditional
+// OrbitControls/CameraControls render below).
+function FocusCameraDriver() {
   const { warehouse } = useEditor();
   const { focus, cameraControlsRef } = useViewFocus();
 
@@ -28,49 +33,29 @@ function FocusCameraDriver({
     const controls = cameraControlsRef.current;
     if (!controls) return;
 
+    let view;
     if (focus.level === "plant") {
-      const [px, py, pz] = initialView.cameraPosition;
-      const [tx, ty, tz] = initialView.target;
-      void controls.setLookAt(px, py, pz, tx, ty, tz, true);
-      return;
-    }
-
-    if (focus.level === "warehouse") {
+      view = frameBox(plantWorldBox(warehouse), "top");
+    } else if (focus.level === "warehouse") {
       const loop = warehouse.walls.find((w) => w.id === focus.buildingId);
       if (!loop) return;
-      // A building's box is wide/deep but short (just wall height) — fed
-      // straight into fitToBox, camera-controls dollies in far too close
-      // (it seems to fit the short Y extent rather than the constraining
-      // footprint dimension). Framed manually instead, with the same
-      // span-based offset formula initialView already uses below, which is
-      // known-good for exactly this "look down at a wide flat footprint" shot.
-      const box = buildingWorldBox(loop, WALL_HEIGHT);
-      const cx = (box.min.x + box.max.x) / 2;
-      const cz = (box.min.z + box.max.z) / 2;
-      const buildingSpan = Math.max(box.max.x - box.min.x, box.max.z - box.min.z) || 20;
-      void controls.setLookAt(
-        cx + buildingSpan * 0.6,
-        buildingSpan * 0.9,
-        cz + buildingSpan * 0.8,
-        cx,
-        0,
-        cz,
-        true,
-      );
-      return;
+      view = frameBox(buildingWorldBox(loop, WALL_HEIGHT), "top");
+    } else {
+      const slot = warehouse.slots.find((s) => s.id === focus.slotId);
+      if (!slot) return;
+      const box =
+        focus.level === "slot"
+          ? slotWorldBox(slot, warehouse.slotDefaults)
+          : focus.level === "slot-space"
+            ? subSlotWorldBox(slot, warehouse.slotDefaults, focus.subSlotIndex!)
+            : palletWorldBox(slot, warehouse.slotDefaults, focus.subSlotIndex!, focus.palletIndex!);
+      view = frameBox(box, "iso");
     }
 
-    const slot = warehouse.slots.find((s) => s.id === focus.slotId);
-    if (!slot) return;
-
-    const box =
-      focus.level === "slot"
-        ? slotWorldBox(slot, warehouse.slotDefaults)
-        : focus.level === "slot-space"
-          ? subSlotWorldBox(slot, warehouse.slotDefaults, focus.subSlotIndex!)
-          : palletWorldBox(slot, warehouse.slotDefaults, focus.subSlotIndex!, focus.palletIndex!);
-    void controls.fitToBox(box, true, FIT_PADDING);
-  }, [focus, warehouse, initialView, cameraControlsRef]);
+    const [px, py, pz] = view.position;
+    const [tx, ty, tz] = view.target;
+    void controls.setLookAt(px, py, pz, tx, ty, tz, true);
+  }, [focus, warehouse, cameraControlsRef]);
 
   return null;
 }
@@ -131,7 +116,7 @@ export function WarehouseScene() {
       ) : (
         <>
           <CameraControls ref={cameraControlsRef} makeDefault />
-          <FocusCameraDriver initialView={initialView} />
+          <FocusCameraDriver />
         </>
       )}
     </Canvas>

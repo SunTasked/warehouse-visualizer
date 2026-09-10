@@ -4,6 +4,54 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-10 (cont'd — camera consistency, deeper hover, second building)
+
+- User request (French, with 4 reference screenshots): (1) camera angle must always be
+  identical when clicking to focus something — plant/warehouse from directly above,
+  slot/slot-space/pallet from a fixed above-and-to-the-side angle; (2) hover highlight
+  should go one level deeper — at "slot" level, hovering a sub-slot's rack; at
+  "slot-space" level, hovering a pallet; (3) on the example warehouse, add a second
+  building (to give "plant" something to show and "warehouse" something to isolate) and
+  vary pallet fill between full/partial (~90% full).
+- Replaced `CameraControls.fitToBox` entirely with a new unified `frameBox(box, angle)`
+  helper (`src/lib/focusBounds.ts`) that offsets the camera from a box's own center by a
+  *fixed ratio* of the box's own span — angle is a pure function of the target, never of
+  the camera's current position/orientation. Two angles: `"top"` and `"iso"`. First pass
+  at `"top"` used a diagonal offset (`x:0.15, z:0.15`) which, geometrically, aligns the
+  camera's screen-up with the world diagonal — verified via Playwright screenshot that
+  this rendered as a 45°-rotated diamond grid, not a proper axis-aligned plan view;
+  fixed by zeroing the x-component (`x:0, z:0.2`) so plant/warehouse now read as a true
+  top-down site plan. `FocusCameraDriver` (`WarehouseScene.tsx`) rewritten around this
+  single helper, deleting the old `fitToBox` iso path and the manual `setLookAt`
+  workaround previously needed just for the "warehouse" level (that bug is now
+  subsumed — "warehouse" just uses `"top"` like "plant").
+- Hover highlight extended one level deeper each: `HoverPoint`
+  (`src/state/ViewFocusContext.tsx`) gained optional `subSlotIndex`/`palletIndex`;
+  `Slots.tsx` sets/reads them for sub-slot-rack hover (gated to "slot" level, mutually
+  exclusive with the slot-pad highlight via `subSlotIndex === undefined`); `Rack.tsx`
+  lightens the rack frame (`RACK_HOVER_COLOR`) on sub-slot hover and lightens the
+  individual pallet block (`lighten()`, blending toward white) on pallet hover (gated to
+  "slot-space" level).
+- Reworked `scripts/generate-example-warehouse.js`: added a second building ("Entrepot
+  Annexe", its own wall loop east of the main one, slots C01-C03) — main building
+  renamed from a generic id to "Batiment 13A" to match its display name; replaced the
+  fixed 6-items-per-pallet convention with a deterministic 90%-full/10%-partial split
+  (`nextItemCount()`, a running counter across the whole file so the split holds
+  file-wide, partial counts cycling through `[2,4,5,7,8]`) — same "no `Math.random()`"
+  convention as the rest of the generator, so re-running it reproduces byte-identical
+  output. Re-ran the script: 2 buildings, 21 slots, 19 stocked slots; spot-checked the
+  actual distribution (65 full / 7 partial ≈ 90.3%).
+- Verified via Playwright screenshots: plant level now shows both buildings as an
+  axis-aligned top-down plan (not a diamond) with a visible red/orange fill-rate mix;
+  drilling into a slot/slot-space/pallet shows the same consistent 3/4 angle at every
+  level; hover-lightened the sub-slot rack frame at "slot" level and a pallet block at
+  "slot-space" level; clicking the annex building's wall correctly isolates it (shows
+  only C01-C03, breadcrumb reads "Warehouse: Entrepot Annexe"); Escape resets cleanly
+  back to the full top-down plant view; edit mode (Inspector, slot selection) unaffected.
+  `tsc --noEmit` clean throughout.
+- specs.md updated (§5.1 camera-framing and hover paragraphs rewritten, new decision log
+  entry).
+
 ## 2026-09-10
 
 - User set a standing preference: always commit and push once a unit of work is done in

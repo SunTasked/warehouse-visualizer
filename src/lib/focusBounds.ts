@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import type { Slot, SlotSize, WallLoop } from "../types/warehouse";
-import { slotFootprint, toSceneXZ } from "./geometry";
+import type { Slot, SlotSize, WallLoop, Warehouse } from "../types/warehouse";
+import { computeBounds, slotFootprint, toSceneXZ } from "./geometry";
 import { SLOT_HEIGHT } from "../components/Slots";
 import { LEVEL_HEIGHT, RACK_MARGIN_FACTOR } from "../components/Rack";
 
@@ -68,6 +68,22 @@ export function subSlotWorldBox(slot: Slot, defaults: SlotSize, subSlotIndex: nu
   );
 }
 
+/** The whole loaded site (plant level) — all walls' extent, at floor level. */
+export function plantWorldBox(warehouse: Warehouse): THREE.Box3 {
+  const bounds = computeBounds(warehouse);
+  const box = new THREE.Box3();
+  for (const [x, y] of [
+    [bounds.minX, bounds.minY],
+    [bounds.maxX, bounds.minY],
+    [bounds.maxX, bounds.maxY],
+    [bounds.minX, bounds.maxY],
+  ] as const) {
+    const [sx, sz] = toSceneXZ(x, y);
+    box.expandByPoint(new THREE.Vector3(sx, 0, sz));
+  }
+  return box;
+}
+
 /** One building (a closed wall loop), from floor to wall height. */
 export function buildingWorldBox(loop: WallLoop, wallHeight: number): THREE.Box3 {
   const box = new THREE.Box3();
@@ -77,6 +93,38 @@ export function buildingWorldBox(loop: WallLoop, wallHeight: number): THREE.Box3
     box.expandByPoint(new THREE.Vector3(sx, wallHeight, sz));
   }
   return box;
+}
+
+export interface FramedView {
+  position: [number, number, number];
+  target: [number, number, number];
+}
+
+// Camera offset ratios, applied to a box's own (padded) span, relative to
+// its own center — not fixed world-space angles — so the same two shots
+// work identically regardless of the box's size or floor height:
+//   "top": plant/warehouse — nearly straight down, matching a site plan.
+//   "iso": slot/slot-space/pallet — a fixed above-and-to-the-side 3/4 view.
+// A box's own direction (never the camera's current one) drives the shot,
+// so clicking into an element always arrives from the same angle — see the
+// "camera angle should always be the same when clicking an element" request.
+// x stays 0 (not diagonal like ISO_RATIO) so the grid/walls read axis-aligned
+// on screen — a true plan view, not a diamond-rotated iso shot; z is only
+// just enough to keep the look direction well-defined at near-vertical pitch.
+const TOP_DOWN_RATIO = { x: 0, y: 1.3, z: 0.2 };
+const ISO_RATIO = { x: 0.6, y: 0.9, z: 0.8 };
+const FRAME_PADDING = 1.6;
+
+/** Computes a fixed-angle camera shot ("top" or "iso") that frames `box`. */
+export function frameBox(box: THREE.Box3, angle: "top" | "iso"): FramedView {
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const span = Math.max(size.x, size.y, size.z, 1) * FRAME_PADDING;
+  const ratio = angle === "top" ? TOP_DOWN_RATIO : ISO_RATIO;
+  return {
+    position: [center.x + span * ratio.x, center.y + span * ratio.y, center.z + span * ratio.z],
+    target: [center.x, center.y, center.z],
+  };
 }
 
 /** One pallet's tier within its sub-slot's rack. */

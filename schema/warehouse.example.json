@@ -4,7 +4,7 @@
   "units": "m",
   "walls": [
     {
-      "id": "envelope",
+      "id": "Batiment 13A",
       "closed": true,
       "points": [
         {
@@ -22,6 +22,28 @@
         {
           "x": 0,
           "y": 22
+        }
+      ]
+    },
+    {
+      "id": "Entrepot Annexe",
+      "closed": true,
+      "points": [
+        {
+          "x": 44,
+          "y": 0
+        },
+        {
+          "x": 60,
+          "y": 0
+        },
+        {
+          "x": 60,
+          "y": 14
+        },
+        {
+          "x": 44,
+          "y": 14
         }
       ]
     }
@@ -150,6 +172,24 @@
       "x": 35,
       "y": 16,
       "rotationDeg": 90,
+      "depth": 2
+    },
+    {
+      "id": "C01",
+      "x": 47,
+      "y": 8,
+      "depth": 2
+    },
+    {
+      "id": "C02",
+      "x": 51,
+      "y": 8,
+      "depth": 2
+    },
+    {
+      "id": "C03",
+      "x": 55,
+      "y": 8,
       "depth": 2
     }
   ]

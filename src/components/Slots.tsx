@@ -96,7 +96,10 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
   if (mode === "view" && !isSlotVisible(focus, slot.id, buildingId)) return null;
 
   const selected = selectedSlotIds.has(slot.id);
-  const hovered = mode === "view" && hover?.slotId === slot.id;
+  // Only a "pure" slot-level hover (no deeper target) lights up the pad —
+  // hovering one of its sub-slot racks highlights that rack instead (see
+  // the sub-slot group below / Rack.tsx), not the whole slot.
+  const hovered = mode === "view" && hover?.slotId === slot.id && hover.subSlotIndex === undefined;
   const padColor = hovered ? SLOT_HOVER_COLOR : selected ? SLOT_SELECTED_COLOR : SLOT_COLOR;
   const rotationRad = THREE.MathUtils.degToRad(slot.rotationDeg ?? 0);
 
@@ -197,11 +200,26 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
           e.stopPropagation();
           focusSlotSpace(slot.id, i, buildingId);
         };
+        // Hovering a sub-slot's rack highlights *it* (Rack.tsx) rather than
+        // the whole slot pad — only meaningful while browsing this slot's
+        // sub-slots (i.e. exactly at "slot" level for this slot).
+        const handleSubSlotPointerOver = (e: ThreeEvent<PointerEvent>) => {
+          if (mode !== "view" || focus.level !== "slot" || focus.slotId !== slot.id) return;
+          e.stopPropagation();
+          setHover({ slotId: slot.id, subSlotIndex: i, x: e.nativeEvent.clientX, y: e.nativeEvent.clientY });
+        };
+        const handleSubSlotPointerOut = () => {
+          if (mode !== "view" || focus.level !== "slot" || focus.slotId !== slot.id) return;
+          setHover(null);
+        };
         return (
           <group
             key={subSlot.id}
             position={[0, SLOT_HEIGHT / 2, i * cellDepth]}
             onPointerDown={handleSubSlotPointerDown}
+            onPointerOver={handleSubSlotPointerOver}
+            onPointerMove={handleSubSlotPointerOver}
+            onPointerOut={handleSubSlotPointerOut}
           >
             <Rack
               slotId={slot.id}

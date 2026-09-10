@@ -184,10 +184,16 @@ point-in-polygon on its center, falling back to the sole building when there's o
 and the point tests as technically outside (so a slot right at a wall never ends up
 orphaned over rounding).
 
-Hovering a slot shows both an HTML info card (`src/components/HoverCard.tsx` — id,
-position, depth, occupancy summary; shown while browsing at plant/warehouse level, not
-once a specific slot is picked) *and* an in-scene highlight (the pad lightens, distinct
-from edit mode's orange selection). Clicking drills one level at a time — a building,
+Hovering shows both an HTML info card (`src/components/HoverCard.tsx` — id, position,
+depth, occupancy summary; shown while browsing at plant/warehouse level, not once a
+specific slot is picked) *and* an in-scene highlight, one level deeper each time: a slot
+pad lightens while browsing at plant/warehouse; at "slot" level, hovering one of its
+sub-slot racks lightens that rack's frame instead (`RACK_HOVER_COLOR` in
+`src/components/Rack.tsx`) rather than the pad; at "slot-space" level, hovering one of
+its pallet blocks lightens that block instead (`lighten()` blending toward white).
+`ViewFocusContext`'s `HoverPoint` carries optional `subSlotIndex`/`palletIndex` so each
+level's highlight is mutually exclusive with the shallower one (e.g. a slot pad only
+lights up when `subSlotIndex` is unset). Clicking drills one level at a time — a building,
 then a slot, then (only if it has stocked sub-slots — empty ones render no rack at all,
 so there's nothing to click) a sub-slot, then a pallet tier — smoothly zooming the
 camera each time. **Whenever a level is focused, every sibling at that level disappears
@@ -224,15 +230,24 @@ State lives in `src/state/ViewFocusContext.tsx` (deliberately separate from
 subSlotIndex?, palletIndex?}`. The camera swaps from `OrbitControls` (edit mode,
 unchanged) to drei's `CameraControls` (view mode only) in `WarehouseScene.tsx` — never
 both at once, and since they share the same underlying Three.js camera object,
-switching modes doesn't reset framing. Slot/sub-slot/pallet framing uses
-`CameraControls.fitToBox` against a world-space box computed *analytically* (not read
-off rendered meshes) by `src/lib/focusBounds.ts`, reusing the exact depth/footprint math
-`Slots.tsx` renders with — **except the "warehouse" level**, which frames manually via
-`setLookAt` using the same span-based offset formula as the initial plant view:
-`fitToBox` was found to dolly absurdly close for a building's box (wide/deep but only
-wall-height tall), apparently fitting the short axis rather than the constraining
-footprint dimension. `@react-three/drei`'s `CameraControls` (and its `camera-controls`
-peer dependency) was already installed — no new npm package was needed.
+switching modes doesn't reset framing.
+
+Every level frames via one unified `frameBox(box, angle)` helper in
+`src/lib/focusBounds.ts`, not `CameraControls.fitToBox` — `fitToBox` dollies along
+whatever direction the camera already happens to be facing, so repeated clicks never
+arrived from a consistent angle, and it was also found to dolly absurdly close on a
+building's box (wide/deep but only wall-height tall). `frameBox` instead offsets the
+camera from the box's own center by a *fixed ratio* of the box's own (padded) span —
+so the shot's angle is a pure function of the target box, never of wherever the camera
+currently is. Two angles: `"top"` (plant/warehouse — nearly straight down, matching a
+site plan; the offset's x-component is 0, not diagonal like `"iso"`, so the floor/walls
+read axis-aligned on screen rather than rotated into a diamond) and `"iso"`
+(slot/slot-space/pallet — a fixed above-and-to-the-side 3/4 view, reusing the same
+ratios as the scene's initial default camera). Box math itself is unchanged: computed
+*analytically* (not read off rendered meshes) so a box is available even for geometry
+that isn't yet mounted, reusing the exact depth/footprint math `Slots.tsx`/`Rack.tsx`
+render with. `@react-three/drei`'s `CameraControls` (and its `camera-controls` peer
+dependency) was already installed — no new npm package was needed.
 
 Implementation gotcha worth remembering: a slot's `<lineSegments>` edge outline (purely
 decorative) needs `raycast={() => null}` — Three.js's default line-raycast threshold is
@@ -480,6 +495,19 @@ eyeball results in 3D rather than deciding blind.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-10 — Per user feedback (in French, with reference screenshots): (1) replaced
+  `fitToBox`-based camera framing with the unified `frameBox()` helper (see §5.1 "View
+  mode..." camera paragraph) so plant/warehouse always frame from directly above and
+  slot/slot-space/pallet always frame from the same fixed 3/4 angle, regardless of the
+  camera's prior position; (2) extended the in-scene hover highlight one level deeper at
+  "slot" (sub-slot rack) and "slot-space" (pallet block) levels, not just the slot pad;
+  (3) reworked the example warehouse (`scripts/generate-example-warehouse.js`) to add a
+  second building ("Entrepot Annexe", C01-C03) purely so "plant" has multiple buildings
+  to show and "warehouse" has something to actually isolate, and varied pallet fill —
+  ~90% full (10/10 items) / ~10% partial (a deterministic, non-random cycle through
+  smaller counts via a running `palletSequence` counter) — so the block-mode fill-rate
+  color coding (red/orange, added earlier the same day) has real variety to display
+  instead of every pallet reading identically full.
 - 2026-09-10 — Pallets now only show real content (tires) at the exact "pallet" focus
   level; everywhere else — slot-space and shallower, which includes slot/warehouse/plant
   too — they render as a simplified chamfered block instead (`RoundedBox`), color-coded

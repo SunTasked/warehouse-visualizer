@@ -14,6 +14,10 @@ import { useEditor } from "./EditorContext";
 
 export interface HoverPoint {
   slotId: string;
+  /** Set when hovering a sub-slot's rack (at "slot" level) or a pallet tier (at "slot-space" level). */
+  subSlotIndex?: number;
+  /** Set only when hovering a pallet tier (at "slot-space" level). */
+  palletIndex?: number;
   /** Page (client) coordinates, for positioning the HTML hover card. */
   x: number;
   y: number;
@@ -75,6 +79,7 @@ export function ViewFocusProvider({ children }: { children: ReactNode }) {
   const focusSlotSpace = useCallback(
     (slotId: string, subSlotIndex: number, buildingId: string | undefined) => {
       setFocus({ level: "slot-space", slotId, subSlotIndex, buildingId });
+      setHover(null);
     },
     [],
   );
@@ -82,6 +87,7 @@ export function ViewFocusProvider({ children }: { children: ReactNode }) {
   const focusPallet = useCallback(
     (slotId: string, subSlotIndex: number, palletIndex: number, buildingId: string | undefined) => {
       setFocus({ level: "pallet", slotId, subSlotIndex, palletIndex, buildingId });
+      setHover(null);
     },
     [],
   );
