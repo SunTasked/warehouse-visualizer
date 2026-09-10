@@ -192,13 +192,26 @@ then a slot, then (only if it has stocked sub-slots — empty ones render no rac
 so there's nothing to click) a sub-slot, then a pallet tier — smoothly zooming the
 camera each time. **Whenever a level is focused, every sibling at that level disappears
 entirely** (not rendered — see `src/lib/visibility.ts`'s `isBuildingVisible`/
-`isSlotVisible`/`isSlotSpaceVisible`/`isPalletVisible`, each a plain boolean, no color
-blending), so a hidden thing is also automatically un-hoverable/unclickable. A rack's
-*frame* (posts/rails) is the shared shelf, not a sibling, so it stays fully shown even
-at pallet level — only *other pallets'* tire rows hide. Clicking a different slot (or
+`isSlotVisible`/`isSlotSpaceVisible`, each a plain boolean, no color blending), so a
+hidden thing is also automatically un-hoverable/unclickable. Pallets are the one
+exception: a rack's *frame* (posts/rails) is the shared shelf, not a sibling, so it
+always stays shown, and *other pallets in the same sub-slot don't hide either* — they
+just render as a simplified block instead of their real content (see below) — only the
+one pallet actually drilled into shows real content. Clicking a different slot (or
 building) at any point re-targets directly to it; clicking empty floor or the
 currently-focused level's own wall backs out one level; Escape resets straight to plant
 from anywhere.
+
+**Pallet content vs. block mode**: a pallet only renders its actual content (a row of
+tires) once it's specifically the deepest focus target (`src/lib/visibility.ts`'s
+`isPalletDetailed()`) — everywhere else (slot-space level and shallower, which includes
+slot/warehouse/plant too, not just slot-space) it renders as a simplified chamfered
+block (`RoundedBox` from drei) instead, color-coded by fill rate against the schema's
+10-item-per-pallet cap: red if full (10/10 items), orange otherwise (`PalletBlock` in
+`src/components/Rack.tsx`). This keeps the rest of a sub-slot's (or the whole plant's)
+stock legible at a glance without the render cost of full tire detail everywhere at
+once, and edit mode always shows real content regardless of focus (so it's still
+authoritative for inspecting/changing actual counts).
 
 A **left-side breadcrumb widget** (`src/components/FocusBreadcrumb.tsx`) always shows
 the current path (e.g. "Warehouse: Batiment 13A / Slot: A02") — every crumb except the
@@ -467,6 +480,15 @@ eyeball results in 3D rather than deciding blind.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-10 — Pallets now only show real content (tires) at the exact "pallet" focus
+  level; everywhere else — slot-space and shallower, which includes slot/warehouse/plant
+  too — they render as a simplified chamfered block instead (`RoundedBox`), color-coded
+  red (full, 10/10 items per the schema cap) or orange (partial). Per user feedback (in
+  French): reduces render clutter/cost at higher zoom levels and gives an at-a-glance
+  fill-rate read. Replaced `isPalletVisible` (show/hide) with `isPalletDetailed`
+  (detail-vs-block) in `src/lib/visibility.ts` — pallets are now the one part of the
+  hierarchy where siblings never hide, only simplify. Edit mode is unaffected (always
+  shows real content). See §5.1 "View mode..." → "Pallet content vs. block mode".
 - 2026-09-10 — Redesigned the view-mode focus system per user feedback (in French):
   five named levels (**plant → warehouse → slot → slot-space → pallet**, "warehouse"
   new — one closed wall loop, derived from `walls`, not a schema field), a left-side

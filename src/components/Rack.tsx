@@ -1,10 +1,11 @@
 import type { ThreeEvent } from "@react-three/fiber";
+import { RoundedBox } from "@react-three/drei";
 import * as THREE from "three";
 import { useMemo } from "react";
 import type { Pallet } from "../types/warehouse";
 import { useEditor } from "../state/EditorContext";
 import { useViewFocus } from "../state/ViewFocusContext";
-import { isPalletVisible } from "../lib/visibility";
+import { isPalletDetailed } from "../lib/visibility";
 
 // Visual constants for the pallet-rack + tire-stack representation (schematic,
 // not to real-world tire scale — see specs.md §5.1 "Storage subdivision").
@@ -18,6 +19,15 @@ const RAIL_THICKNESS = 0.05;
 const RACK_COLOR = "#2a52c9";
 const TIRE_COLOR = "#171717";
 const TIRE_ROUGHNESS = 0.85;
+// "Block" mode (everywhere except the one pallet actually drilled into):
+// a chamfered crate standing in for the real content, colored by fill rate.
+// Schema caps items at 10 (warehouse.content.schema.json) — that's "full".
+const PALLET_MAX_ITEMS = 10;
+const PALLET_FULL_COLOR = "#dc2626";
+const PALLET_PARTIAL_COLOR = "#f59e0b";
+const PALLET_BLOCK_HEIGHT_FACTOR = 0.7;
+const PALLET_BLOCK_INSET = 0.92;
+const PALLET_BLOCK_BEVEL_FACTOR = 0.12;
 
 // A closed rectangle of rails at one level boundary, connecting all four
 // corner posts — reads as one physical, operable shelf rather than two
@@ -91,18 +101,39 @@ function TireRow({ y, halfWidth, pallet }: { y: number; halfWidth: number; palle
   );
 }
 
+// Simplified stand-in for a pallet's content, shown everywhere except the
+// one pallet actually drilled into (see isPalletDetailed) — a chamfered
+// crate colored by fill rate rather than individual tires, so the rest of a
+// sub-slot's stock stays legible without the render cost/clutter of full
+// detail everywhere at once.
+function PalletBlock({ y, halfWidth, halfDepth, pallet }: { y: number; halfWidth: number; halfDepth: number; pallet: Pallet }) {
+  const width = halfWidth * 2 * PALLET_BLOCK_INSET;
+  const depth = halfDepth * 2 * PALLET_BLOCK_INSET;
+  const height = LEVEL_HEIGHT * PALLET_BLOCK_HEIGHT_FACTOR;
+  const radius = Math.min(width, depth, height) * PALLET_BLOCK_BEVEL_FACTOR;
+  const isFull = pallet.items.length >= PALLET_MAX_ITEMS;
+  const color = isFull ? PALLET_FULL_COLOR : PALLET_PARTIAL_COLOR;
+  return (
+    <RoundedBox args={[width, height, depth]} radius={radius} smoothness={2} position={[0, y + height / 2 + 0.02, 0]}>
+      <meshStandardMaterial color={color} />
+    </RoundedBox>
+  );
+}
+
 /**
  * Renders one sub-slot's storage content: a rack frame sized to the cell
- * footprint, with `pallets.length` tiers stacked vertically (bottom-up), each
- * tier showing its items as a row of tires laid side by side along the
- * cell's width. Cell-local coordinates — position the whole group at the
- * sub-slot's center in the parent (see Slots.tsx). The frame (posts/rails)
- * is the shared shelf, not a sibling in the focus hierarchy, so it always
- * renders once this sub-slot itself is visible (checked by the caller); only
- * individual pallet tiers hide when a *different* pallet is focused.
- * `slotId`/`subSlotIndex`/`buildingId` identify this rack for the view-mode
- * focus drill-down (click a tier to select that pallet, only reachable once
- * this sub-slot itself is focused).
+ * footprint, with `pallets.length` tiers stacked vertically (bottom-up).
+ * Cell-local coordinates — position the whole group at the sub-slot's
+ * center in the parent (see Slots.tsx). The frame (posts/rails) is the
+ * shared shelf, not a sibling in the focus hierarchy, so it always renders
+ * once this sub-slot itself is visible (checked by the caller). Each tier
+ * shows its real content (a row of tires) only once *that exact pallet* is
+ * the deepest focus target (view mode) — every other tier renders as a
+ * simplified fill-rate-colored block instead of being hidden, so the rest
+ * of the sub-slot's stock stays visible for context; edit mode always shows
+ * real content. `slotId`/`subSlotIndex`/`buildingId` identify this rack for
+ * the view-mode focus drill-down (click a tier to select that pallet, only
+ * reachable once this sub-slot itself is focused).
  */
 export function Rack({
   slotId,
@@ -158,7 +189,11 @@ export function Rack({
         />
       ))}
       {pallets.map((pallet, level) => {
-        if (mode === "view" && !isPalletVisible(focus, slotId, subSlotIndex, level)) return null;
+        // Edit mode always shows real content; in view mode, only the one
+        // pallet actually drilled into does — every other pallet in a
+        // visible sub-slot renders as a fill-rate-colored block instead of
+        // being hidden, so the rest of the stock stays visible for context.
+        const detailed = mode !== "view" || isPalletDetailed(focus, slotId, subSlotIndex, level);
         const handlePalletPointerDown = (e: ThreeEvent<PointerEvent>) => {
           // Reachable once this pallet's own sub-slot is focused (at any
           // drill-down level) — mirrors the slot -> sub-slot -> pallet order.
@@ -169,11 +204,15 @@ export function Rack({
         return (
           <group key={pallet.id} onPointerDown={handlePalletPointerDown}>
             {/* Invisible hit target spanning the whole tier — clicking a
-                sparse tire row shouldn't require pixel-perfect aim. */}
+                sparse tire row (or the block) shouldn't require pixel-perfect aim. */}
             <mesh geometry={hitBoxGeometry} position={[0, level * LEVEL_HEIGHT + LEVEL_HEIGHT / 2, 0]}>
               <meshBasicMaterial transparent opacity={0} depthWrite={false} />
             </mesh>
-            <TireRow y={level * LEVEL_HEIGHT} halfWidth={halfWidth} pallet={pallet} />
+            {detailed ? (
+              <TireRow y={level * LEVEL_HEIGHT} halfWidth={halfWidth} pallet={pallet} />
+            ) : (
+              <PalletBlock y={level * LEVEL_HEIGHT} halfWidth={halfWidth} halfDepth={halfDepth} pallet={pallet} />
+            )}
           </group>
         );
       })}

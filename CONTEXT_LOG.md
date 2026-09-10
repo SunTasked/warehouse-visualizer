@@ -6,6 +6,31 @@ top. This is a log of what happened each session — the current-state snapshot 
 
 ## 2026-09-10
 
+- User set a standing preference: always commit and push once a unit of work is done in
+  this repo, without asking first — saved to persistent memory (feedback type) so future
+  sessions pick it up automatically. Applied starting this entry's changes.
+- Pallets now render as a simplified color-coded block everywhere except the exact
+  "pallet" focus level (user request, in French): `RoundedBox` (drei) chamfered crate,
+  red if full (10/10 items, the schema's per-pallet cap) else orange. Turns out to
+  naturally extend the win beyond what was literally asked ("slot-space et au-delà") —
+  since block-vs-detail is keyed off "is this the exact focused pallet", *every*
+  shallower level (slot, warehouse, plant too) also gets the lighter block rendering,
+  confirmed via screenshot at plant level showing the whole site in blocks. Also
+  confirmed coexistence at pallet level: the focused pallet shows real tires, its
+  sibling pallet in the same sub-slot shows as a block (not hidden) — a deliberate
+  change from the pure hide-siblings rule used everywhere else in the hierarchy, since
+  hiding pallet siblings would lose useful at-a-glance context.
+- Changed: `src/lib/visibility.ts` (`isPalletVisible` → `isPalletDetailed`, a real
+  semantic shift not just a rename — see specs.md), `src/components/Rack.tsx` (new
+  `PalletBlock`, wired in place of the old show/hide branch).
+- Verified via Playwright: bumped a pallet to 10 items via the edit-mode Inspector,
+  confirmed it renders red in view mode while everything else (6 items in the example
+  data) renders orange; confirmed the focused-pallet-shows-tires /
+  sibling-pallet-shows-block coexistence at pallet level for a two-tier sub-slot.
+  `tsc`/build clean, no console errors.
+- specs.md updated (§5.1 + new decision log entry).
+- Committed and pushed per the new standing instruction (see above) — no separate
+  confirmation asked this time.
 - Redesigned the view-mode focus system (user request, in French): 5 named levels —
   **plant → warehouse → slot → slot-space → pallet** — "warehouse" is new (one closed
   wall loop, derived from `walls` via point-in-polygon, no schema change); focused-level

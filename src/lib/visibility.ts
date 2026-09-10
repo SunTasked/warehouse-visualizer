@@ -5,8 +5,9 @@ import type { Focus } from "../state/ViewFocusContext";
  * every *sibling* at that level is hidden entirely (not rendered) — only
  * the selected path (its ancestors and descendants) stays visible. Replaces
  * the previous dim/gray-blend approach: "hidden" now really means hidden,
- * so a hidden slot/building/pallet also stops being hoverable or clickable
- * for free, since it's simply not in the scene graph.
+ * so a hidden building/slot/sub-slot also stops being hoverable or
+ * clickable for free, since it's simply not in the scene graph. Pallets are
+ * the one exception to "sibling hidden" — see isPalletDetailed() below.
  */
 
 export function isBuildingVisible(focus: Focus, buildingId: string): boolean {
@@ -27,16 +28,25 @@ export function isSlotSpaceVisible(focus: Focus, slotId: string, subSlotIndex: n
   return focus.subSlotIndex === subSlotIndex;
 }
 
-export function isPalletVisible(
+/**
+ * Whether a pallet should render its actual content (a tire row) rather than
+ * a simplified fill-rate-colored block — true only for the one pallet
+ * that's actually the deepest focus target. Every *other* pallet within a
+ * visible sub-slot still renders (as a block, see Rack.tsx) — unlike
+ * buildings/slots/sub-slots, siblings here aren't hidden, just simplified,
+ * so the rest of the sub-slot's stock stays visible for context while
+ * inspecting one pallet closely.
+ */
+export function isPalletDetailed(
   focus: Focus,
   slotId: string,
   subSlotIndex: number,
   palletIndex: number,
 ): boolean {
-  if (focus.level === "plant" || focus.level === "warehouse") return true;
-  if (focus.slotId !== slotId) return false;
-  if (focus.level === "slot") return true;
-  if (focus.subSlotIndex !== subSlotIndex) return false;
-  if (focus.level === "slot-space") return true;
-  return focus.palletIndex === palletIndex;
+  return (
+    focus.level === "pallet" &&
+    focus.slotId === slotId &&
+    focus.subSlotIndex === subSlotIndex &&
+    focus.palletIndex === palletIndex
+  );
 }
