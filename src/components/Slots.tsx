@@ -6,12 +6,16 @@ import type { Slot, SlotSize } from "../types/warehouse";
 import { useEditor } from "../state/EditorContext";
 import { useViewFocus } from "../state/ViewFocusContext";
 import { fromSceneXZ, slotFootprint } from "../lib/geometry";
-import { slotEmphasis, emphasisColor } from "../lib/emphasis";
+import { isSlotVisible, isSlotSpaceVisible } from "../lib/visibility";
+import { findBuildingForSlot } from "../lib/buildings";
 import { Rack } from "./Rack";
 
 export const SLOT_HEIGHT = 0.06;
 const SLOT_COLOR = "#4d7cfe";
 const SLOT_SELECTED_COLOR = "#ff8c42";
+// A lighter blend of SLOT_COLOR — "surbrillance" when the pointer hovers a
+// slot in view mode, distinct from edit-mode's orange selection.
+const SLOT_HOVER_COLOR = "#a9c2ff";
 // Bold/dark: the outer edge of a whole slot (drawn once per slot, around its
 // full — possibly depth-extended — footprint). Pale/light: the boundary
 // between two sub-slots *within* the same slot. The contrast is what reads as
@@ -22,7 +26,7 @@ const DIVIDER_COLOR = "#b7c6ef";
 // at its fixed entry edge — where an operator accesses the slot to load/
 // unload. Green reads as "access point" and is distinct from every other
 // color already in use (slot fill, black edge, pale divider, orange
-// selection, blue-gray dimming).
+// selection, hover highlight).
 const ENTRY_COLOR = "#22c55e";
 const ENTRY_MARKER_DEPTH = 0.25;
 // Raised like a real painted threshold bar (taller than the slot pad itself)
@@ -47,7 +51,7 @@ function DepthDivider({ z, width }: { z: number; width: number }) {
 // A painted strip on the pad surface at the slot's fixed entry edge —
 // materializes where an operator accesses the slot, right on the slot
 // itself (as opposed to the id label, which sits just outside it).
-function EntryMarker({ cellDepth, width, color }: { cellDepth: number; width: number; color: string }) {
+function EntryMarker({ cellDepth, width }: { cellDepth: number; width: number }) {
   const geometry = useMemo(
     () => new THREE.BoxGeometry(width * 0.96, ENTRY_MARKER_HEIGHT, ENTRY_MARKER_DEPTH),
     [width],
@@ -55,7 +59,7 @@ function EntryMarker({ cellDepth, width, color }: { cellDepth: number; width: nu
   const z = -cellDepth / 2 + ENTRY_MARKER_DEPTH / 2;
   return (
     <mesh geometry={geometry} position={[0, SLOT_HEIGHT / 2 + ENTRY_MARKER_HEIGHT / 2, z]}>
-      <meshStandardMaterial color={color} />
+      <meshStandardMaterial color={ENTRY_COLOR} />
     </mesh>
   );
 }
@@ -71,11 +75,8 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
     dragRef,
     orbitRef,
   } = useEditor();
-  const { focus, setHover, focusSlot, focusSubSlot } = useViewFocus();
-  const selected = selectedSlotIds.has(slot.id);
-  const emphasis = slotEmphasis(focus, slot.id);
-  const padColor = emphasisColor(selected ? SLOT_SELECTED_COLOR : SLOT_COLOR, emphasis);
-  const rotationRad = THREE.MathUtils.degToRad(slot.rotationDeg ?? 0);
+  const { focus, hover, setHover, focusSlot, focusSlotSpace } = useViewFocus();
+  const buildingId = useMemo(() => findBuildingForSlot(slot, warehouse.walls), [slot, warehouse.walls]);
   // Each sub-slot is a full slotDefaults footprint (not a fraction of one) —
   // a depth-3 slot occupies 3x the standard 4x2 space, not the same 4x2
   // split three ways. Sub-slot 0 always sits exactly where a depth-1 slot's
@@ -89,6 +90,15 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
     [defaults.width, totalDepth],
   );
   const edges = useMemo(() => new THREE.EdgesGeometry(geometry), [geometry]);
+
+  // All hooks above run unconditionally every render (rules of hooks) — the
+  // visibility check itself is a plain early return, below them.
+  if (mode === "view" && !isSlotVisible(focus, slot.id, buildingId)) return null;
+
+  const selected = selectedSlotIds.has(slot.id);
+  const hovered = mode === "view" && hover?.slotId === slot.id;
+  const padColor = hovered ? SLOT_HOVER_COLOR : selected ? SLOT_SELECTED_COLOR : SLOT_COLOR;
+  const rotationRad = THREE.MathUtils.degToRad(slot.rotationDeg ?? 0);
 
   const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {
     if (mode !== "view") return;
@@ -109,7 +119,7 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
     if (mode === "view") {
       if (e.nativeEvent.button !== 0) return;
       e.stopPropagation();
-      focusSlot(slot.id);
+      focusSlot(slot.id, buildingId);
       return;
     }
     if (mode !== "edit" || addSlotMode) return; // let the event fall through to the drag plane
@@ -152,11 +162,16 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
         <mesh geometry={geometry}>
           <meshStandardMaterial color={padColor} />
         </mesh>
-        <lineSegments geometry={edges}>
+        {/* Purely decorative — Three.js's default line-raycast threshold (1
+            world unit) makes an un-opted-out LineSegments a near-universal
+            click-blocker once zoomed in close (a whole focused slot may only
+            be a few meters across), stealing clicks meant for the rack
+            behind/above it. raycast={() => null} opts it out entirely. */}
+        <lineSegments geometry={edges} raycast={() => null}>
           <lineBasicMaterial color={SLOT_EDGE_COLOR} />
         </lineSegments>
       </group>
-      <EntryMarker cellDepth={cellDepth} width={defaults.width} color={emphasisColor(ENTRY_COLOR, emphasis)} />
+      <EntryMarker cellDepth={cellDepth} width={defaults.width} />
       <Text
         position={[0, SLOT_HEIGHT / 2 + 0.05, -cellDepth / 2 - LABEL_OFFSET]}
         rotation={[-Math.PI / 2, 0, 0]}
@@ -173,13 +188,14 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
         ))}
       {slot.subSlots?.map((subSlot, i) => {
         if (subSlot.pallets.length === 0) return null;
+        if (mode === "view" && !isSlotSpaceVisible(focus, slot.id, i)) return null;
         const handleSubSlotPointerDown = (e: ThreeEvent<PointerEvent>) => {
           // Reachable once this slot is focused at any drill-down level —
           // mirrors "select a slot space only if pallets are on it" (empty
           // sub-slots render no Rack at all, so there's nothing to click).
           if (mode !== "view" || focus.slotId !== slot.id) return;
           e.stopPropagation();
-          focusSubSlot(slot.id, i);
+          focusSlotSpace(slot.id, i, buildingId);
         };
         return (
           <group
@@ -190,6 +206,7 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
             <Rack
               slotId={slot.id}
               subSlotIndex={i}
+              buildingId={buildingId}
               cellWidth={defaults.width}
               cellDepth={cellDepth}
               pallets={subSlot.pallets}

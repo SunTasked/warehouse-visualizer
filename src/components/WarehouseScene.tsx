@@ -2,10 +2,10 @@ import { Canvas } from "@react-three/fiber";
 import { Grid, OrbitControls, CameraControls } from "@react-three/drei";
 import { useEffect, useMemo, useState } from "react";
 import { boundsCenter, boundsSpan, computeBounds, toSceneXZ } from "../lib/geometry";
-import { slotWorldBox, subSlotWorldBox, palletWorldBox } from "../lib/focusBounds";
+import { slotWorldBox, subSlotWorldBox, palletWorldBox, buildingWorldBox } from "../lib/focusBounds";
 import { useEditor } from "../state/EditorContext";
 import { useViewFocus } from "../state/ViewFocusContext";
-import { Walls } from "./Walls";
+import { Walls, WALL_HEIGHT } from "./Walls";
 import { Slots } from "./Slots";
 import { DragPlane } from "./DragPlane";
 
@@ -28,10 +28,35 @@ function FocusCameraDriver({
     const controls = cameraControlsRef.current;
     if (!controls) return;
 
-    if (focus.level === "overview") {
+    if (focus.level === "plant") {
       const [px, py, pz] = initialView.cameraPosition;
       const [tx, ty, tz] = initialView.target;
       void controls.setLookAt(px, py, pz, tx, ty, tz, true);
+      return;
+    }
+
+    if (focus.level === "warehouse") {
+      const loop = warehouse.walls.find((w) => w.id === focus.buildingId);
+      if (!loop) return;
+      // A building's box is wide/deep but short (just wall height) — fed
+      // straight into fitToBox, camera-controls dollies in far too close
+      // (it seems to fit the short Y extent rather than the constraining
+      // footprint dimension). Framed manually instead, with the same
+      // span-based offset formula initialView already uses below, which is
+      // known-good for exactly this "look down at a wide flat footprint" shot.
+      const box = buildingWorldBox(loop, WALL_HEIGHT);
+      const cx = (box.min.x + box.max.x) / 2;
+      const cz = (box.min.z + box.max.z) / 2;
+      const buildingSpan = Math.max(box.max.x - box.min.x, box.max.z - box.min.z) || 20;
+      void controls.setLookAt(
+        cx + buildingSpan * 0.6,
+        buildingSpan * 0.9,
+        cz + buildingSpan * 0.8,
+        cx,
+        0,
+        cz,
+        true,
+      );
       return;
     }
 
@@ -41,7 +66,7 @@ function FocusCameraDriver({
     const box =
       focus.level === "slot"
         ? slotWorldBox(slot, warehouse.slotDefaults)
-        : focus.level === "subslot"
+        : focus.level === "slot-space"
           ? subSlotWorldBox(slot, warehouse.slotDefaults, focus.subSlotIndex!)
           : palletWorldBox(slot, warehouse.slotDefaults, focus.subSlotIndex!, focus.palletIndex!);
     void controls.fitToBox(box, true, FIT_PADDING);

@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import type { Pallet } from "../types/warehouse";
 import { useEditor } from "../state/EditorContext";
 import { useViewFocus } from "../state/ViewFocusContext";
-import { subSlotEmphasis, palletEmphasis, emphasisColor } from "../lib/emphasis";
+import { isPalletVisible } from "../lib/visibility";
 
 // Visual constants for the pallet-rack + tire-stack representation (schematic,
 // not to real-world tire scale — see specs.md §5.1 "Storage subdivision").
@@ -62,17 +62,7 @@ function RailFrame({
 // Tires resize to always span the full pallet width, from one edge to the
 // other — a partial pallet has fewer, larger-spaced tires rather than a
 // half-empty row.
-function TireRow({
-  y,
-  halfWidth,
-  pallet,
-  color,
-}: {
-  y: number;
-  halfWidth: number;
-  pallet: Pallet;
-  color: string;
-}) {
+function TireRow({ y, halfWidth, pallet }: { y: number; halfWidth: number; pallet: Pallet }) {
   const count = pallet.items.length;
   const spacing = (halfWidth * 2) / Math.max(count, 1);
   const tireRadius = Math.min(spacing, LEVEL_HEIGHT) * 0.42;
@@ -93,7 +83,7 @@ function TireRow({
             position={[x, y + tireRadius + 0.03, 0]}
             rotation={[0, Math.PI / 2, 0]}
           >
-            <meshStandardMaterial color={color} roughness={TIRE_ROUGHNESS} />
+            <meshStandardMaterial color={TIRE_COLOR} roughness={TIRE_ROUGHNESS} />
           </mesh>
         );
       })}
@@ -106,19 +96,25 @@ function TireRow({
  * footprint, with `pallets.length` tiers stacked vertically (bottom-up), each
  * tier showing its items as a row of tires laid side by side along the
  * cell's width. Cell-local coordinates — position the whole group at the
- * sub-slot's center in the parent (see Slots.tsx). `slotId`/`subSlotIndex`
- * identify this rack for the view-mode focus drill-down (dimming + click to
- * select a pallet tier, only reachable once this sub-slot itself is focused).
+ * sub-slot's center in the parent (see Slots.tsx). The frame (posts/rails)
+ * is the shared shelf, not a sibling in the focus hierarchy, so it always
+ * renders once this sub-slot itself is visible (checked by the caller); only
+ * individual pallet tiers hide when a *different* pallet is focused.
+ * `slotId`/`subSlotIndex`/`buildingId` identify this rack for the view-mode
+ * focus drill-down (click a tier to select that pallet, only reachable once
+ * this sub-slot itself is focused).
  */
 export function Rack({
   slotId,
   subSlotIndex,
+  buildingId,
   cellWidth,
   cellDepth,
   pallets,
 }: {
   slotId: string;
   subSlotIndex: number;
+  buildingId: string | undefined;
   cellWidth: number;
   cellDepth: number;
   pallets: Pallet[];
@@ -145,13 +141,11 @@ export function Rack({
 
   if (pallets.length === 0) return null;
 
-  const frameColor = emphasisColor(RACK_COLOR, subSlotEmphasis(focus, slotId, subSlotIndex));
-
   return (
     <group>
       {corners.map(([cx, cz]) => (
         <mesh key={`${cx}-${cz}`} geometry={postGeometry} position={[cx, totalHeight / 2, cz]}>
-          <meshStandardMaterial color={frameColor} />
+          <meshStandardMaterial color={RACK_COLOR} />
         </mesh>
       ))}
       {Array.from({ length: pallets.length + 1 }).map((_, level) => (
@@ -160,17 +154,17 @@ export function Rack({
           y={level * LEVEL_HEIGHT}
           halfWidth={halfWidth}
           halfDepth={halfDepth}
-          color={frameColor}
+          color={RACK_COLOR}
         />
       ))}
       {pallets.map((pallet, level) => {
-        const tireColor = emphasisColor(TIRE_COLOR, palletEmphasis(focus, slotId, subSlotIndex, level));
+        if (mode === "view" && !isPalletVisible(focus, slotId, subSlotIndex, level)) return null;
         const handlePalletPointerDown = (e: ThreeEvent<PointerEvent>) => {
           // Reachable once this pallet's own sub-slot is focused (at any
           // drill-down level) — mirrors the slot -> sub-slot -> pallet order.
           if (mode !== "view" || focus.slotId !== slotId || focus.subSlotIndex !== subSlotIndex) return;
           e.stopPropagation();
-          focusPallet(slotId, subSlotIndex, level);
+          focusPallet(slotId, subSlotIndex, level, buildingId);
         };
         return (
           <group key={pallet.id} onPointerDown={handlePalletPointerDown}>
@@ -179,7 +173,7 @@ export function Rack({
             <mesh geometry={hitBoxGeometry} position={[0, level * LEVEL_HEIGHT + LEVEL_HEIGHT / 2, 0]}>
               <meshBasicMaterial transparent opacity={0} depthWrite={false} />
             </mesh>
-            <TireRow y={level * LEVEL_HEIGHT} halfWidth={halfWidth} pallet={pallet} color={tireColor} />
+            <TireRow y={level * LEVEL_HEIGHT} halfWidth={halfWidth} pallet={pallet} />
           </group>
         );
       })}

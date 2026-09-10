@@ -341,3 +341,52 @@
   color: #5a6270;
   font-style: italic;
 }
+
+.focus-breadcrumb {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.5rem;
+  background: #ffffff;
+  border: 1px solid #d7dbe3;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.12);
+  font-size: 0.8rem;
+}
+
+.focus-breadcrumb__crumb {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.focus-breadcrumb__crumb:hover {
+  background: #eef1f6;
+}
+
+.focus-breadcrumb__crumb--current {
+  cursor: default;
+  background: #eaf0ff;
+}
+
+.focus-breadcrumb__crumb--current:hover {
+  background: #eaf0ff;
+}
+
+.focus-breadcrumb__level {
+  color: #5a6270;
+  font-size: 0.72rem;
+  min-width: 5.2rem;
+}
+
+.focus-breadcrumb__value {
+  font-weight: 600;
+  color: #1a2233;
+}

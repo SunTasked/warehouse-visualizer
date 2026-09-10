@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import type { Slot, SlotSize } from "../types/warehouse";
-import { slotFootprint } from "./geometry";
+import type { Slot, SlotSize, WallLoop } from "../types/warehouse";
+import { slotFootprint, toSceneXZ } from "./geometry";
 import { SLOT_HEIGHT } from "../components/Slots";
 import { LEVEL_HEIGHT, RACK_MARGIN_FACTOR } from "../components/Rack";
 
@@ -66,6 +66,17 @@ export function subSlotWorldBox(slot: Slot, defaults: SlotSize, subSlotIndex: nu
     [0, pallets * LEVEL_HEIGHT + SLOT_HEIGHT],
     [centerZ - halfDepth, centerZ + halfDepth],
   );
+}
+
+/** One building (a closed wall loop), from floor to wall height. */
+export function buildingWorldBox(loop: WallLoop, wallHeight: number): THREE.Box3 {
+  const box = new THREE.Box3();
+  for (const p of loop.points) {
+    const [sx, sz] = toSceneXZ(p.x, p.y);
+    box.expandByPoint(new THREE.Vector3(sx, 0, sz));
+    box.expandByPoint(new THREE.Vector3(sx, wallHeight, sz));
+  }
+  return box;
 }
 
 /** One pallet's tier within its sub-slot's rack. */

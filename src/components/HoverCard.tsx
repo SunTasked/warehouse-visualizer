@@ -1,11 +1,12 @@
 import { useEditor } from "../state/EditorContext";
 import { useViewFocus } from "../state/ViewFocusContext";
 
-/** Small HTML tooltip shown in view mode while hovering a slot (no card mid-drill-down). */
+/** Small HTML tooltip shown in view mode while hovering a slot (browsing at
+ * plant/warehouse level — no card once a specific slot is already focused). */
 export function HoverCard() {
   const { warehouse } = useEditor();
   const { hover, focus } = useViewFocus();
-  if (!hover || focus.level !== "overview") return null;
+  if (!hover || (focus.level !== "plant" && focus.level !== "warehouse")) return null;
 
   const slot = warehouse.slots.find((s) => s.id === hover.slotId);
   if (!slot) return null;

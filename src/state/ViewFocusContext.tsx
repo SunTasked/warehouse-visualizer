@@ -19,25 +19,34 @@ export interface HoverPoint {
   y: number;
 }
 
-export type FocusLevel = "overview" | "slot" | "subslot" | "pallet";
+/** plant (whole map) -> warehouse (one building) -> slot -> slot-space -> pallet. */
+export type FocusLevel = "plant" | "warehouse" | "slot" | "slot-space" | "pallet";
 
 export interface Focus {
   level: FocusLevel;
+  buildingId?: string;
   slotId?: string;
   subSlotIndex?: number;
   palletIndex?: number;
 }
 
-const OVERVIEW: Focus = { level: "overview" };
+const PLANT: Focus = { level: "plant" };
 
 interface ViewFocusContextValue {
   focus: Focus;
-  focusSlot: (slotId: string) => void;
-  focusSubSlot: (slotId: string, subSlotIndex: number) => void;
-  focusPallet: (slotId: string, subSlotIndex: number, palletIndex: number) => void;
-  /** Rolls back one drill-down level (pallet -> subslot -> slot -> overview). */
+  focusWarehouse: (buildingId: string) => void;
+  /** buildingId is the slot's resolved building (see src/lib/buildings.ts), if known. */
+  focusSlot: (slotId: string, buildingId: string | undefined) => void;
+  focusSlotSpace: (slotId: string, subSlotIndex: number, buildingId: string | undefined) => void;
+  focusPallet: (
+    slotId: string,
+    subSlotIndex: number,
+    palletIndex: number,
+    buildingId: string | undefined,
+  ) => void;
+  /** Rolls back one drill-down level (pallet -> slot-space -> slot -> warehouse -> plant). */
   back: () => void;
-  /** Jumps straight back to overview from any level. */
+  /** Jumps straight back to plant (the whole map) from any level. */
   reset: () => void;
   /** The slot currently under the pointer in view mode, and where to anchor its hover card. */
   hover: HoverPoint | null;
@@ -49,38 +58,59 @@ const ViewFocusContext = createContext<ViewFocusContextValue | null>(null);
 
 export function ViewFocusProvider({ children }: { children: ReactNode }) {
   const { mode } = useEditor();
-  const [focus, setFocus] = useState<Focus>(OVERVIEW);
+  const [focus, setFocus] = useState<Focus>(PLANT);
   const [hover, setHover] = useState<HoverPoint | null>(null);
   const cameraControlsRef = useRef<CameraControlsImpl | null>(null);
 
-  const focusSlot = useCallback((slotId: string) => {
-    setFocus({ level: "slot", slotId });
+  const focusWarehouse = useCallback((buildingId: string) => {
+    setFocus({ level: "warehouse", buildingId });
     setHover(null);
   }, []);
 
-  const focusSubSlot = useCallback((slotId: string, subSlotIndex: number) => {
-    setFocus({ level: "subslot", slotId, subSlotIndex });
+  const focusSlot = useCallback((slotId: string, buildingId: string | undefined) => {
+    setFocus({ level: "slot", slotId, buildingId });
+    setHover(null);
   }, []);
 
-  const focusPallet = useCallback((slotId: string, subSlotIndex: number, palletIndex: number) => {
-    setFocus({ level: "pallet", slotId, subSlotIndex, palletIndex });
-  }, []);
+  const focusSlotSpace = useCallback(
+    (slotId: string, subSlotIndex: number, buildingId: string | undefined) => {
+      setFocus({ level: "slot-space", slotId, subSlotIndex, buildingId });
+    },
+    [],
+  );
+
+  const focusPallet = useCallback(
+    (slotId: string, subSlotIndex: number, palletIndex: number, buildingId: string | undefined) => {
+      setFocus({ level: "pallet", slotId, subSlotIndex, palletIndex, buildingId });
+    },
+    [],
+  );
 
   const back = useCallback(() => {
     setFocus((current) => {
-      if (current.level === "pallet") return { level: "subslot", slotId: current.slotId, subSlotIndex: current.subSlotIndex };
-      if (current.level === "subslot") return { level: "slot", slotId: current.slotId };
-      if (current.level === "slot") return OVERVIEW;
+      if (current.level === "pallet") {
+        return {
+          level: "slot-space",
+          slotId: current.slotId,
+          subSlotIndex: current.subSlotIndex,
+          buildingId: current.buildingId,
+        };
+      }
+      if (current.level === "slot-space") {
+        return { level: "slot", slotId: current.slotId, buildingId: current.buildingId };
+      }
+      if (current.level === "slot") return { level: "warehouse", buildingId: current.buildingId };
+      if (current.level === "warehouse") return PLANT;
       return current;
     });
   }, []);
 
-  const reset = useCallback(() => setFocus(OVERVIEW), []);
+  const reset = useCallback(() => setFocus(PLANT), []);
 
   // Leaving view mode (toggling to edit) drops any drill-down state so it
   // doesn't linger stale for the next time view mode is entered.
   useEffect(() => {
-    if (mode !== "view") setFocus(OVERVIEW);
+    if (mode !== "view") setFocus(PLANT);
   }, [mode]);
 
   useEffect(() => {
@@ -95,8 +125,9 @@ export function ViewFocusProvider({ children }: { children: ReactNode }) {
   const value = useMemo<ViewFocusContextValue>(
     () => ({
       focus,
+      focusWarehouse,
       focusSlot,
-      focusSubSlot,
+      focusSlotSpace,
       focusPallet,
       back,
       reset,
@@ -104,7 +135,7 @@ export function ViewFocusProvider({ children }: { children: ReactNode }) {
       setHover,
       cameraControlsRef,
     }),
-    [focus, focusSlot, focusSubSlot, focusPallet, back, reset, hover],
+    [focus, focusWarehouse, focusSlot, focusSlotSpace, focusPallet, back, reset, hover],
   );
 
   return <ViewFocusContext.Provider value={value}>{children}</ViewFocusContext.Provider>;

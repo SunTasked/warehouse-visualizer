@@ -6,6 +6,43 @@ top. This is a log of what happened each session — the current-state snapshot 
 
 ## 2026-09-10
 
+- Redesigned the view-mode focus system (user request, in French): 5 named levels —
+  **plant → warehouse → slot → slot-space → pallet** — "warehouse" is new (one closed
+  wall loop, derived from `walls` via point-in-polygon, no schema change); focused-level
+  siblings now **disappear** (not just dim — a real behavior change, per explicit
+  feedback: "les autres éléments du même niveau sont masqués... disparaissent"); a new
+  left-side breadcrumb widget shows the full path with direct jump-to-level clicks; slots
+  now also highlight in-scene on hover (not just the existing hover card). Entered Plan
+  Mode given the scope (new hierarchy level, a real behavior change, a new widget); no
+  blocking ambiguity found worth a separate question round this time, wrote the plan
+  directly from analysis of the existing 4-level system.
+- New: `src/lib/buildings.ts` (`listBuildings`/`findBuildingForSlot`),
+  `src/lib/visibility.ts` (replaces the deleted `src/lib/emphasis.ts` — boolean
+  show/hide instead of color-blend dimming), `src/components/FocusBreadcrumb.tsx`.
+  Changed: `src/state/ViewFocusContext.tsx` (new `FocusLevel` union, `buildingId` on
+  `Focus`, `back()` extended to 5 levels), `src/lib/focusBounds.ts` (+
+  `buildingWorldBox`), `src/components/WarehouseScene.tsx` (warehouse-level camera
+  branch), `src/components/Slots.tsx`/`Rack.tsx` (hide-via-early-return, hover
+  highlight), `src/components/Walls.tsx` (exports `WALL_HEIGHT`, per-building
+  hide/click-routing), `src/components/HoverCard.tsx` (now shows at plant *and*
+  warehouse level), `src/App.tsx`/`App.css`.
+- Two real bugs found and fixed while testing (Playwright, extensive — this took several
+  rounds of coordinate-probing and console-log tracing before landing on the actual root
+  causes, both now noted in specs.md so they don't get re-discovered blind next time):
+  (1) a slot's decorative edge-outline `<lineSegments>` intercepted nearly all clicks
+  once zoomed in on a single slot, because Three.js defaults line-raycasting to a
+  1-world-unit threshold — fixed with `raycast={() => null}`; (2) the new "warehouse"
+  level's `fitToBox` dollied absurdly close for a wide/deep/short building box — worked
+  around by framing it manually via `setLookAt` with the same span-based formula the
+  plant-level reset already uses.
+- Verified via Playwright: full plant→warehouse→slot→slot-space→pallet drill-down with
+  screenshots at each level confirming siblings actually vanish (not dim); breadcrumb
+  shows the correct path at each level and clicking an ancestor crumb jumps straight
+  there (tested from pallet level back to slot in one click); Escape resets fully to
+  plant from any depth; hover highlight visible on a slot's pad; edit mode (Inspector,
+  depth, pallets, drag) confirmed unaffected. `tsc`/build clean throughout.
+- specs.md §5.1 rewritten for the new hierarchy + a new decision log entry, both noting
+  the two bugs above for future reference.
 - Rebuilt the example warehouse (`schema/warehouse.example.json` +
   `.content.example.json`) into a purpose-built demo per the user's spec: A01-A05
   (depth 3, up to 2 tiers, facing south) and B01-B05 (depth 2, up to 3 tiers, facing

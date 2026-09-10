@@ -170,32 +170,63 @@ pallets onto one sub-slot while a deeper one sits empty. Removal stays manual/pe
 (picking which tier to remove isn't automated). See `setSlotDepth`/`addPalletAuto`/
 `removePallet`/`setPalletItemCount` in `src/state/EditorContext.tsx`.
 
-#### View mode: hover card + click-to-zoom drill-down
+#### View mode: 5-level focus hierarchy, hover card + click-to-zoom drill-down
 
 View mode (the toolbar's default, non-editing state) has its own interaction model,
-independent of edit mode's click-to-select/drag: hovering a slot shows an HTML info
-card (`src/components/HoverCard.tsx`) with its id, position, depth, and an occupancy
-summary (sub-slots stocked, total pallets/items). Clicking a slot smoothly zooms the
-camera to frame it and dims everything else (a plain color desaturation toward gray —
-instant, not a real depth-of-field blur — see `src/lib/emphasis.ts`); if that slot has
-any stocked sub-slots, clicking one drills the camera in further and lets you then click
-a pallet tier to zoom in once more. Clicking a different slot at any point re-targets
-directly to it; clicking empty floor or a wall, or pressing Escape, backs out (one level
-per click, or straight to the overview on Escape). Empty sub-slots have no rack rendered
-at all, so they're never selectable — "select a slot space only if pallets are on it"
-falls out of that naturally rather than needing an extra check.
+independent of edit mode's click-to-select/drag, built around five named zoom levels:
+**plant** (the whole loaded site) → **warehouse** (one building) → **slot** →
+**slot-space** (one depth position within a slot) → **pallet** (one rack tier). A
+"warehouse" is one *closed* wall loop — `src/lib/buildings.ts`'s `listBuildings()`
+derives them from the existing `walls` array (no schema field for it), labeled with the
+overall warehouse's own `name` when there's only one loop (the common case today) or
+each loop's own `id` otherwise; `findBuildingForSlot()` assigns a slot to a building via
+point-in-polygon on its center, falling back to the sole building when there's only one
+and the point tests as technically outside (so a slot right at a wall never ends up
+orphaned over rounding).
 
-State lives in a new `src/state/ViewFocusContext.tsx` (deliberately separate from
+Hovering a slot shows both an HTML info card (`src/components/HoverCard.tsx` — id,
+position, depth, occupancy summary; shown while browsing at plant/warehouse level, not
+once a specific slot is picked) *and* an in-scene highlight (the pad lightens, distinct
+from edit mode's orange selection). Clicking drills one level at a time — a building,
+then a slot, then (only if it has stocked sub-slots — empty ones render no rack at all,
+so there's nothing to click) a sub-slot, then a pallet tier — smoothly zooming the
+camera each time. **Whenever a level is focused, every sibling at that level disappears
+entirely** (not rendered — see `src/lib/visibility.ts`'s `isBuildingVisible`/
+`isSlotVisible`/`isSlotSpaceVisible`/`isPalletVisible`, each a plain boolean, no color
+blending), so a hidden thing is also automatically un-hoverable/unclickable. A rack's
+*frame* (posts/rails) is the shared shelf, not a sibling, so it stays fully shown even
+at pallet level — only *other pallets'* tire rows hide. Clicking a different slot (or
+building) at any point re-targets directly to it; clicking empty floor or the
+currently-focused level's own wall backs out one level; Escape resets straight to plant
+from anywhere.
+
+A **left-side breadcrumb widget** (`src/components/FocusBreadcrumb.tsx`) always shows
+the current path (e.g. "Warehouse: Batiment 13A / Slot: A02") — every crumb except the
+current (deepest) one is clickable and jumps *straight* to that level, not just one
+step at a time.
+
+State lives in `src/state/ViewFocusContext.tsx` (deliberately separate from
 `EditorContext` — this is view-mode navigation UI state, not warehouse data), tracking
-`focus: {level: "overview"|"slot"|"subslot"|"pallet", ...ids}`. The camera itself swaps
-from `OrbitControls` (edit mode, unchanged) to drei's `CameraControls` (view mode only)
-in `WarehouseScene.tsx` — never both at once, and since they share the same underlying
-Three.js camera object, switching modes doesn't reset framing. `CameraControls.fitToBox`
-does the smooth zoom, given a world-space box computed *analytically* (not read off
-rendered meshes) by `src/lib/focusBounds.ts`, reusing the exact depth/footprint math
-`Slots.tsx` renders with. `@react-three/drei`'s `CameraControls` (and its
-`camera-controls` peer dependency) was already installed — no new npm package was
-needed.
+`focus: {level: "plant"|"warehouse"|"slot"|"slot-space"|"pallet", buildingId?, slotId?,
+subSlotIndex?, palletIndex?}`. The camera swaps from `OrbitControls` (edit mode,
+unchanged) to drei's `CameraControls` (view mode only) in `WarehouseScene.tsx` — never
+both at once, and since they share the same underlying Three.js camera object,
+switching modes doesn't reset framing. Slot/sub-slot/pallet framing uses
+`CameraControls.fitToBox` against a world-space box computed *analytically* (not read
+off rendered meshes) by `src/lib/focusBounds.ts`, reusing the exact depth/footprint math
+`Slots.tsx` renders with — **except the "warehouse" level**, which frames manually via
+`setLookAt` using the same span-based offset formula as the initial plant view:
+`fitToBox` was found to dolly absurdly close for a building's box (wide/deep but only
+wall-height tall), apparently fitting the short axis rather than the constraining
+footprint dimension. `@react-three/drei`'s `CameraControls` (and its `camera-controls`
+peer dependency) was already installed — no new npm package was needed.
+
+Implementation gotcha worth remembering: a slot's `<lineSegments>` edge outline (purely
+decorative) needs `raycast={() => null}` — Three.js's default line-raycast threshold is
+1 *world unit*, so once zoomed in close on a single focused slot (which may only be a
+few meters across on screen), an un-opted-out wireframe silently intercepts nearly every
+click meant for the rack geometry behind/above it. Cost real debugging time to track
+down (clicks appeared to do nothing, with no error) before finding it.
 
 #### Editor
 
@@ -436,6 +467,21 @@ eyeball results in 3D rather than deciding blind.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-10 — Redesigned the view-mode focus system per user feedback (in French):
+  five named levels (**plant → warehouse → slot → slot-space → pallet**, "warehouse"
+  new — one closed wall loop, derived from `walls`, not a schema field), a left-side
+  breadcrumb widget with direct jump-to-level clicks, and — the significant behavior
+  change — focused-level siblings now **disappear entirely** rather than dim (deleted
+  `src/lib/emphasis.ts`'s color-blend approach, replaced by boolean
+  `src/lib/visibility.ts`). Also added an in-scene slot hover highlight alongside the
+  existing hover card. Found and fixed a real bug while testing: a slot's decorative
+  edge-outline `<lineSegments>` was silently eating clicks meant for the rack behind it
+  once zoomed in close, because Three.js's default line-raycast threshold (1 world
+  unit) is enormous relative to a single focused slot's on-screen size —
+  `raycast={() => null}` opts it out. Also found and fixed the "warehouse" level's
+  camera framing dollying absurdly close (`fitToBox` mishandling a wide/deep-but-short
+  box) by framing it manually instead, matching the plant-level formula. See §5.1
+  "View mode: 5-level focus hierarchy, hover card + click-to-zoom drill-down".
 - 2026-09-10 — Rebuilt `schema/warehouse.example.json` / `.content.example.json` as a
   purpose-built demo of depth, orientation, and stacking: four facing-pairs of racking
   (A/B horizontal, N/M vertical — rotated 90°/270°), each pair separated by a 2m aisle,

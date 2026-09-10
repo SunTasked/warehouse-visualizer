@@ -3,9 +3,9 @@ import type { ThreeEvent } from "@react-three/fiber";
 import type { WallLoop } from "../types/warehouse";
 import { useEditor } from "../state/EditorContext";
 import { useViewFocus } from "../state/ViewFocusContext";
-import { sceneEmphasis, emphasisColor } from "../lib/emphasis";
+import { isBuildingVisible } from "../lib/visibility";
 
-const WALL_HEIGHT = 3;
+export const WALL_HEIGHT = 3;
 const WALL_THICKNESS = 0.2;
 const HANDLE_RADIUS = 0.35;
 const HANDLE_Y = 0.15;
@@ -13,6 +13,9 @@ const WALL_COLOR = "#8a8f98";
 
 interface WallSegment {
   key: string;
+  loopId: string;
+  /** Only closed loops participate in the plant/warehouse focus level — open polylines (partial/interior walls) are always shown and just step back on click. */
+  isBuilding: boolean;
   position: [number, number, number];
   rotationY: number;
   length: number;
@@ -37,6 +40,8 @@ function segmentsForLoop(wall: WallLoop): WallSegment[] {
 
     return {
       key: `${wall.id}-${i}-${j}`,
+      loopId: wall.id,
+      isBuilding: wall.closed,
       position: [midX, WALL_HEIGHT / 2, -midY],
       rotationY: angle,
       length,
@@ -72,29 +77,40 @@ function WallHandles({ wall }: { wall: WallLoop }) {
 
 export function Walls({ walls }: { walls: WallLoop[] }) {
   const { mode } = useEditor();
-  const { focus, back } = useViewFocus();
+  const { focus, back, focusWarehouse } = useViewFocus();
   const segments = useMemo(() => walls.flatMap(segmentsForLoop), [walls]);
-  const wallColor = emphasisColor(WALL_COLOR, sceneEmphasis(focus));
-
-  const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
-    if (mode !== "view") return;
-    e.stopPropagation();
-    back();
-  };
 
   return (
     <group>
-      {segments.map((segment) => (
-        <mesh
-          key={segment.key}
-          position={segment.position}
-          rotation={[0, segment.rotationY, 0]}
-          onPointerDown={handlePointerDown}
-        >
-          <boxGeometry args={[segment.length, WALL_HEIGHT, WALL_THICKNESS]} />
-          <meshStandardMaterial color={wallColor} />
-        </mesh>
-      ))}
+      {segments.map((segment) => {
+        if (segment.isBuilding && !isBuildingVisible(focus, segment.loopId)) return null;
+
+        const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
+          if (mode !== "view") return;
+          e.stopPropagation();
+          // A different building's wall (or any wall from plant, since
+          // focus.buildingId is unset there): jump directly into it. The
+          // currently-focused building's own wall (or a non-building, open
+          // polyline segment): step back one level, like clicking outside.
+          if (segment.isBuilding && focus.buildingId !== segment.loopId) {
+            focusWarehouse(segment.loopId);
+          } else {
+            back();
+          }
+        };
+
+        return (
+          <mesh
+            key={segment.key}
+            position={segment.position}
+            rotation={[0, segment.rotationY, 0]}
+            onPointerDown={handlePointerDown}
+          >
+            <boxGeometry args={[segment.length, WALL_HEIGHT, WALL_THICKNESS]} />
+            <meshStandardMaterial color={WALL_COLOR} />
+          </mesh>
+        );
+      })}
       {mode === "edit" && walls.map((wall) => <WallHandles key={wall.id} wall={wall} />)}
     </group>
   );

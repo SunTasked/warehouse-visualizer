@@ -11,6 +11,7 @@ import { Inspector } from "./components/Inspector";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SelectionOverlay } from "./components/SelectionOverlay";
 import { HoverCard } from "./components/HoverCard";
+import { FocusBreadcrumb } from "./components/FocusBreadcrumb";
 import "./App.css";
 
 // First the warehouse configuration (layout) loads, then its content
@@ -43,6 +44,7 @@ function AppShell() {
         <HistoryPanel />
         <SelectionOverlay containerRef={sceneRef} />
         <HoverCard />
+        <FocusBreadcrumb />
       </div>
     </div>
   );
