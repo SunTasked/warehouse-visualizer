@@ -15,6 +15,11 @@ export function isBuildingVisible(focus: Focus, buildingId: string): boolean {
   return focus.buildingId === buildingId;
 }
 
+/** Like isBuildingVisible, but true if ANY of the given buildings is visible — for elements (e.g. a cross-building Path) that touch more than one building. */
+export function isAnyBuildingVisible(focus: Focus, buildingIds: string[]): boolean {
+  return buildingIds.some((id) => isBuildingVisible(focus, id));
+}
+
 export function isSlotVisible(focus: Focus, slotId: string, buildingId: string | undefined): boolean {
   if (!isBuildingVisible(focus, buildingId ?? "")) return false;
   if (focus.level === "plant" || focus.level === "warehouse") return true;

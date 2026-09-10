@@ -16,6 +16,7 @@ import { Walls, WALL_HEIGHT } from "./Walls";
 import { Doors } from "./Doors";
 import { Paths } from "./Paths";
 import { LiftStations } from "./LiftStations";
+import { DeliverySpaces } from "./DeliverySpaces";
 import { Slots } from "./Slots";
 import { DragPlane } from "./DragPlane";
 
@@ -110,10 +111,11 @@ export function WarehouseScene() {
         infiniteGrid={false}
       />
 
-      <Walls walls={warehouse.walls} />
+      <Walls walls={warehouse.walls} doors={warehouse.doors} />
       <Doors doors={warehouse.doors} />
       <Paths paths={warehouse.paths} />
       <LiftStations stations={warehouse.liftStations} />
+      <DeliverySpaces spaces={warehouse.deliverySpaces} />
       <Slots slots={warehouse.slots} defaults={warehouse.slotDefaults} />
       <DragPlane />
 

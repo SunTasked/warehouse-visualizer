@@ -105,11 +105,17 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
 
   const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {
     if (mode !== "view") return;
+    // Without this, the event keeps propagating to whatever's beneath (at
+    // "plant" level, the building floor click-catcher — see Walls.tsx's
+    // BuildingFloor), whose own setHover(buildingId) call would immediately
+    // overwrite this one since both fire within the same event dispatch.
+    e.stopPropagation();
     setHover({ slotId: slot.id, x: e.nativeEvent.clientX, y: e.nativeEvent.clientY });
   };
 
   const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
     if (mode !== "view") return;
+    e.stopPropagation();
     setHover({ slotId: slot.id, x: e.nativeEvent.clientX, y: e.nativeEvent.clientY });
   };
 

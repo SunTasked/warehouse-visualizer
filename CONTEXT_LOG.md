@@ -4,6 +4,68 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-10 (cont'd — path routing, wall openings, delivery space, cross-building link)
+
+- User follow-up (English, with an annotated screenshot of the previous round's plant
+  view) — six items, plus an explicit ask to keep the data shape pathfinding-friendly for
+  a stated next step (chariot routing/BFS between slots): (1) paths were cutting straight
+  through slot/lift-station geometry, reroute around it; (2) punch an actual hole in the
+  wall at each door; (3) add a "delivery space" element, same 6x2 footprint as the lift
+  station, yellow; (4) move the annex building beneath the main one (3m gap), add a door
+  facing the main building's south door, connect them with a path; (5) make a building's
+  floor (not just its wall) clickable at "plant" level, and truncate+arrow any path that
+  would otherwise run into a now-hidden building; (6) the slot hover tooltip was missing
+  a Height row.
+- Used plan mode again given the scope (schema shape change, wall-gap geometry, a new
+  cross-building visibility case). Key design calls: `Path.buildingId` became
+  `buildingIds: string[]` (a path can now touch two buildings) with an optional
+  `endpointBuildingIds: [string, string]` for the one connector that does, used by
+  `Paths.tsx`'s truncation logic; `DeliverySpace` is its own type/component (matching the
+  user's "a new warehouse element" framing) but shares box+edges+label rendering with
+  `LiftStation` via a new `src/components/FacilityPad.tsx`.
+- **Graph-readiness convention**, documented (not enforced) in `src/types/warehouse.ts`'s
+  `Path` doc comment and specs.md: any point shared between two paths, or between a path
+  and a door, must be an *exact* coincident coordinate, not just a visual overlap — so a
+  future graph-extraction step can dedupe points into node ids and turn each path's
+  consecutive points into edges mechanically. Redesigned the whole example corridor
+  network around this rule (explicit tee/junction points at (24,13), (10,6), (10,-3),
+  etc.) rather than leaving it implicit.
+- `Walls.tsx` grew substantially: `segmentsForEdge` now splits a wall edge around any door
+  projected onto its line (collinearity + projection-along-edge check), leaving an actual
+  gap instead of a decorative marker on an unbroken wall; a new `BuildingFloor` per closed
+  loop (a `THREE.Shape` built directly from the loop's own (x,y) points, `rotateX(-Math.PI/2)`
+  mapping local (x,y,0) to world (x,0,-y) with no separate coordinate conversion needed)
+  makes the whole floor clickable/hoverable at "plant" level, reusing the exact hover
+  state and click routing a wall segment already had.
+- Found and fixed a real bug while wiring the floor click-catcher in: `Slots.tsx`'s hover
+  handlers never called `e.stopPropagation()` — harmless before (nothing sat beneath a
+  slot), but once the floor catcher existed underneath, a slot hover's `setHover` call
+  kept propagating down and the floor's own `setHover(buildingId)` silently overwrote it
+  on every mouse-move, so the slot's hover card/highlight never showed. Caught via
+  Playwright (hovering a slot lit up the building's wall instead of showing the tooltip)
+  and fixed by stopping propagation, matching every other hover handler in the codebase.
+- Also caught (same Playwright pass) that centering a path exactly on an obstacle's edge
+  coordinate still overlaps it by half the path's own width — not zero, as first assumed
+  — via a cropped screenshot showing the corridor cutting into the N block's leftmost
+  column; fixed by offsetting the jog and the annex's internal aisle by a full path-width
+  margin instead of sitting exactly on the obstacle's boundary coordinate.
+- Reworked `scripts/generate-example-warehouse.js`: rerouted every path to run through
+  clear floor only (verified via cropped screenshots); added `DS01` (delivery space) next
+  to `CL01`, with a 2m gap between their footprints that the service corridor's
+  north-south drop deliberately runs through; moved "Entrepot Annexe" to sit 3m south of
+  the main building (translating its C01-C03 slots by the same offset), added
+  `Door-Annex-North` facing the main building's `Door-South`, and added a `Path-Bridge`
+  connector between them with `endpointBuildingIds` set.
+- Verified via Playwright: wall gaps render at both doors and the bridge crossing; the
+  corridor network no longer overlaps any slot/lift-station/delivery-space footprint;
+  clicking open floor (not a wall) at "plant" level focuses the right building; the
+  bridge path shows only a stub + arrow pointing toward the hidden building once either
+  side is focused, mirrored correctly in both directions; the slot hover tooltip now
+  shows Height; edit mode (Inspector, slot selection, wall-corner handles) unaffected.
+  `tsc --noEmit` clean throughout.
+- specs.md updated (§5.1 rewritten for the new shape/behavior, new decision log entry,
+  open-questions bullets updated/added).
+
 ## 2026-09-10 (cont'd — doors, paths, carriage lift station)
 
 - User request (English, with an annotated screenshot): add three new physical/

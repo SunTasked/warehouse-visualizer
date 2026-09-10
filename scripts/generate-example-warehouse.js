@@ -12,7 +12,8 @@
 //            (N and M face each other across a 2m aisle, oriented
 //            perpendicular to A/B — "vertical" racks.)
 //   C01-C03: a small second building ("Entrepot Annexe"), depth 2, facing
-//            north, east of the main building with its own wall loop.
+//            north, 3m south of the main building's south wall, with its own
+//            wall loop and a door facing the main building's own south door.
 //
 // Each "0x" slot number gets the same pallet count across every group
 // (01->1, 02->3, 03->5, 04->6, 05->0 where it exists; C01-C03 use 2/4/6),
@@ -25,11 +26,18 @@
 // and ~10% partial (a varied smaller count) — deterministic, not random, so
 // re-running this script reproduces the same file (no noisy diffs).
 //
-// The main building also gets two doors (west, south — both exterior), a
-// connected corridor network (the A/B and N/M aisles, plus a south branch),
-// and one carriage lift station (CL01) sitting on that south branch — see
-// specs.md §5.1 "Doors, paths & the carriage lift station". The annex
-// building has none of these, so isolating it shows a bare shell.
+// The main building also gets two exterior doors (west, south), a lift
+// station (CL01) and a delivery space (DS01), and a corridor network that
+// routes AROUND all of them (never through a slot/lift-station/delivery-space
+// footprint) — see specs.md §5.1 "Doors, paths & the carriage lift station".
+// The annex sits 3m south of the main building's south wall, with its own
+// door facing the main building's south door, connected by a bridging path
+// so its slots are reachable from the main building.
+//
+// Every path point that's meant to connect to another path or a door is an
+// *exact* coincident coordinate with it (not just a visual overlap) — see
+// the Path type's doc comment in src/types/warehouse.ts for why (graph
+// readiness for future chariot pathfinding).
 //
 // Run: node scripts/generate-example-warehouse.js
 
@@ -172,19 +180,22 @@ const groupM = buildGroup({
   along: NM_ROW_Y.map((y, i) => [String(i + 1).padStart(2, "0"), y, PALLET_COUNTS_4[String(i + 1).padStart(2, "0")]]),
 });
 
-// --- C: a small second building, its own wall loop, east of the main one
-// with a clear gap — exists purely so "plant" has more than one building to
-// show, and "warehouse" has something to actually isolate. ---
+// --- C: a small second building, its own wall loop, 3m south of the main
+// one — exists so "plant" has more than one building to show, "warehouse"
+// has something to actually isolate, and (now) so the cross-building
+// door+path connection has two buildings to link. Entry aisle at y=-8 (one
+// cell-depth-half north of the anchor row, same convention as every other
+// facing-north group). ---
 const groupC = buildGroup({
   prefix: "C",
   facing: FACING.north,
   depth: 2,
   alongAxis: "x",
-  perpValue: 8,
+  perpValue: -9,
   along: [
-    ["01", 47, 2],
-    ["02", 51, 4],
-    ["03", 55, 6],
+    ["01", 3, 2],
+    ["02", 7, 4],
+    ["03", 11, 6],
   ],
 });
 
@@ -197,30 +208,88 @@ const allContents = [
   ...groupC.contents,
 ];
 
-// --- Doors, paths & the carriage lift station: physical/circulation
-// elements, main building only (the annex building has none, so isolating it
-// at "warehouse" level shows a bare shell — see specs.md §5.1). Positions are
-// hand-picked to land on the A/B and N/M aisle centerlines (y=13, x=33 — the
-// midpoints between each facing pair's ANCHOR/ENTRY coordinates above) so the
-// corridor network visibly connects to where slots actually open onto it.
+// --- Doors, paths, the carriage lift station & the delivery space. ---
 const MAIN_BUILDING_ID = "Batiment 13A";
+const ANNEX_BUILDING_ID = "Entrepot Annexe";
 
 const doors = [
   { id: "Door-West", x: 0, y: 13, rotationDeg: 90, buildingId: MAIN_BUILDING_ID },
-  { id: "Door-South", x: 6, y: 0, rotationDeg: 0, buildingId: MAIN_BUILDING_ID },
+  { id: "Door-South", x: 10, y: 0, rotationDeg: 0, buildingId: MAIN_BUILDING_ID },
+  // Faces the main building's south door across the 3m gap between them.
+  { id: "Door-Annex-North", x: 10, y: -3, rotationDeg: 0, buildingId: ANNEX_BUILDING_ID },
 ];
+
+// CL01 and DS01 sit side by side with a 2m gap between their footprints
+// (lift east edge x=9, delivery west edge x=11) — the corridor's north-south
+// drop to the south door runs straight through that gap, so it never cuts
+// through either box.
+const liftStations = [{ id: "CL01", x: 6, y: 4, rotationDeg: 0, buildingId: MAIN_BUILDING_ID }];
+const deliverySpaces = [{ id: "DS01", x: 14, y: 4, rotationDeg: 0, buildingId: MAIN_BUILDING_ID }];
 
 const paths = [
-  // A/B aisle (y=13), extended west all the way to the west door.
-  { id: "Path-Main", points: [{ x: 0, y: 13 }, { x: 33, y: 13 }], buildingId: MAIN_BUILDING_ID },
-  // N/M aisle (x=33), meeting Path-Main at (33, 13).
-  { id: "Path-NM", points: [{ x: 33, y: 2 }, { x: 33, y: 18 }], buildingId: MAIN_BUILDING_ID },
-  // South branch from Path-Main down to the south door, passing right through
-  // the lift station's position below.
-  { id: "Path-South", points: [{ x: 6, y: 13 }, { x: 6, y: 0 }], buildingId: MAIN_BUILDING_ID },
+  // Main east-west aisle (y=13, the A/B aisle), from the west door, past the
+  // service-branch tee at x=24, then jogging around the N/M block (whose
+  // footprint spans x=[26,32] at this y) instead of cutting through it: a
+  // clear meter outside its west edge (x=25 — the path's own half-width
+  // means centering exactly on x=26 would still overlap the block by 0.75m)
+  // up to y=19 (clear north of the whole N/M block, which tops out at y=18),
+  // across to x=33, then down the N/M internal aisle itself.
+  {
+    id: "Path-Main",
+    points: [
+      { x: 0, y: 13 },
+      { x: 24, y: 13 },
+      { x: 25, y: 13 },
+      { x: 25, y: 19 },
+      { x: 33, y: 19 },
+      { x: 33, y: 2 },
+    ],
+    buildingIds: [MAIN_BUILDING_ID],
+  },
+  // Service branch: tees off Path-Main at (24,13) — clear of the B block
+  // (whose slots are contiguous, x=[2,22], with no internal gap — this is
+  // the only clear vertical strip between B and the N/M block) — down to
+  // y=6 (clear south of B, whose south edge is y=8), then west to x=10 (the
+  // gap between CL01/DS01), then straight down through that gap to the
+  // south door.
+  {
+    id: "Path-Service",
+    points: [
+      { x: 24, y: 13 },
+      { x: 24, y: 6 },
+      { x: 10, y: 6 },
+      { x: 10, y: 0 },
+    ],
+    buildingIds: [MAIN_BUILDING_ID],
+  },
+  // Short spurs from the service branch to each box's north edge (y=5) —
+  // "connected to a path" by touching, not by running through it.
+  { id: "Path-Lift-Spur", points: [{ x: 10, y: 6 }, { x: 6, y: 6 }, { x: 6, y: 5 }], buildingIds: [MAIN_BUILDING_ID] },
+  {
+    id: "Path-Delivery-Spur",
+    points: [{ x: 10, y: 6 }, { x: 14, y: 6 }, { x: 14, y: 5 }],
+    buildingIds: [MAIN_BUILDING_ID],
+  },
+  // Cross-building connector: the main building's south door straight down
+  // to the annex's north door, across the 3m gap between them. Truncated to
+  // a stub + arrow (Paths.tsx) once only one of the two buildings is focused.
+  {
+    id: "Path-Bridge",
+    points: [{ x: 10, y: 0 }, { x: 10, y: -3 }],
+    buildingIds: [MAIN_BUILDING_ID, ANNEX_BUILDING_ID],
+    endpointBuildingIds: [MAIN_BUILDING_ID, ANNEX_BUILDING_ID],
+  },
+  // Inside the annex: its door down to the C-slots' aisle. The aisle sits at
+  // y=-7, a clear meter north of the slots' own entry edge (y=-8) — same
+  // reasoning as Path-Main's x=25 jog: centering exactly on the entry edge
+  // would still overlap the slots by half the path's own width.
+  { id: "Path-Annex-Connector", points: [{ x: 10, y: -3 }, { x: 10, y: -7 }], buildingIds: [ANNEX_BUILDING_ID] },
+  {
+    id: "Path-Annex-Aisle",
+    points: [{ x: 1, y: -7 }, { x: 10, y: -7 }, { x: 13, y: -7 }],
+    buildingIds: [ANNEX_BUILDING_ID],
+  },
 ];
-
-const liftStations = [{ id: "CL01", x: 6, y: 4, rotationDeg: 0, buildingId: MAIN_BUILDING_ID }];
 
 const config = {
   id: "bat-13a",
@@ -228,7 +297,7 @@ const config = {
   units: "m",
   walls: [
     {
-      id: "Batiment 13A",
+      id: MAIN_BUILDING_ID,
       closed: true,
       points: [
         { x: 0, y: 0 },
@@ -238,19 +307,21 @@ const config = {
       ],
     },
     {
-      id: "Entrepot Annexe",
+      // 3m south of the main building's y=0 wall.
+      id: ANNEX_BUILDING_ID,
       closed: true,
       points: [
-        { x: 44, y: 0 },
-        { x: 60, y: 0 },
-        { x: 60, y: 14 },
-        { x: 44, y: 14 },
+        { x: 0, y: -17 },
+        { x: 16, y: -17 },
+        { x: 16, y: -3 },
+        { x: 0, y: -3 },
       ],
     },
   ],
   doors,
   paths,
   liftStations,
+  deliverySpaces,
   slotDefaults: { width: WIDTH, height: CELL_DEPTH },
   slots: allSlots,
 };

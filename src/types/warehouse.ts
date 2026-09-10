@@ -72,16 +72,43 @@ export interface Door {
   leadsTo?: string;
 }
 
+/**
+ * Every point where two paths meet, branch, or a path starts/ends at a door
+ * MUST appear as an exact coincident point (same x,y) in every path's
+ * `points` list that touches it, not just a visual overlap — this is what
+ * lets a future graph-extraction step (for chariot pathfinding, e.g. BFS)
+ * mechanically dedupe identical points into shared node ids and turn each
+ * path's consecutive points into edges, without any new schema on top of
+ * this one. See specs.md §5.1.
+ */
 export interface Path {
   id: string;
   /** Polyline, like an open WallLoop. */
   points: Point[];
   /** Corridor width in meters. Default PATH_DEFAULT_WIDTH (src/components/Paths.tsx). */
   width?: number;
-  buildingId: string;
+  /** Usually one building; two for a connector that crosses between buildings. */
+  buildingIds: string[];
+  /**
+   * Cross-building connectors only (buildingIds.length > 1): which building
+   * owns `points[0]` and which owns the last point, in that order. Lets
+   * Paths.tsx truncate the path to a short stub + arrow at whichever end's
+   * building is currently focused, instead of drawing into a building that's
+   * hidden at that focus level.
+   */
+  endpointBuildingIds?: [string, string];
 }
 
 export interface LiftStation {
+  id: string;
+  x: number;
+  y: number;
+  rotationDeg?: number;
+  buildingId: string;
+}
+
+/** Same footprint as LiftStation (6x2, see src/components/DeliverySpaces.tsx) — a separate concept, just sharing the same fixed-pad rendering. */
+export interface DeliverySpace {
   id: string;
   x: number;
   y: number;
@@ -117,6 +144,7 @@ export interface WarehouseConfig {
   doors?: Door[];
   paths?: Path[];
   liftStations?: LiftStation[];
+  deliverySpaces?: DeliverySpace[];
   slotDefaults: SlotSize;
   slots: SlotConfig[];
 }
@@ -178,6 +206,7 @@ export interface Warehouse {
   doors: Door[];
   paths: Path[];
   liftStations: LiftStation[];
+  deliverySpaces: DeliverySpace[];
   slotDefaults: SlotSize;
   slots: Slot[];
 }

@@ -13,6 +13,10 @@ export function HoverCard() {
 
   const subSlots = slot.subSlots ?? [];
   const depth = subSlots.length || 1;
+  // Tallest sub-slot's pallet-tier count — the informal "height" convention
+  // (e.g. "depth 3, height 2") already used in the generator script's
+  // comments and specs.md, made visible here rather than only in code/docs.
+  const height = Math.max(0, ...subSlots.map((ss) => ss.pallets.length));
   const stocked = subSlots.filter((ss) => ss.pallets.length > 0).length;
   const palletCount = subSlots.reduce((sum, ss) => sum + ss.pallets.length, 0);
   const itemCount = subSlots.reduce(
@@ -32,6 +36,10 @@ export function HoverCard() {
       <div className="hover-card__row">
         <span>Depth</span>
         <span>{depth}</span>
+      </div>
+      <div className="hover-card__row">
+        <span>Height</span>
+        <span>{height}</span>
       </div>
       <div className="hover-card__row">
         <span>Stocked</span>

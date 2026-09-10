@@ -9,7 +9,8 @@ import { isBuildingVisible } from "../lib/visibility";
 const DOOR_COLOR = "#22c55e";
 const DOOR_HEIGHT = 0.1;
 const DOOR_THICKNESS = 0.5;
-const DOOR_DEFAULT_WIDTH = 3;
+// Exported so Walls.tsx can size the wall gap it cuts for each door the same way.
+export const DOOR_DEFAULT_WIDTH = 3;
 
 function DoorMesh({ door }: { door: Door }) {
   const width = door.width ?? DOOR_DEFAULT_WIDTH;

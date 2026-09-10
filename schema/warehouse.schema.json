@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/SunTasked/warehouse-visualizer/schema/warehouse.schema.json",
-  "title": "Warehouse Configuration (physical layout, v3)",
-  "description": "Physical layer of a warehouse: building walls, doors, circulation paths, a carriage lift station, storage slot footprints, and each slot's physical depth. Coordinates are in meters (1 unit = 1m), origin at the bottom-left of the site, +X right, +Y up. This describes what physically exists (the building), not what's currently stocked (see warehouse.content.schema.json). Doors/paths/liftStations are literal physical/visual objects (an opening, a corridor marking, a piece of equipment's footprint) — distinct from the future walkable/simulation graph (routing, lane direction/capacity) sketched in specs.md, which is a separate, not-yet-built layer that may later reference or formalize path connectivity for actual routing. A config file is loaded first; its content file (referencing this file's `id` as `warehouseId`) is loaded second and merged in.",
+  "title": "Warehouse Configuration (physical layout, v4)",
+  "description": "Physical layer of a warehouse: building walls, doors, circulation paths, a carriage lift station, a delivery space, storage slot footprints, and each slot's physical depth. Coordinates are in meters (1 unit = 1m), origin at the bottom-left of the site, +X right, +Y up. This describes what physically exists (the building), not what's currently stocked (see warehouse.content.schema.json). Doors/paths/liftStations/deliverySpaces are literal physical/visual objects (an opening, a corridor marking, a piece of equipment's footprint) — distinct from the future walkable/simulation graph (routing, lane direction/capacity) sketched in specs.md, which is a separate, not-yet-built layer that may later reference or formalize path connectivity for actual routing. A path's `points` are already authored so that any point shared with another path or a door is an exact coincident coordinate — see specs.md's graph-readiness convention. A config file is loaded first; its content file (referencing this file's `id` as `warehouseId`) is loaded second and merged in.",
   "type": "object",
   "required": ["id", "name", "units", "walls", "slotDefaults", "slots"],
   "additionalProperties": false,
@@ -39,6 +39,11 @@
       "type": "array",
       "description": "Carriage lift stations (fixed 6x2m footprint for now). Optional — absent in files predating this field, treated as empty.",
       "items": { "$ref": "#/definitions/liftStation" }
+    },
+    "deliverySpaces": {
+      "type": "array",
+      "description": "Delivery spaces (fixed 6x2m footprint, same as liftStation, for now). Optional — absent in files predating this field, treated as empty.",
+      "items": { "$ref": "#/definitions/deliverySpace" }
     },
     "slotDefaults": {
       "$ref": "#/definitions/slotSize",
@@ -106,24 +111,49 @@
     },
     "path": {
       "type": "object",
-      "required": ["id", "points", "buildingId"],
+      "required": ["id", "points", "buildingIds"],
       "additionalProperties": false,
       "properties": {
         "id": { "type": "string" },
         "points": {
           "type": "array",
           "minItems": 2,
-          "items": { "$ref": "#/definitions/point" }
+          "items": { "$ref": "#/definitions/point" },
+          "description": "A point shared with another path's points, or with a door's position, must be an exact coincident coordinate — see the top-level description's graph-readiness note."
         },
         "width": {
           "type": "number",
           "exclusiveMinimum": 0,
           "description": "Corridor width in meters. Defaults to the renderer's PATH_DEFAULT_WIDTH when omitted."
         },
-        "buildingId": { "type": "string" }
+        "buildingIds": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Usually one building; two for a connector that crosses between buildings."
+        },
+        "endpointBuildingIds": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "string" },
+          "description": "Cross-building connectors only (buildingIds.length > 1): which building owns points[0] and which owns the last point, in that order."
+        }
       }
     },
     "liftStation": {
+      "type": "object",
+      "required": ["id", "x", "y", "buildingId"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "rotationDeg": { "type": "number", "default": 0 },
+        "buildingId": { "type": "string" }
+      }
+    },
+    "deliverySpace": {
       "type": "object",
       "required": ["id", "x", "y", "buildingId"],
       "additionalProperties": false,

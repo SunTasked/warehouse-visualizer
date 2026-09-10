@@ -30,20 +30,20 @@
       "closed": true,
       "points": [
         {
-          "x": 44,
-          "y": 0
+          "x": 0,
+          "y": -17
         },
         {
-          "x": 60,
-          "y": 0
+          "x": 16,
+          "y": -17
         },
         {
-          "x": 60,
-          "y": 14
+          "x": 16,
+          "y": -3
         },
         {
-          "x": 44,
-          "y": 14
+          "x": 0,
+          "y": -3
         }
       ]
     }
@@ -58,10 +58,17 @@
     },
     {
       "id": "Door-South",
-      "x": 6,
+      "x": 10,
       "y": 0,
       "rotationDeg": 0,
       "buildingId": "Batiment 13A"
+    },
+    {
+      "id": "Door-Annex-North",
+      "x": 10,
+      "y": -3,
+      "rotationDeg": 0,
+      "buildingId": "Entrepot Annexe"
     }
   ],
   "paths": [
@@ -73,45 +80,165 @@
           "y": 13
         },
         {
-          "x": 33,
+          "x": 24,
           "y": 13
-        }
-      ],
-      "buildingId": "Batiment 13A"
-    },
-    {
-      "id": "Path-NM",
-      "points": [
+        },
+        {
+          "x": 25,
+          "y": 13
+        },
+        {
+          "x": 25,
+          "y": 19
+        },
+        {
+          "x": 33,
+          "y": 19
+        },
         {
           "x": 33,
           "y": 2
-        },
-        {
-          "x": 33,
-          "y": 18
         }
       ],
-      "buildingId": "Batiment 13A"
+      "buildingIds": [
+        "Batiment 13A"
+      ]
     },
     {
-      "id": "Path-South",
+      "id": "Path-Service",
       "points": [
         {
-          "x": 6,
+          "x": 24,
           "y": 13
         },
         {
-          "x": 6,
+          "x": 24,
+          "y": 6
+        },
+        {
+          "x": 10,
+          "y": 6
+        },
+        {
+          "x": 10,
           "y": 0
         }
       ],
-      "buildingId": "Batiment 13A"
+      "buildingIds": [
+        "Batiment 13A"
+      ]
+    },
+    {
+      "id": "Path-Lift-Spur",
+      "points": [
+        {
+          "x": 10,
+          "y": 6
+        },
+        {
+          "x": 6,
+          "y": 6
+        },
+        {
+          "x": 6,
+          "y": 5
+        }
+      ],
+      "buildingIds": [
+        "Batiment 13A"
+      ]
+    },
+    {
+      "id": "Path-Delivery-Spur",
+      "points": [
+        {
+          "x": 10,
+          "y": 6
+        },
+        {
+          "x": 14,
+          "y": 6
+        },
+        {
+          "x": 14,
+          "y": 5
+        }
+      ],
+      "buildingIds": [
+        "Batiment 13A"
+      ]
+    },
+    {
+      "id": "Path-Bridge",
+      "points": [
+        {
+          "x": 10,
+          "y": 0
+        },
+        {
+          "x": 10,
+          "y": -3
+        }
+      ],
+      "buildingIds": [
+        "Batiment 13A",
+        "Entrepot Annexe"
+      ],
+      "endpointBuildingIds": [
+        "Batiment 13A",
+        "Entrepot Annexe"
+      ]
+    },
+    {
+      "id": "Path-Annex-Connector",
+      "points": [
+        {
+          "x": 10,
+          "y": -3
+        },
+        {
+          "x": 10,
+          "y": -7
+        }
+      ],
+      "buildingIds": [
+        "Entrepot Annexe"
+      ]
+    },
+    {
+      "id": "Path-Annex-Aisle",
+      "points": [
+        {
+          "x": 1,
+          "y": -7
+        },
+        {
+          "x": 10,
+          "y": -7
+        },
+        {
+          "x": 13,
+          "y": -7
+        }
+      ],
+      "buildingIds": [
+        "Entrepot Annexe"
+      ]
     }
   ],
   "liftStations": [
     {
       "id": "CL01",
       "x": 6,
+      "y": 4,
+      "rotationDeg": 0,
+      "buildingId": "Batiment 13A"
+    }
+  ],
+  "deliverySpaces": [
+    {
+      "id": "DS01",
+      "x": 14,
       "y": 4,
       "rotationDeg": 0,
       "buildingId": "Batiment 13A"
@@ -245,20 +372,20 @@
     },
     {
       "id": "C01",
-      "x": 47,
-      "y": 8,
+      "x": 3,
+      "y": -9,
       "depth": 2
     },
     {
       "id": "C02",
-      "x": 51,
-      "y": 8,
+      "x": 7,
+      "y": -9,
       "depth": 2
     },
     {
       "id": "C03",
-      "x": 55,
-      "y": 8,
+      "x": 11,
+      "y": -9,
       "depth": 2
     }
   ]
