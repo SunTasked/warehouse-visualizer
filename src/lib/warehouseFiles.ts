@@ -39,6 +39,9 @@ export function mergeWarehouse(config: WarehouseConfig, content: WarehouseConten
     name: config.name,
     units: config.units,
     walls: config.walls,
+    doors: config.doors ?? [],
+    paths: config.paths ?? [],
+    liftStations: config.liftStations ?? [],
     slotDefaults: config.slotDefaults,
     slots,
   };
@@ -59,6 +62,9 @@ export function splitWarehouse(warehouse: Warehouse): {
     name: warehouse.name,
     units: warehouse.units,
     walls: warehouse.walls,
+    doors: warehouse.doors,
+    paths: warehouse.paths,
+    liftStations: warehouse.liftStations,
     slotDefaults: warehouse.slotDefaults,
     slots: warehouse.slots.map((s) => {
       const depth = s.subSlots?.length;

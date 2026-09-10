@@ -50,6 +50,45 @@ export interface Pallet {
 // each slot's physical depth). Rarely changes — this is "the building".
 // ---------------------------------------------------------------------------
 
+/**
+ * Physical circulation elements (see specs.md §5.1 "Doors, paths & the
+ * carriage lift station"): openings, corridor markings, and a fixed-footprint
+ * lift station. All config-authored for now (no interactive editor UI yet),
+ * so `buildingId` is an explicit field here — unlike a slot's `buildingId`,
+ * computed dynamically via point-in-polygon (src/lib/buildings.ts) — since a
+ * door in particular sits *on* a wall boundary where that test is unreliable.
+ */
+export interface Door {
+  id: string;
+  x: number;
+  y: number;
+  /** Orientation along the wall it's set into, in degrees — same convention as SlotConfig.rotationDeg. */
+  rotationDeg?: number;
+  /** Opening width in meters. Default DOOR_DEFAULT_WIDTH (src/components/Doors.tsx). */
+  width?: number;
+  /** Which building's wall this door is cut into. */
+  buildingId: string;
+  /** Another building's id, if this door connects two buildings rather than leading outside. */
+  leadsTo?: string;
+}
+
+export interface Path {
+  id: string;
+  /** Polyline, like an open WallLoop. */
+  points: Point[];
+  /** Corridor width in meters. Default PATH_DEFAULT_WIDTH (src/components/Paths.tsx). */
+  width?: number;
+  buildingId: string;
+}
+
+export interface LiftStation {
+  id: string;
+  x: number;
+  y: number;
+  rotationDeg?: number;
+  buildingId: string;
+}
+
 export interface SlotConfig {
   id: string;
   /**
@@ -74,6 +113,10 @@ export interface WarehouseConfig {
   name: string;
   units: "m";
   walls: WallLoop[];
+  /** Optional — absent in files predating this addition, treated as empty. */
+  doors?: Door[];
+  paths?: Path[];
+  liftStations?: LiftStation[];
   slotDefaults: SlotSize;
   slots: SlotConfig[];
 }
@@ -132,6 +175,9 @@ export interface Warehouse {
   name: string;
   units: "m";
   walls: WallLoop[];
+  doors: Door[];
+  paths: Path[];
+  liftStations: LiftStation[];
   slotDefaults: SlotSize;
   slots: Slot[];
 }

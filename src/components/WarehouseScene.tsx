@@ -13,6 +13,9 @@ import {
 import { useEditor } from "../state/EditorContext";
 import { useViewFocus } from "../state/ViewFocusContext";
 import { Walls, WALL_HEIGHT } from "./Walls";
+import { Doors } from "./Doors";
+import { Paths } from "./Paths";
+import { LiftStations } from "./LiftStations";
 import { Slots } from "./Slots";
 import { DragPlane } from "./DragPlane";
 
@@ -108,6 +111,9 @@ export function WarehouseScene() {
       />
 
       <Walls walls={warehouse.walls} />
+      <Doors doors={warehouse.doors} />
+      <Paths paths={warehouse.paths} />
+      <LiftStations stations={warehouse.liftStations} />
       <Slots slots={warehouse.slots} defaults={warehouse.slotDefaults} />
       <DragPlane />
 

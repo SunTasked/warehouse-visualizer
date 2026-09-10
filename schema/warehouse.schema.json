@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/SunTasked/warehouse-visualizer/schema/warehouse.schema.json",
-  "title": "Warehouse Configuration (physical layout, v2)",
-  "description": "Physical layer of a warehouse: building walls, storage slot footprints, and each slot's physical depth. Coordinates are in meters (1 unit = 1m), origin at the bottom-left of the site, +X right, +Y up. This describes what physically exists (the building), not what's currently stocked (see warehouse.content.schema.json) nor the walkable/simulation graph (routing, lane direction/capacity), which is a separate, future layer. A config file is loaded first; its content file (referencing this file's `id` as `warehouseId`) is loaded second and merged in.",
+  "title": "Warehouse Configuration (physical layout, v3)",
+  "description": "Physical layer of a warehouse: building walls, doors, circulation paths, a carriage lift station, storage slot footprints, and each slot's physical depth. Coordinates are in meters (1 unit = 1m), origin at the bottom-left of the site, +X right, +Y up. This describes what physically exists (the building), not what's currently stocked (see warehouse.content.schema.json). Doors/paths/liftStations are literal physical/visual objects (an opening, a corridor marking, a piece of equipment's footprint) — distinct from the future walkable/simulation graph (routing, lane direction/capacity) sketched in specs.md, which is a separate, not-yet-built layer that may later reference or formalize path connectivity for actual routing. A config file is loaded first; its content file (referencing this file's `id` as `warehouseId`) is loaded second and merged in.",
   "type": "object",
   "required": ["id", "name", "units", "walls", "slotDefaults", "slots"],
   "additionalProperties": false,
@@ -24,6 +24,21 @@
       "type": "array",
       "description": "One or more wall loops/polylines. Each is an ordered list of corner points. Supports irregular outlines, notches, and multiple disjoint structures (e.g. a detached annex) by using multiple entries.",
       "items": { "$ref": "#/definitions/wallLoop" }
+    },
+    "doors": {
+      "type": "array",
+      "description": "Openings in a building's wall to the exterior or to another building. Optional — absent in files predating this field, treated as empty.",
+      "items": { "$ref": "#/definitions/door" }
+    },
+    "paths": {
+      "type": "array",
+      "description": "Corridors connecting slot entry points (and doors, and the lift station) together. Optional — absent in files predating this field, treated as empty.",
+      "items": { "$ref": "#/definitions/path" }
+    },
+    "liftStations": {
+      "type": "array",
+      "description": "Carriage lift stations (fixed 6x2m footprint for now). Optional — absent in files predating this field, treated as empty.",
+      "items": { "$ref": "#/definitions/liftStation" }
     },
     "slotDefaults": {
       "$ref": "#/definitions/slotSize",
@@ -59,6 +74,65 @@
           "minItems": 2,
           "items": { "$ref": "#/definitions/point" }
         }
+      }
+    },
+    "door": {
+      "type": "object",
+      "required": ["id", "x", "y", "buildingId"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "rotationDeg": {
+          "type": "number",
+          "default": 0,
+          "description": "Orientation along the wall it's set into, in degrees — same convention as slot.rotationDeg."
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Opening width in meters. Defaults to the renderer's DOOR_DEFAULT_WIDTH when omitted."
+        },
+        "buildingId": {
+          "type": "string",
+          "description": "Which building's wall (a walls[].id of a closed loop) this door is cut into."
+        },
+        "leadsTo": {
+          "type": "string",
+          "description": "Another building's id, if this door connects two buildings rather than leading outside."
+        }
+      }
+    },
+    "path": {
+      "type": "object",
+      "required": ["id", "points", "buildingId"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/definitions/point" }
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Corridor width in meters. Defaults to the renderer's PATH_DEFAULT_WIDTH when omitted."
+        },
+        "buildingId": { "type": "string" }
+      }
+    },
+    "liftStation": {
+      "type": "object",
+      "required": ["id", "x", "y", "buildingId"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "rotationDeg": { "type": "number", "default": 0 },
+        "buildingId": { "type": "string" }
       }
     },
     "slotSize": {

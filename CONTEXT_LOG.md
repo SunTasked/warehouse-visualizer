@@ -4,6 +4,46 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-10 (cont'd — doors, paths, carriage lift station)
+
+- User request (English, with an annotated screenshot): add three new physical/
+  circulation elements — doors (wall openings to the exterior or another building),
+  paths (corridors connecting slot entry points), and a carriage lift station (a fixed
+  6x2m purple rectangle, connected to a path).
+- Used plan mode given the schema/design decisions involved. Key call: these are literal
+  physical/visual objects (like walls), not the abstract simulation node/edge graph
+  already sketched in specs.md §5.2 (which models routing with direction/capacity and is
+  explicitly future work) — kept them simple and separate from that.
+- Added `Door`/`Path`/`LiftStation` types (`src/types/warehouse.ts`), optional arrays on
+  `WarehouseConfig` (old files load unchanged), required arrays on the merged
+  `Warehouse` type; `mergeWarehouse`/`splitWarehouse` (`src/lib/warehouseFiles.ts`) carry
+  them straight through; `schema/warehouse.schema.json` bumped to "v3" with new
+  `door`/`path`/`liftStation` definitions.
+- Design choice: each carries an explicit, required `buildingId` rather than a
+  dynamically-computed one (unlike a slot's `findBuildingForSlot`) — they're
+  config-authored only for now (no drag editing), and a door sits right on a wall
+  boundary where point-in-polygon is unreliable. Plugs straight into the existing
+  `isBuildingVisible` used for the plant/warehouse drill-down.
+- New `src/components/Doors.tsx`/`Paths.tsx`/`LiftStations.tsx`: a green rectangle (door,
+  matching the slot entry marker's "access point" green), a chain of thin flat boxes
+  between path points (reusing `Walls.tsx`'s segment length/angle math), and a purple
+  labeled pad (lift station, mirroring the slot pad+edges+label pattern). All three opt
+  out of raycasting (`raycast={() => null}`) so they stay non-interactive and don't block
+  the existing click-empty-floor `back()` behavior — deliberately, since interactive
+  editing for these isn't built yet.
+- Reworked `scripts/generate-example-warehouse.js`: added to the main building only (two
+  exterior doors, a connected corridor network along the A/B and N/M aisles plus a south
+  branch to a door, one lift station "CL01" sitting on that branch) — the annex building
+  has none, so isolating it at "warehouse" level correctly shows a bare shell. Re-ran the
+  script; `tsc --noEmit` clean.
+- Verified via Playwright: plant/warehouse-level screenshots match the user's annotated
+  topology (west/south doors, connected red corridor, purple "CL01" pad); confirmed
+  clicking directly on the lift station while a building was focused still popped back to
+  "plant" (the raycast opt-out works); confirmed edit mode still renders everything with
+  no regression to slot selection/Inspector.
+- specs.md updated (new §5.1 subsection, decision log entry, open-questions bullet
+  about no editor UI / no enforced path-to-entry connection yet).
+
 ## 2026-09-10 (cont'd — building hover highlight)
 
 - User follow-up: "hover highlighting should work for buildings as well." Added hover

@@ -25,6 +25,12 @@
 // and ~10% partial (a varied smaller count) — deterministic, not random, so
 // re-running this script reproduces the same file (no noisy diffs).
 //
+// The main building also gets two doors (west, south — both exterior), a
+// connected corridor network (the A/B and N/M aisles, plus a south branch),
+// and one carriage lift station (CL01) sitting on that south branch — see
+// specs.md §5.1 "Doors, paths & the carriage lift station". The annex
+// building has none of these, so isolating it shows a bare shell.
+//
 // Run: node scripts/generate-example-warehouse.js
 
 import { writeFileSync } from "node:fs";
@@ -191,6 +197,31 @@ const allContents = [
   ...groupC.contents,
 ];
 
+// --- Doors, paths & the carriage lift station: physical/circulation
+// elements, main building only (the annex building has none, so isolating it
+// at "warehouse" level shows a bare shell — see specs.md §5.1). Positions are
+// hand-picked to land on the A/B and N/M aisle centerlines (y=13, x=33 — the
+// midpoints between each facing pair's ANCHOR/ENTRY coordinates above) so the
+// corridor network visibly connects to where slots actually open onto it.
+const MAIN_BUILDING_ID = "Batiment 13A";
+
+const doors = [
+  { id: "Door-West", x: 0, y: 13, rotationDeg: 90, buildingId: MAIN_BUILDING_ID },
+  { id: "Door-South", x: 6, y: 0, rotationDeg: 0, buildingId: MAIN_BUILDING_ID },
+];
+
+const paths = [
+  // A/B aisle (y=13), extended west all the way to the west door.
+  { id: "Path-Main", points: [{ x: 0, y: 13 }, { x: 33, y: 13 }], buildingId: MAIN_BUILDING_ID },
+  // N/M aisle (x=33), meeting Path-Main at (33, 13).
+  { id: "Path-NM", points: [{ x: 33, y: 2 }, { x: 33, y: 18 }], buildingId: MAIN_BUILDING_ID },
+  // South branch from Path-Main down to the south door, passing right through
+  // the lift station's position below.
+  { id: "Path-South", points: [{ x: 6, y: 13 }, { x: 6, y: 0 }], buildingId: MAIN_BUILDING_ID },
+];
+
+const liftStations = [{ id: "CL01", x: 6, y: 4, rotationDeg: 0, buildingId: MAIN_BUILDING_ID }];
+
 const config = {
   id: "bat-13a",
   name: "Batiment 13A",
@@ -217,6 +248,9 @@ const config = {
       ],
     },
   ],
+  doors,
+  paths,
+  liftStations,
   slotDefaults: { width: WIDTH, height: CELL_DEPTH },
   slots: allSlots,
 };

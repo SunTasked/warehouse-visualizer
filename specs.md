@@ -260,6 +260,46 @@ few meters across on screen), an un-opted-out wireframe silently intercepts near
 click meant for the rack geometry behind/above it. Cost real debugging time to track
 down (clicks appeared to do nothing, with no error) before finding it.
 
+#### Doors, paths & the carriage lift station
+
+Three new physical/circulation elements, all optional arrays on the config file
+(`doors`/`paths`/`liftStations`, absent = empty — old files keep loading unchanged):
+`Door` (an opening in a building's wall, to the exterior or to another building via
+`leadsTo`), `Path` (a polyline corridor, like an open `WallLoop`), and `LiftStation` (a
+fixed 6x2m footprint — a code constant for now, not a schema field). These are literal
+physical/visual objects — closer in spirit to walls than to the future simulation graph
+(§5.2), which will model routing with direction/capacity and is a separate, not-yet-built
+layer that may later reference or formalize path connectivity for actual routing.
+
+Unlike a slot's `buildingId` (computed dynamically via point-in-polygon —
+`findBuildingForSlot` in `src/lib/buildings.ts`), all three carry an **explicit, required
+`buildingId` field** instead. Two reasons: they're config-authored only for now (no
+drag-to-reposition), so there's no need for a dynamic/recomputed association; and a door
+in particular sits *on* a wall boundary, where a point-in-polygon test is unreliable
+(floating-point edge case). The explicit field plugs directly into the existing
+`isBuildingVisible(focus, buildingId)` from `src/lib/visibility.ts` — the same
+plant/warehouse drill-down hiding `Walls.tsx` already uses — so isolating a building at
+"warehouse" level correctly shows only its own doors/paths/lift station.
+
+Rendering (`src/components/Doors.tsx`/`Paths.tsx`/`LiftStations.tsx`, wired into
+`WarehouseScene.tsx` after `Walls`): a door is a green flat rectangle (matching
+`Slots.tsx`'s `ENTRY_COLOR` — the same "access point" meaning); a path is a chain of thin
+flat boxes between consecutive points, using the same length/angle/midpoint math
+`Walls.tsx`'s `segmentsForLoop` already computes for wall segments, colored a muted red
+(`#b91c1c`) deliberately distinct from the pallet fill-rate red/orange so a corridor
+marking never reads as stock; a lift station is a purple 6x2 pad with a black edge
+outline and an id label, mirroring `Slots.tsx`'s pad+edges+`Text` pattern. All three are
+**non-interactive by design**: every mesh opts out of raycasting (`raycast={() =>
+null}`, the same fix already used for the slot edge-outline's Three.js line-raycast
+gotcha), so clicking through one in view mode still falls through to the existing
+click-empty-floor `back()` behavior on the Canvas — verified via Playwright by clicking
+directly on the lift station while a building was focused and confirming it popped back
+to "plant" exactly like clicking bare floor does.
+
+Not yet built: interactive add/drag/delete UI for any of these three (same precedent as
+wall-loop authoring below — config-only, authored via `scripts/generate-example-
+warehouse.js` for the example data). See §9 open questions.
+
 #### Editor
 
 The viewer has an edit mode (toggle in the toolbar) for authoring/adjusting this format
@@ -494,11 +534,32 @@ eyeball results in 3D rather than deciding blind.
     when generating the example warehouse (decision log below) but not a schema field, and
     `addPalletAuto` will happily keep stacking past it. Worth a schema field if this needs
     to become a real, enforced constraint rather than just how the demo data was built.
+14. Doors/paths/lift stations (§5.1) have no interactive editor UI yet (add/drag/delete) —
+    config-only, authored via the generator script, same as whole new wall loops (open
+    question 11). Also no enforced geometric relationship between a path's endpoints and
+    the slot entries / doors / lift station it's meant to connect to ("a slot entry point
+    should be connected to one") — purely a data-authoring convention in the example
+    generator, not validated. Worth revisiting once the simulation graph layer (§5.2) is
+    built, which may supersede or formalize path connectivity for actual routing.
 
 ## 10. Decision Log
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-10 — Added three new physical/circulation elements: doors, corridor paths, and
+  a carriage lift station (fixed 6x2m footprint for now). All config-only (optional
+  arrays, so old files keep loading unchanged), rendered but not yet interactive/editable
+  — same precedent as whole new wall loops not having editor UI yet. Each carries an
+  explicit, required `buildingId` (unlike a slot's dynamically-computed one) since a door
+  sits on a wall boundary where point-in-polygon is unreliable, and none of the three are
+  drag-editable yet anyway. Reuses `isBuildingVisible` for the same plant/warehouse
+  drill-down hiding walls already have, and the slot edge-outline's `raycast={() => null}`
+  fix so none of them block the existing click-empty-floor `back()` behavior. Added to the
+  example warehouse's main building only (`scripts/generate-example-warehouse.js`): two
+  exterior doors, a connected corridor network along the A/B and N/M aisles plus a south
+  branch, and one lift station (CL01) on that branch — matching the rough topology of a
+  screenshot the user annotated by hand. See §5.1 "Doors, paths & the carriage lift
+  station".
 - 2026-09-10 — Extended the in-scene hover highlight to buildings: hovering any wall
   segment of a closed loop while browsing at "plant" level highlights that building's
   whole wall outline. Per user follow-up request. Used a distinct blue accent color
