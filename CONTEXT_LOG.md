@@ -6,6 +6,62 @@ top. This is a log of what happened each session — the current-state snapshot 
 
 ## 2026-09-10
 
+- Rebuilt the example warehouse (`schema/warehouse.example.json` +
+  `.content.example.json`) into a purpose-built demo per the user's spec: A01-A05
+  (depth 3, up to 2 tiers, facing south) and B01-B05 (depth 2, up to 3 tiers, facing
+  north) as a horizontal facing-pair across a 2m aisle; N01-N04/M01-M04 as the same
+  pattern rotated 90°/270° ("vertical" racks, facing east/west) across their own 2m
+  aisle. Pallet counts: 01->1, 02->3, 03->5, 04->6 (full capacity), 05->0 (A/B only, N/M
+  only go to 04) — filled using the exact same deepest-first algorithm as the app's
+  `addPalletAuto`, written as a small local function in the new generator script so the
+  data is byte-identical to what clicking "+ Pallet" that many times would produce.
+  Walls enlarged to 40x22m to fit both facing-pairs without overlap.
+- New: `scripts/generate-example-warehouse.js` (run: `node scripts/generate-
+  example-warehouse.js`), parallel to the existing `generate-batiment-13a.js`. Had to
+  derive the `rotationDeg` -> compass-facing mapping from scratch by working through
+  `Slots.tsx`'s actual Three.js rotation-around-Y math (not assumed): 0=North, 90=West,
+  180=South, 270=East — cross-checked the entry-marker and sub-slot-offset formulas both
+  independently, they agreed. This is now the first real usage of `rotationDeg` beyond
+  90°-increment eyeballing.
+- Verified via Playwright (screenshots + a data-summary dump comparing generated pallet
+  distribution against hand-derived expectations for every slot — all matched exactly)
+  and via the Inspector in edit mode (selected A01, confirmed Depth 3 / only A01.3 has a
+  pallet, matching "A01 should contain 1 pallet" filling the deepest sub-slot first).
+  `tsc`/full build clean, no console errors.
+- specs.md updated (decision log + a new open question: "height"/max-tiers-per-sub-slot
+  is a data-authoring convention only here, not a persisted or enforced schema field).
+- Added a visible entry marker on each slot (user request, in French, with an
+  annotated screenshot): a raised green threshold bar right at the slot's fixed entry
+  edge (`EntryMarker` in `src/components/Slots.tsx`), sized/positioned so it still
+  reads clearly even where a rack's corner posts stand on it, and dims along with the
+  rest of the slot under the view-mode focus system. Verified visually (zoomed-out
+  overview and zoomed-in via the click-to-focus flow) — reads clearly at both scales.
+  specs.md §5.1 "Storage subdivision" + decision log updated.
+- Split the physical asset layer into two files (user request, in French): a
+  **configuration** file (layout — walls, slot positions, each slot's physical `depth`)
+  and a **content** file (inventory — which sub-slots hold pallets/items), loaded in
+  sequence, config first. New: `src/lib/warehouseFiles.ts` (`mergeWarehouse`/
+  `splitWarehouse`, round-trip verified lossless via a Playwright Save-then-inspect
+  pass), `schema/warehouse.content.schema.json`, `schema/warehouse.content.example.json`.
+  Changed: `src/types/warehouse.ts` (added `SlotConfig`/`WarehouseConfig`/
+  `SlotContent`/`WarehouseContent`, kept the merged runtime `Slot`/`Warehouse` as-is),
+  `src/lib/file.ts` (`loadWarehouseFiles`/`saveWarehouseFiles`, two sequential
+  pickers/saves with an `alert()` naming each one), `src/state/EditorContext.tsx`
+  (`fileHandlesRef` now holds both handles), `src/App.tsx` (merges both example files
+  on initial load), `schema/warehouse.example.json` (trimmed to config-only).
+  `schema/warehouse.batiment-13a.json` needed no change (it never had subSlots data).
+  No changes needed anywhere else — `Slots.tsx`/`Rack.tsx`/`Inspector.tsx`/
+  `ViewFocusContext`/`focusBounds.ts` all still just work with the merged in-memory
+  `Warehouse`, exactly as before.
+- Verified via Playwright: initial app load renders pixel-identical to before the
+  split; the two-file Load flow (sequential `<input type=file>` pickers, forcing the
+  fallback path since this headless Chromium's `showOpenFilePicker` doesn't
+  resolve/reject in this environment — a test-harness limitation, not an app issue)
+  merges correctly; Save produces `bat-13a.json` + `bat-13a.content.json` whose content
+  exactly reproduces the original split. Edit mode (Inspector, depth, pallets)
+  unaffected. Did not commit/push this round — not asked to this time.
+- specs.md updated (§5.1 intro + "Storage subdivision" + "Editor" Save/load bullet +
+  decision log); this entry is the CONTEXT_LOG.md counterpart.
 - Finished Milestones 3-4 of the plan referenced below: a view-mode-only hover card
   (`src/components/HoverCard.tsx`) and a click-to-zoom drill-down through
   Slot → sub-slot → pallet, with dimming and rollback. New:

@@ -1,6 +1,8 @@
 import { useRef } from "react";
-import warehouseData from "../schema/warehouse.example.json";
-import type { Warehouse } from "./types/warehouse";
+import warehouseConfig from "../schema/warehouse.example.json";
+import warehouseContent from "../schema/warehouse.content.example.json";
+import type { WarehouseConfig, WarehouseContent } from "./types/warehouse";
+import { mergeWarehouse } from "./lib/warehouseFiles";
 import { EditorProvider, useEditor } from "./state/EditorContext";
 import { ViewFocusProvider } from "./state/ViewFocusContext";
 import { WarehouseScene } from "./components/WarehouseScene";
@@ -11,7 +13,13 @@ import { SelectionOverlay } from "./components/SelectionOverlay";
 import { HoverCard } from "./components/HoverCard";
 import "./App.css";
 
-const initialWarehouse = warehouseData as Warehouse;
+// First the warehouse configuration (layout) loads, then its content
+// (inventory) — same two-file split as Toolbar's Load button (see
+// src/lib/file.ts / src/lib/warehouseFiles.ts).
+const initialWarehouse = mergeWarehouse(
+  warehouseConfig as WarehouseConfig,
+  warehouseContent as WarehouseContent,
+);
 
 function AppShell() {
   const { warehouse } = useEditor();

@@ -1,4 +1,5 @@
-import type { Warehouse } from "../types/warehouse";
+import type { Warehouse, WarehouseConfig, WarehouseContent } from "../types/warehouse";
+import { mergeWarehouse, splitWarehouse } from "./warehouseFiles";
 
 // Minimal File System Access API typings (not yet in lib.dom.d.ts everywhere).
 interface FileSystemFileHandleLike {
@@ -13,6 +14,11 @@ declare global {
   }
 }
 
+export interface WarehouseFileHandles {
+  configHandle: FileSystemFileHandleLike | null;
+  contentHandle: FileSystemFileHandleLike | null;
+}
+
 const JSON_PICKER_TYPES = [
   { description: "Warehouse JSON", accept: { "application/json": [".json"] } },
 ];
@@ -21,12 +27,12 @@ function isAbort(err: unknown): boolean {
   return err instanceof DOMException && err.name === "AbortError";
 }
 
-function downloadJson(warehouse: Warehouse): void {
-  const blob = new Blob([JSON.stringify(warehouse, null, 2)], { type: "application/json" });
+function downloadJson(data: unknown, filename: string): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${warehouse.id || "warehouse"}.json`;
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -41,31 +47,20 @@ function pickJsonFile(): Promise<File | null> {
   });
 }
 
-/**
- * Saves to the given file handle if we have one (from a prior load/save-as),
- * otherwise prompts via the File System Access API (Chrome/Edge). Falls back
- * to a plain browser download when that API isn't available (e.g. Firefox,
- * Safari) — the caller won't get a handle back in that case, so subsequent
- * saves download again rather than overwriting in place.
- */
-export async function saveWarehouse(
-  warehouse: Warehouse,
+/** Saves one JSON document to the given handle if present, otherwise prompts (FSA, or a plain download as fallback). */
+async function saveJson(
+  data: unknown,
   handle: FileSystemFileHandleLike | null,
+  suggestedName: string,
 ): Promise<FileSystemFileHandleLike | null> {
   if (!window.showSaveFilePicker) {
-    downloadJson(warehouse);
+    downloadJson(data, suggestedName);
     return null;
   }
-
   try {
-    const target =
-      handle ??
-      (await window.showSaveFilePicker({
-        suggestedName: `${warehouse.id || "warehouse"}.json`,
-        types: JSON_PICKER_TYPES,
-      }));
+    const target = handle ?? (await window.showSaveFilePicker({ suggestedName, types: JSON_PICKER_TYPES }));
     const writable = await target.createWritable();
-    await writable.write(JSON.stringify(warehouse, null, 2));
+    await writable.write(JSON.stringify(data, null, 2));
     await writable.close();
     return target;
   } catch (err) {
@@ -74,26 +69,63 @@ export async function saveWarehouse(
   }
 }
 
-/**
- * Opens a warehouse JSON file. Uses the File System Access API when
- * available (so a following Save can write back in place); otherwise falls
- * back to a plain <input type="file"> picker.
- */
-export async function loadWarehouse(): Promise<{ warehouse: Warehouse; handle: FileSystemFileHandleLike | null } | null> {
+/** Opens one JSON file (FSA when available, so a following save can write back in place; `<input type=file>` otherwise). */
+async function pickJson<T>(instructions: string): Promise<{ data: T; handle: FileSystemFileHandleLike | null } | null> {
+  window.alert(instructions);
   if (window.showOpenFilePicker) {
     try {
       const [handle] = await window.showOpenFilePicker({ types: JSON_PICKER_TYPES, multiple: false });
       const file = await handle.getFile();
-      const warehouse = JSON.parse(await file.text()) as Warehouse;
-      return { warehouse, handle };
+      return { data: JSON.parse(await file.text()) as T, handle };
     } catch (err) {
       if (isAbort(err)) return null;
       throw err;
     }
   }
-
   const file = await pickJsonFile();
   if (!file) return null;
-  const warehouse = JSON.parse(await file.text()) as Warehouse;
-  return { warehouse, handle: null };
+  return { data: JSON.parse(await file.text()) as T, handle: null };
+}
+
+/**
+ * Loads a warehouse from two separate files, picked in sequence: first the
+ * physical-layout **configuration**, then its **content** (inventory). The
+ * content file is optional — cancelling that second picker still loads the
+ * layout, just with every slot empty (mergeWarehouse handles a null
+ * content). Cancelling the *first* picker (config) aborts the whole load.
+ */
+export async function loadWarehouseFiles(): Promise<
+  { warehouse: Warehouse; handles: WarehouseFileHandles } | null
+> {
+  const configResult = await pickJson<WarehouseConfig>(
+    "Select the warehouse CONFIGURATION file (layout: walls, slots, depth).",
+  );
+  if (!configResult) return null;
+
+  const contentResult = await pickJson<WarehouseContent>(
+    "Now select the warehouse CONTENT file (inventory: pallets/items). Cancel to load the layout empty.",
+  );
+
+  const warehouse = mergeWarehouse(configResult.data, contentResult?.data ?? null);
+  return {
+    warehouse,
+    handles: { configHandle: configResult.handle, contentHandle: contentResult?.handle ?? null },
+  };
+}
+
+/**
+ * Splits the live warehouse back into its two files and saves each — to its
+ * existing handle in place when we have one (FSA, from a prior load/save),
+ * otherwise prompting for where to save (or downloading, on browsers without
+ * the File System Access API).
+ */
+export async function saveWarehouseFiles(
+  warehouse: Warehouse,
+  handles: WarehouseFileHandles,
+): Promise<WarehouseFileHandles> {
+  const { config, content } = splitWarehouse(warehouse);
+  const base = warehouse.id || "warehouse";
+  const configHandle = await saveJson(config, handles.configHandle, `${base}.json`);
+  const contentHandle = await saveJson(content, handles.contentHandle, `${base}.content.json`);
+  return { configHandle, contentHandle };
 }

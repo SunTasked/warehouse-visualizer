@@ -12,7 +12,7 @@ import {
 import type { Camera } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { Point, Slot, SubSlot, Warehouse } from "../types/warehouse";
-import { loadWarehouse, saveWarehouse } from "../lib/file";
+import { loadWarehouseFiles, saveWarehouseFiles, type WarehouseFileHandles } from "../lib/file";
 
 export type Mode = "view" | "edit";
 
@@ -26,11 +26,6 @@ export type DragTarget = {
   | { type: "wallPoint"; wallId: string; index: number }
   | { type: "slots"; ids: string[]; anchor: Point; origins: Record<string, Point> }
 );
-
-interface FileHandleLike {
-  getFile: () => Promise<File>;
-  createWritable: () => Promise<{ write: (data: string) => Promise<void>; close: () => Promise<void> }>;
-}
 
 // All edges (walls and slots) must land on whole-meter graduation marks.
 // Slot footprints (4x2) have integer half-extents, so an integer center plus
@@ -129,7 +124,7 @@ export function EditorProvider({
   const dragRef = useRef<DragTarget | null>(null);
   const orbitRef = useRef<OrbitControlsImpl | null>(null);
   const cameraRef = useRef<Camera | null>(null);
-  const fileHandleRef = useRef<FileHandleLike | null>(null);
+  const fileHandlesRef = useRef<WarehouseFileHandles>({ configHandle: null, contentHandle: null });
 
   const warehouse = state.warehouse;
 
@@ -412,15 +407,14 @@ export function EditorProvider({
   }, [undo, redo]);
 
   const save = useCallback(async () => {
-    const handle = await saveWarehouse(warehouse, fileHandleRef.current);
-    fileHandleRef.current = handle;
+    fileHandlesRef.current = await saveWarehouseFiles(warehouse, fileHandlesRef.current);
     setDirty(false);
   }, [warehouse]);
 
   const load = useCallback(async () => {
-    const result = await loadWarehouse();
+    const result = await loadWarehouseFiles();
     if (!result) return;
-    fileHandleRef.current = result.handle;
+    fileHandlesRef.current = result.handles;
     setState({
       warehouse: result.warehouse,
       entries: [{ warehouse: result.warehouse, label: `Loaded ${result.warehouse.name}` }],

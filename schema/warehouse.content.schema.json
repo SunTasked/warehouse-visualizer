@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/SunTasked/warehouse-visualizer/schema/warehouse.content.schema.json",
+  "title": "Warehouse Content (inventory, v1)",
+  "description": "What's actually stocked in a warehouse, separate from its physical layout (see warehouse.schema.json, whose `id` this file references as `warehouseId`). Loaded second, after the configuration file, and merged with it in memory. A slot absent from `slots`, or a sub-slot with no pallets, is simply empty — this file only needs to describe what's actually there.",
+  "type": "object",
+  "required": ["warehouseId", "slots"],
+  "additionalProperties": false,
+  "properties": {
+    "warehouseId": {
+      "type": "string",
+      "description": "The warehouse.schema.json config's `id` this content belongs to."
+    },
+    "slots": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/slotContent" }
+    }
+  },
+  "definitions": {
+    "slotContent": {
+      "type": "object",
+      "required": ["slotId", "subSlots"],
+      "additionalProperties": false,
+      "properties": {
+        "slotId": {
+          "type": "string",
+          "description": "References a slot `id` in the matching warehouse.schema.json config."
+        },
+        "subSlots": {
+          "type": "array",
+          "description": "One entry per depth position (see the config slot's `depth`), front-to-back. Shorter than the config's depth is fine — missing positions are treated as empty.",
+          "items": { "$ref": "#/definitions/subSlotContent" }
+        }
+      }
+    },
+    "subSlotContent": {
+      "type": "object",
+      "required": ["pallets"],
+      "additionalProperties": false,
+      "properties": {
+        "pallets": {
+          "type": "array",
+          "description": "Stacked bottom-to-top; pallets[0] is the lowest tier.",
+          "items": { "$ref": "#/definitions/pallet" }
+        }
+      }
+    },
+    "pallet": {
+      "type": "object",
+      "required": ["id", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": { "$ref": "#/definitions/item" }
+        }
+      }
+    },
+    "item": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" }
+      }
+    }
+  }
+}

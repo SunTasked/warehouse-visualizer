@@ -18,6 +18,16 @@ const SLOT_SELECTED_COLOR = "#ff8c42";
 // "these cells belong together, but that one over there is a different slot".
 const SLOT_EDGE_COLOR = "#000000";
 const DIVIDER_COLOR = "#b7c6ef";
+// The entry marker: a painted-looking strip on the slot's own floor surface,
+// at its fixed entry edge — where an operator accesses the slot to load/
+// unload. Green reads as "access point" and is distinct from every other
+// color already in use (slot fill, black edge, pale divider, orange
+// selection, blue-gray dimming).
+const ENTRY_COLOR = "#22c55e";
+const ENTRY_MARKER_DEPTH = 0.25;
+// Raised like a real painted threshold bar (taller than the slot pad itself)
+// so it still reads clearly even where a rack's corner posts stand on it.
+const ENTRY_MARKER_HEIGHT = 0.14;
 // How far outside the slot's fixed entry edge (see cellDepth/footprintCenterZ
 // below) the id label sits — the operator-access side, assumed to stay clear
 // of any other slot's footprint.
@@ -30,6 +40,22 @@ function DepthDivider({ z, width }: { z: number; width: number }) {
   return (
     <mesh geometry={geometry} position={[0, SLOT_HEIGHT / 2 + 0.005, z]}>
       <meshStandardMaterial color={DIVIDER_COLOR} />
+    </mesh>
+  );
+}
+
+// A painted strip on the pad surface at the slot's fixed entry edge —
+// materializes where an operator accesses the slot, right on the slot
+// itself (as opposed to the id label, which sits just outside it).
+function EntryMarker({ cellDepth, width, color }: { cellDepth: number; width: number; color: string }) {
+  const geometry = useMemo(
+    () => new THREE.BoxGeometry(width * 0.96, ENTRY_MARKER_HEIGHT, ENTRY_MARKER_DEPTH),
+    [width],
+  );
+  const z = -cellDepth / 2 + ENTRY_MARKER_DEPTH / 2;
+  return (
+    <mesh geometry={geometry} position={[0, SLOT_HEIGHT / 2 + ENTRY_MARKER_HEIGHT / 2, z]}>
+      <meshStandardMaterial color={color} />
     </mesh>
   );
 }
@@ -130,6 +156,7 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
           <lineBasicMaterial color={SLOT_EDGE_COLOR} />
         </lineSegments>
       </group>
+      <EntryMarker cellDepth={cellDepth} width={defaults.width} color={emphasisColor(ENTRY_COLOR, emphasis)} />
       <Text
         position={[0, SLOT_HEIGHT / 2 + 0.05, -cellDepth / 2 - LABEL_OFFSET]}
         rotation={[-Math.PI / 2, 0, 0]}

@@ -74,8 +74,19 @@ downstream tooling.
 
 ### 5.1 Physical Asset Layer — walls & slots (decided, v1)
 
-Format: `schema/warehouse.schema.json` (JSON Schema, draft-07), example at
-`schema/warehouse.example.json`.
+Format: split across two files, loaded in sequence — **config** first, then **content**:
+- `schema/warehouse.schema.json` (JSON Schema, draft-07): the physical layout — walls,
+  slot positions/footprints, and each slot's physical `depth`. Rarely changes; this is
+  "the building". Example at `schema/warehouse.example.json`.
+- `schema/warehouse.content.schema.json`: the inventory — which sub-slots actually hold
+  pallets/items right now, referencing the config's `id` as `warehouseId`. Changes
+  constantly; this is "what's on the shelves". Example at
+  `schema/warehouse.content.example.json`.
+
+The app (`src/lib/warehouseFiles.ts`) merges the two into one in-memory `Warehouse` object
+that the rest of the app (rendering, editing, the view-mode drill-down) works with
+unchanged, and splits it back apart on save. See §5.1 "Storage subdivision" below for why
+this split exists and exactly what moved where.
 
 - Coordinates in meters (1 unit = 1m), **origin at bottom-left, +X right, +Y up**.
 - `walls`: one or more named loops/polylines, each an ordered list of corner points, with a
@@ -106,16 +117,29 @@ before building anything on top of it. Implementation notes:
 
 #### Storage subdivision (sub-slots, pallets, items)
 
-A slot's depth (`subSlots.length`) multiplies its footprint rather than subdividing
-it — a depth-3 slot occupies 3x the standard `slotDefaults` footprint, front-to-back,
-not that same footprint split three ways. `subSlots[0]` always sits exactly where a
-depth-1 slot's footprint would (so `slot.x`/`y` never move as depth changes); each
-further sub-slot is appended outward from there. Within one sub-slot, **pallets**
-stack vertically (rack tiers); each pallet holds 1-10 **items** (individual units, e.g.
+A slot's depth multiplies its footprint rather than subdividing it — a depth-3 slot
+occupies 3x the standard `slotDefaults` footprint, front-to-back, not that same
+footprint split three ways. The frontmost sub-slot always sits exactly where a depth-1
+slot's footprint would (so `slot.x`/`y` never move as depth changes); each further
+sub-slot is appended outward from there. Within one sub-slot, **pallets** stack
+vertically (rack tiers); each pallet holds 1-10 **items** (individual units, e.g.
 tires) laid out side by side along the slot's width. Hierarchy: **Slot → Sub-slot →
-Pallet → Item**. See the type definitions in `src/types/warehouse.ts` and
-`schema/warehouse.schema.json` (`slot.subSlots`, optional — omitted/empty means depth
-1, no storage detail authored yet).
+Pallet → Item**.
+
+**Depth is config, stock is content** — this is *why* the format is split into two
+files (see above): `depth` (how many sub-slot positions physically exist) lives in
+`SlotConfig`/`warehouse.schema.json`, a physical/structural property independent of
+whether those positions currently hold anything, exactly like a real drive-in rack is
+built with a fixed number of pallet positions regardless of current stock level.
+Which positions actually hold pallets/items lives in `SlotContent`/
+`warehouse.content.schema.json`, referencing the config's slot `id`s. `src/lib/
+warehouseFiles.ts`'s `mergeWarehouse()`/`splitWarehouse()` convert between this
+two-file shape and the single in-memory `Warehouse` (with `Slot.subSlots` holding the
+merged pallets/items) that `src/components/Slots.tsx`/`Rack.tsx`/`Inspector.tsx` etc.
+read and write — none of that rendering/editing code deals with the file split
+directly. See the type definitions in `src/types/warehouse.ts`
+(`SlotConfig`/`WarehouseConfig` vs. `SlotContent`/`WarehouseContent` vs. the merged
+runtime `Slot`/`Warehouse`).
 
 Rendering (`src/components/Rack.tsx`, wired into `src/components/Slots.tsx`) is
 schematic, not to real-world scale: a blue rack frame per stocked sub-slot, sized to
@@ -129,7 +153,11 @@ the fixed entry edge (the side that doesn't move as depth changes — see below)
 space is assumed to be the aisle an operator uses to access the slot, so no other
 slot's footprint will occupy it. The outer edge of a whole slot's footprint renders in
 solid black (vs. the pale sub-slot dividers), for a clear "these cells belong together,
-that's a different slot" contrast.
+that's a different slot" contrast. The entry itself is also marked *on* the slot: a
+raised green threshold bar (`EntryMarker` in `Slots.tsx`) sits right at the fixed entry
+edge, on the pad surface — tall enough to still read clearly even where a rack's
+corner posts stand on it, distinct from every other color already in use (slot fill,
+black edge, pale divider, orange selection, gray dimming).
 
 Editable in the Inspector when a single slot is selected: a Depth field (resizes
 `subSlots`, preserving existing content when growing, dropping the deepest sub-slots
@@ -208,9 +236,15 @@ directly, instead of hand-editing JSON:
   timeline. A plain click with no movement commits nothing (checked via a `moved` flag on
   the drag target) rather than recording a no-op "Move..." entry. History resets on Load
   (opening a different file isn't itself undoable).
-- **Save/load**: uses the File System Access API where available (Chrome/Edge) so repeated
-  saves overwrite the same file in place; falls back to a browser download (save) and an
-  `<input type="file">` picker (load) elsewhere. See `src/lib/file.ts`.
+- **Save/load**: one "Load…"/"Save" action each, but two files under the hood — Load
+  prompts for the **configuration** file first, then the **content** file (an `alert()`
+  names which is which before each picker; cancelling the content picker still loads
+  the layout, just empty); Save splits the live warehouse back into both and writes
+  them in the same order. Uses the File System Access API where available (Chrome/Edge)
+  so repeated saves overwrite both files in place; falls back to a browser download
+  (save) and an `<input type="file">` picker, invoked twice (load) elsewhere. See
+  `src/lib/file.ts` (the two-file I/O) and `src/lib/warehouseFiles.ts` (the merge/split
+  conversion, also used for the app's own initial load in `src/App.tsx`).
 - Implementation note: the camera/orbit target is computed once per mount, not on every
   edit, so reshaping a wall doesn't yank the view out from under the user — see
   `src/components/WarehouseScene.tsx`. Loading a different file remounts the scene (keyed
@@ -390,13 +424,50 @@ eyeball results in 3D rather than deciding blind.
     moving existing ones) — needed once someone actually digitizes a new building shape
     from scratch rather than adjusting the example.
 12. The view-mode hover card/click-to-zoom drill-down (§5.1) was only verified against the
-    5-slot example file — not checked against the full 870-slot Batiment 13A dataset. The
+    18-slot example file — not checked against the full 870-slot Batiment 13A dataset. The
     per-slot hover/focus checks are cheap conditionals so likely fine, but not confirmed.
+13. No persisted or enforced cap on pallet tiers per sub-slot ("height", e.g. "a slot's
+    depth-3 sub-slots each hold at most 2 pallets") — used as a data-authoring convention
+    when generating the example warehouse (decision log below) but not a schema field, and
+    `addPalletAuto` will happily keep stacking past it. Worth a schema field if this needs
+    to become a real, enforced constraint rather than just how the demo data was built.
 
 ## 10. Decision Log
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-10 — Rebuilt `schema/warehouse.example.json` / `.content.example.json` as a
+  purpose-built demo of depth, orientation, and stacking: four facing-pairs of racking
+  (A/B horizontal, N/M vertical — rotated 90°/270°), each pair separated by a 2m aisle,
+  slots facing each other across it. A/N: depth 3; B/M: depth 2. Pallet counts follow a
+  fixed 01→1, 02→3, 03→5 (04→6 = full capacity), 05→0-if-present pattern, filled via the
+  exact same deepest-first algorithm as the app's own `addPalletAuto`. Walls enlarged
+  (40x22m) to fit. New `scripts/generate-example-warehouse.js` (mirrors
+  `scripts/generate-batiment-13a.js`'s existence as a script, not hand-edited JSON) —
+  also the first real-world confirmation of the `rotationDeg` -> compass-facing mapping
+  (0=N, 90=W, 180=S, 270=E), derived from and cross-checked against `Slots.tsx`'s actual
+  rotation math before generating. "Height" (max pallet tiers per sub-slot, e.g. "depth 3
+  and height 2" for A) is a data-authoring concept only here, not a persisted schema
+  field or an enforced cap — nothing stops `addPalletAuto` from exceeding it later.
+- 2026-09-10 — Added a visible entry marker directly on each slot's pad: a raised
+  green threshold bar at the fixed entry edge (`EntryMarker` in
+  `src/components/Slots.tsx`), on top of the existing outside-the-footprint id label.
+  Requested after the id label alone wasn't read as clearly marking the access point.
+  See §5.1 "Storage subdivision".
+- 2026-09-10 — Split the physical asset layer into two files, loaded in sequence: a
+  **configuration** file (`schema/warehouse.schema.json` — walls, slot positions, and
+  each slot's physical `depth`) and a **content** file
+  (`schema/warehouse.content.schema.json` — which sub-slots actually hold
+  pallets/items, referencing the config's `id`). Rationale: depth is a physical/
+  structural property of a slot (like a real rack built with N positions), while stock
+  changes constantly — conflating them in one file meant every inventory change was
+  also a layout-file change. `src/lib/warehouseFiles.ts` merges the two into the single
+  in-memory `Warehouse` shape the rest of the app already used, and splits it back
+  apart on save, so no rendering/editing code needed to change. Updated
+  `schema/warehouse.example.json` (now config-only) and added
+  `schema/warehouse.content.example.json`; `schema/warehouse.batiment-13a.json` needed
+  no change (it never had storage content). See §5.1 "Storage subdivision" and "Physical
+  Asset Layer" intro.
 - 2026-09-10 — Added a view-mode-only hover card + click-to-zoom drill-down through
   Slot → sub-slot → pallet (`src/state/ViewFocusContext.tsx`, `src/lib/focusBounds.ts`,
   `src/lib/emphasis.ts`, `src/components/HoverCard.tsx`), on top of the same day's
