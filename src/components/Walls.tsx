@@ -10,6 +10,13 @@ const WALL_THICKNESS = 0.2;
 const HANDLE_RADIUS = 0.35;
 const HANDLE_Y = 0.15;
 const WALL_COLOR = "#8a8f98";
+// A blue accent (matching SLOT_COLOR's family) rather than a lightened gray
+// — "surbrillance" when hovering a building's wall while browsing at "plant"
+// level. A subtle same-hue lighten (as used for slots/racks/pallets) reads
+// too faintly here: at plant zoom a wall is only a few screen pixels thick,
+// so the highlight needs real hue contrast against the gray/white floor to
+// actually be noticeable, not just a brightness bump.
+const WALL_HOVER_COLOR = "#4d7cfe";
 
 interface WallSegment {
   key: string;
@@ -77,7 +84,7 @@ function WallHandles({ wall }: { wall: WallLoop }) {
 
 export function Walls({ walls }: { walls: WallLoop[] }) {
   const { mode } = useEditor();
-  const { focus, back, focusWarehouse } = useViewFocus();
+  const { focus, hover, setHover, back, focusWarehouse } = useViewFocus();
   const segments = useMemo(() => walls.flatMap(segmentsForLoop), [walls]);
 
   return (
@@ -99,15 +106,36 @@ export function Walls({ walls }: { walls: WallLoop[] }) {
           }
         };
 
+        // Hovering a building's wall highlights the whole building — only
+        // meaningful while choosing among buildings at "plant" level (once
+        // inside one, its siblings are hidden and there's nothing to pick).
+        const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {
+          if (mode !== "view" || !segment.isBuilding || focus.level !== "plant") return;
+          e.stopPropagation();
+          setHover({ buildingId: segment.loopId, x: e.nativeEvent.clientX, y: e.nativeEvent.clientY });
+        };
+        const handlePointerOut = () => {
+          if (mode !== "view" || !segment.isBuilding || focus.level !== "plant") return;
+          setHover(null);
+        };
+        const wallHovered =
+          mode === "view" &&
+          focus.level === "plant" &&
+          segment.isBuilding &&
+          hover?.buildingId === segment.loopId;
+
         return (
           <mesh
             key={segment.key}
             position={segment.position}
             rotation={[0, segment.rotationY, 0]}
             onPointerDown={handlePointerDown}
+            onPointerOver={handlePointerOver}
+            onPointerMove={handlePointerOver}
+            onPointerOut={handlePointerOut}
           >
             <boxGeometry args={[segment.length, WALL_HEIGHT, WALL_THICKNESS]} />
-            <meshStandardMaterial color={WALL_COLOR} />
+            <meshStandardMaterial color={wallHovered ? WALL_HOVER_COLOR : WALL_COLOR} />
           </mesh>
         );
       })}

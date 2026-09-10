@@ -4,6 +4,29 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-10 (cont'd — building hover highlight)
+
+- User follow-up: "hover highlighting should work for buildings as well." Added hover
+  handlers to wall segments (`src/components/Walls.tsx`, `onPointerOver`/`onPointerMove`/
+  `onPointerOut`) gated to `focus.level === "plant"` and `segment.isBuilding`, setting a
+  new optional `buildingId` on `ViewFocusContext`'s `HoverPoint` (made `slotId` optional
+  too, since a building hover has no slot).
+- First attempt used a lightened-gray highlight (matching the slot/rack/pallet pattern)
+  and looked like it wasn't working in screenshots — investigated with temporary debug
+  logging (confirmed `onPointerOver` fired with correct conditions and `setHover` did
+  update state/re-render) and a Python/PIL pixel-level comparison between hovered and
+  non-hovered crops of the same wall region, which showed the color change WAS being
+  applied (86,90,98 → 129,132,138 on the wall's outline pixels) — it was just too subtle
+  to see by eye, since a wall at plant-level zoom is only a few screen pixels thick, so a
+  same-hue lighten reads as noise. Switched to a hue-contrasting blue accent color
+  instead, which is clearly visible in screenshots.
+- Verified via Playwright: hovering each building's wall highlights only that building
+  (not the other); moving off returns to plain gray; clicking through to a building right
+  after hovering still correctly drills into "warehouse" level for that building, and the
+  wall correctly reverts to unhovered gray once no longer at "plant" level. `tsc --noEmit`
+  clean.
+- specs.md updated (§5.1 hover paragraph extended, new decision log entry).
+
 ## 2026-09-10 (cont'd — camera consistency, deeper hover, second building)
 
 - User request (French, with 4 reference screenshots): (1) camera angle must always be

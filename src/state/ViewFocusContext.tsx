@@ -13,7 +13,9 @@ import type CameraControlsImpl from "camera-controls";
 import { useEditor } from "./EditorContext";
 
 export interface HoverPoint {
-  slotId: string;
+  /** Set when hovering a building's wall (at "plant" level) — mutually exclusive with slotId. */
+  buildingId?: string;
+  slotId?: string;
   /** Set when hovering a sub-slot's rack (at "slot" level) or a pallet tier (at "slot-space" level). */
   subSlotIndex?: number;
   /** Set only when hovering a pallet tier (at "slot-space" level). */

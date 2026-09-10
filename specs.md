@@ -186,14 +186,18 @@ orphaned over rounding).
 
 Hovering shows both an HTML info card (`src/components/HoverCard.tsx` — id, position,
 depth, occupancy summary; shown while browsing at plant/warehouse level, not once a
-specific slot is picked) *and* an in-scene highlight, one level deeper each time: a slot
-pad lightens while browsing at plant/warehouse; at "slot" level, hovering one of its
-sub-slot racks lightens that rack's frame instead (`RACK_HOVER_COLOR` in
-`src/components/Rack.tsx`) rather than the pad; at "slot-space" level, hovering one of
-its pallet blocks lightens that block instead (`lighten()` blending toward white).
-`ViewFocusContext`'s `HoverPoint` carries optional `subSlotIndex`/`palletIndex` so each
-level's highlight is mutually exclusive with the shallower one (e.g. a slot pad only
-lights up when `subSlotIndex` is unset). Clicking drills one level at a time — a building,
+specific slot is picked) *and* an in-scene highlight, one level deeper each time: at
+"plant" level, hovering a building's wall (`src/components/Walls.tsx`) highlights that
+whole building — a distinct blue accent color rather than a lightened gray, since a
+lightened-same-hue tint (the pattern every other level uses) reads too faintly against a
+wall that's only a few screen pixels thick at this zoom; a slot pad lightens while
+browsing at plant/warehouse; at "slot" level, hovering one of its sub-slot racks
+lightens that rack's frame instead (`RACK_HOVER_COLOR` in `src/components/Rack.tsx`)
+rather than the pad; at "slot-space" level, hovering one of its pallet blocks lightens
+that block instead (`lighten()` blending toward white). `ViewFocusContext`'s
+`HoverPoint` carries optional `buildingId`/`subSlotIndex`/`palletIndex` (only `x`/`y`
+are required) so each level's highlight is mutually exclusive with the others (e.g. a
+slot pad only lights up when `subSlotIndex` is unset). Clicking drills one level at a time — a building,
 then a slot, then (only if it has stocked sub-slots — empty ones render no rack at all,
 so there's nothing to click) a sub-slot, then a pallet tier — smoothly zooming the
 camera each time. **Whenever a level is focused, every sibling at that level disappears
@@ -495,6 +499,14 @@ eyeball results in 3D rather than deciding blind.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-10 — Extended the in-scene hover highlight to buildings: hovering any wall
+  segment of a closed loop while browsing at "plant" level highlights that building's
+  whole wall outline. Per user follow-up request. Used a distinct blue accent color
+  (`WALL_HOVER_COLOR`, matching `SLOT_COLOR`'s family) rather than the lightened-same-hue
+  treatment every other level uses — verified via pixel-level screenshot comparison that
+  a lightened gray *did* render correctly but was nearly imperceptible at plant zoom,
+  where a wall is only a few screen pixels thick; switching to a hue-contrasting color
+  fixed that. See §5.1 "View mode..." hover paragraph.
 - 2026-09-10 — Per user feedback (in French, with reference screenshots): (1) replaced
   `fitToBox`-based camera framing with the unified `frameBox()` helper (see §5.1 "View
   mode..." camera paragraph) so plant/warehouse always frame from directly above and
