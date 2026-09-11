@@ -133,19 +133,64 @@ export function PickingListPanel() {
         </button>
       </div>
 
-      {run && (
-        <div className="picking-panel__status">
-          {isPlaying ? (
-            <>
-              Playing <strong>{run.list.label}</strong>
-              {run.mode === "animated" && ` — leg ${Math.min(run.currentLegIndex + 1, run.legs.length)}/${run.legs.length}`}
-            </>
-          ) : (
-            <>
-              Finished <strong>{run.list.label}</strong>
-            </>
-          )}
+      {run && run.mode === "animated" ? (
+        <div className="picking-panel__transport">
+          <div className="picking-panel__transport-title">
+            {run.isPaused ? "Paused" : isPlaying ? "Playing" : "Finished"} <strong>{run.list.label}</strong>
+          </div>
+          <div className="picking-panel__transport-buttons">
+            <button
+              className="picking-panel__transport-btn"
+              disabled={run.currentLegIndex === 0}
+              onClick={simulation.previousStep}
+              title="Previous stop"
+            >
+              ⏮
+            </button>
+            <button
+              className="picking-panel__transport-btn"
+              disabled={run.currentLegIndex >= run.legs.length}
+              onClick={simulation.togglePause}
+              title={run.isPaused ? "Resume" : "Pause"}
+            >
+              {run.isPaused ? "▶" : "⏸"}
+            </button>
+            <button
+              className="picking-panel__transport-btn"
+              disabled={run.currentLegIndex >= run.legs.length}
+              onClick={simulation.nextStep}
+              title="Next stop"
+            >
+              ⏭
+            </button>
+            <button className="picking-panel__transport-btn" onClick={simulation.stop} title="Stop">
+              ⏹
+            </button>
+          </div>
+          {/* Each tick is one leg/stop — dragging fast-forwards through the
+              intervening pick/store/deliver/load events for real, same as
+              letting the animation play there; dragging back only moves the
+              displayed position (see SimulationContext.goToStep). */}
+          <input
+            className="picking-panel__transport-slider"
+            type="range"
+            min={0}
+            max={run.legs.length}
+            step={1}
+            value={Math.min(run.currentLegIndex, run.legs.length)}
+            onChange={(e) => simulation.goToStep(Number(e.target.value))}
+          />
+          <div className="picking-panel__transport-label">
+            Stop {Math.min(run.currentLegIndex + 1, run.stops.length)}/{run.stops.length} —{" "}
+            {run.stops[Math.min(run.currentLegIndex, run.stops.length - 1)]?.id}
+          </div>
         </div>
+      ) : (
+        run && (
+          <div className="picking-panel__status">
+            Finished <strong>{run.list.label}</strong>
+          </div>
+        )
       )}
     </div>
   );

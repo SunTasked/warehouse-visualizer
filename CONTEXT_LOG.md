@@ -4,6 +4,58 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-11 (cont'd) — forklift simulation follow-up: transport bar, lanes, occlusion
+
+- User feedback on the just-shipped forklift simulation, six items with screenshots: (1)
+  forgot to mention the forklift always starts at the lift station; (2) wants a
+  music-player-style transport widget (play/pause, stop, next/previous step, a slider
+  where each tick is a step); (3) the route should show direction arrows; (4) two
+  opposite directions on the same path shouldn't visually merge; (5) step numbers should
+  render above everything else; (6) slot labels get hidden again once pallets are on the
+  slot.
+- **Always start at the lift station**: `SimulationContext.tsx`'s new `stopsWithDepot()`
+  prepends the warehouse's first `LiftStation` as an extra depot stop ahead of the list's
+  own `stops`, computed once per run rather than requiring every test list to spell it
+  out. The prepended stop needed no special-casing — it's just an ordinary depot stop
+  under the existing pick/store/deliver/load event logic (a picking run's first
+  "deliver" is a no-op since nothing is held yet).
+- **Transport bar**: replaced the single `advanceLeg()` with one general `goToStep(target)`
+  that both the vehicle's natural per-frame leg completion and the panel's
+  Next/Previous/slider controls call. Moving forward applies every leg's arrival event
+  along the way (real simulation progress, even when the slider skips several stops at
+  once); moving backward only repositions the displayed vehicle, without undoing any
+  already-applied mutation — flagged as a known limitation (no general "undo this exact
+  pallet pick" exists) rather than silently pretending otherwise. Added `isPaused` to the
+  active run, gating whether `Vehicle`'s `useFrame` advances `progressRef`, so Pause
+  truly freezes in place and Resume continues from exactly there.
+- **Direction arrows + lane separation**: `Forklift.tsx`'s new `offsetPolyline()` shifts
+  every point of a leg's route a fixed distance perpendicular to its own local travel
+  direction, always to the same side ("right of travel"). This one rule — no explicit
+  overlap detection — is enough to separate two legs riding the same physical corridor
+  in opposite directions into two parallel lanes, since "right of travel" for one
+  direction is "left of travel" for its reverse. Periodic yellow cone arrows placed
+  along each offset lane show the direction of travel; the vehicle itself now rides the
+  offset lane too, not the raw centerline, for visual consistency.
+- **Always-on-top labels**: both the forklift route's numbered stop markers and (back in
+  `Slots.tsx`) a slot's own id label now render with `material-depthTest={false}` — the
+  same fix for two separate but related occlusion complaints: a stop number could hide
+  behind a tall pallet stack or another lane, and (after last round's fix moved the id
+  label onto the entry marker) a *multi-tier* rack standing on that same slot could still
+  hide the label itself.
+- Verified via Playwright at a larger viewport (for finer visual inspection): the route
+  now visibly starts from the lift station with stop "1"; a corridor traveled in both
+  directions (a picking list revisiting the delivery point) renders as two distinct
+  offset lanes with opposing arrows, not one merged line; stop numbers stay legible over
+  tall pallet stacks and the mustard/purple facility pads; a slot's id label stays
+  legible even with a full 3-tier stack directly behind it; the full transport bar (Play/
+  Pause, Next, Previous, Stop, slider) all correctly drive the same underlying step state,
+  including a slider drag that fast-forwards through several stops' mutations at once;
+  edit mode unaffected, overlay still doesn't leak into it. `tsc --noEmit` clean
+  throughout.
+- specs.md updated: §5.3 rewritten for the depot-prepend/transport-bar/lane-offset
+  design, §5.1's entry-marker paragraph updated for the label depthTest fix, a new open
+  question (backward-stepping doesn't undo mutations), new decision log entry.
+
 ## 2026-09-11 (cont'd) — forklift picking-list simulation (major new feature)
 
 - User request: "warehouse management" — simulate the warehouse's life via a forklift

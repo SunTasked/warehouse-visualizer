@@ -26,21 +26,26 @@ export interface Leg {
   length: number;
 }
 
-export interface ActiveRun {
-  list: PickingList;
-  mode: PlaybackMode;
-  legs: Leg[];
-  /** Flattened for rendering the full highlight regardless of mode. */
-  route: Point[];
-  /** Index into legs currently being traveled (animated) — >= legs.length once finished/static. */
-  currentLegIndex: number;
-}
-
 type StopEvent =
   | { type: "pick"; slotId: string }
   | { type: "store"; slotId: string }
   | { type: "deliver" }
   | { type: "load" };
+
+export interface ActiveRun {
+  list: PickingList;
+  mode: PlaybackMode;
+  /** The list's own stops, with the forklift's home lift station prepended — see stopsWithDepot() below. */
+  stops: PickingStop[];
+  /** Parallel to `stops`. */
+  events: StopEvent[];
+  /** One fewer than `stops`/`events` — leg i runs from stops[i] to stops[i+1]. */
+  legs: Leg[];
+  /** Which leg is currently being traveled (animated) — >= legs.length once finished/static. */
+  currentLegIndex: number;
+  /** Animated mode only — freezes the vehicle in place without losing progress. */
+  isPaused: boolean;
+}
 
 interface SimulationContextValue {
   pickingLists: PickingList[];
@@ -53,12 +58,15 @@ interface SimulationContextValue {
   playList: (list: PickingList) => void;
   playQueue: (lists: PickingList[]) => void;
   stop: () => void;
+  togglePause: () => void;
+  /** Jumps directly to a leg boundary (0..legs.length) — the slider's "each tick is a step". Stepping forward applies the events passed along the way; stepping backward only moves the displayed position (see the doc comment on goToStep itself for why). */
+  goToStep: (target: number) => void;
+  nextStep: () => void;
+  previousStep: () => void;
   showPanel: boolean;
   setShowPanel: (value: boolean) => void;
   /** Distance traveled (meters) within the active run's current leg — a ref, not state, so the per-frame vehicle animation (Forklift.tsx) doesn't trigger a React re-render every frame. */
   progressRef: MutableRefObject<number>;
-  /** Called by Forklift.tsx's useFrame driver once the vehicle reaches the current leg's end. */
-  advanceLeg: () => void;
 }
 
 const SimulationContext = createContext<SimulationContextValue | null>(null);
@@ -71,41 +79,45 @@ function totalLength(points: Point[]): number {
   return sum;
 }
 
-/** Flattens legs into one polyline for the route highlight — consecutive legs share their boundary point exactly, so it's deduped rather than left as a zero-length segment. */
-function flattenLegs(legs: Leg[]): Point[] {
-  const route: Point[] = [];
-  for (const leg of legs) {
-    const points = route.length > 0 ? leg.points.slice(1) : leg.points;
-    route.push(...points);
-  }
-  return route;
+/**
+ * The forklift always starts its journey at its home lift station (per user
+ * feedback) — prepended as an extra depot stop ahead of whatever the list
+ * itself starts with. Falls back to the list's own stops unchanged if the
+ * warehouse has no lift station at all.
+ */
+function stopsWithDepot(list: PickingList, warehouse: Warehouse): PickingStop[] {
+  const home = warehouse.liftStations[0];
+  if (!home) return list.stops;
+  return [{ kind: "depot", id: home.id }, ...list.stops];
 }
 
 /**
- * What happens at each stop, in order — derived once per list, not
- * authored: picking removes a real pallet at a slot stop and delivers
- * everything held at a depot stop; storing loads up to 3 synthetic pallets
- * at a depot stop (only as many as the next consecutive batch of slot stops
- * actually needs) and stores one at each slot stop. See specs.md §5.3.
+ * What happens at each stop, in order: picking removes a real pallet at a
+ * slot stop and delivers everything held at a depot stop; storing loads up
+ * to 3 synthetic pallets at a depot stop (only as many as the next
+ * consecutive batch of slot stops actually needs) and stores one at each
+ * slot stop. See specs.md §5.3. Operates on the *effective* (depot-
+ * prepended) stop list, not the list's own raw `stops` — the prepended
+ * lift-station stop is just an ordinary depot stop under this same logic
+ * (a picking run's first "deliver" is a no-op since nothing is held yet; a
+ * storing run's prepended stop loads 0 since the very next stop is itself
+ * a depot, and the *real* load happens there).
  */
-function planEvents(list: PickingList): StopEvent[] {
+function planEvents(stops: PickingStop[], mode: PickingList["mode"]): StopEvent[] {
   const events: StopEvent[] = [];
-  if (list.mode === "picking") {
-    for (const stop of list.stops) {
+  if (mode === "picking") {
+    for (const stop of stops) {
       events.push(stop.kind === "slot" ? { type: "pick", slotId: stop.id } : { type: "deliver" });
     }
   } else {
-    for (const stop of list.stops) {
+    for (const stop of stops) {
       events.push(stop.kind === "slot" ? { type: "store", slotId: stop.id } : { type: "load" });
     }
   }
   return events;
 }
 
-function stopPoint(
-  stop: PickingStop,
-  warehouse: Warehouse,
-): Point | null {
+function stopPoint(stop: PickingStop, warehouse: Warehouse): Point | null {
   if (stop.kind === "slot") {
     const slot = warehouse.slots.find((s) => s.id === stop.id);
     return slot ? slotEntryPoint(slot, warehouse.slotDefaults) : null;
@@ -117,15 +129,15 @@ function stopPoint(
   return null;
 }
 
-function buildLegs(list: PickingList, warehouse: Warehouse, graph: PathGraph): Leg[] {
+function buildLegs(stops: PickingStop[], warehouse: Warehouse, graph: PathGraph): Leg[] {
   const legs: Leg[] = [];
-  for (let i = 0; i < list.stops.length - 1; i++) {
-    const from = list.stops[i];
-    const to = list.stops[i + 1];
+  for (let i = 0; i < stops.length - 1; i++) {
+    const from = stops[i];
+    const to = stops[i + 1];
     const fromPoint = stopPoint(from, warehouse);
     const toPoint = stopPoint(to, warehouse);
     if (!fromPoint || !toPoint) {
-      console.warn(`SimulationContext: unresolved stop in list "${list.id}" (${from.id} -> ${to.id})`);
+      console.warn(`SimulationContext: unresolved stop (${from.id} -> ${to.id})`);
       continue;
     }
     const points = routeBetween(graph, fromPoint, toPoint);
@@ -157,8 +169,8 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     [editor],
   );
 
-  // playNext calls itself (directly for the animated advance-leg path,
-  // deferred via setTimeout for static-mode queue chaining below) — always
+  // playNext calls itself (directly for static-mode's immediate completion
+  // path, deferred via setTimeout for queue chaining below) — always
   // through this ref, never the closed-over `playNext` binding, so a
   // deferred call picks up the *current* warehouse/graph state (post the
   // mutations this same call just applied) rather than the stale snapshot
@@ -173,13 +185,13 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     }
     resetFocus(); // don't let a cross-building route get truncated by per-building visibility (§5.1)
 
-    const events = planEvents(list);
-    const legs = buildLegs(list, editor.warehouse, graph);
-    const route = flattenLegs(legs);
+    const stops = stopsWithDepot(list, editor.warehouse);
+    const events = planEvents(stops, list.mode);
+    const legs = buildLegs(stops, editor.warehouse, graph);
 
     if (playbackMode === "static") {
       for (const event of events) applyEvent(event);
-      setActiveRun({ list, mode: "static", legs, route, currentLegIndex: legs.length });
+      setActiveRun({ list, mode: "static", stops, events, legs, currentLegIndex: legs.length, isPaused: false });
       // Static runs finish synchronously — pause briefly before the next
       // queued list so each one is actually visible, rather than only the
       // last one ever appearing on screen.
@@ -188,19 +200,19 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     }
 
     // Animated: stop 0's event applies immediately (the forklift "starts"
-    // already there); each subsequent stop's event applies on arrival, via
-    // advanceLeg below.
+    // already there — now always the home lift station); each subsequent
+    // stop's event applies on arrival, via goToStep below.
     applyEvent(events[0]);
     progressRef.current = 0;
     if (legs.length === 0) {
       // A single-stop (or fully unresolved) list has nothing to animate —
-      // nothing would ever call advanceLeg to finish/advance the queue, so
-      // do it here instead.
+      // nothing would ever call goToStep to finish/advance the queue, so do
+      // it here instead.
       if (queueRef.current.length > 0) playNextRef.current();
       else setActiveRun(null);
       return;
     }
-    setActiveRun({ list, mode: "animated", legs, route, currentLegIndex: 0 });
+    setActiveRun({ list, mode: "animated", stops, events, legs, currentLegIndex: 0, isPaused: false });
   }, [applyEvent, editor.warehouse, graph, playbackMode, resetFocus]);
 
   playNextRef.current = playNext;
@@ -226,24 +238,46 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     setActiveRun(null);
   }, []);
 
-  // Called by Forklift.tsx (imperatively, from its useFrame driver — not
-  // from within another state update) once the vehicle's traveled distance
-  // reaches the current leg's length. Applies that leg's arrival event and
-  // moves on to the next leg, the next queued list, or finishes.
-  const advanceLeg = useCallback(() => {
-    if (!activeRun) return;
-    const events = planEvents(activeRun.list);
-    const arrivedLegIndex = activeRun.currentLegIndex;
-    const arrivalEvent = events[arrivedLegIndex + 1]; // leg i ends at stop i+1
-    if (arrivalEvent) applyEvent(arrivalEvent);
-    progressRef.current = 0;
-    const nextLegIndex = arrivedLegIndex + 1;
-    if (nextLegIndex >= activeRun.legs.length && queueRef.current.length > 0) {
-      playNextRef.current();
-    } else {
-      setActiveRun({ ...activeRun, currentLegIndex: nextLegIndex });
-    }
-  }, [activeRun, applyEvent]);
+  const togglePause = useCallback(() => {
+    setActiveRun((run) => (run ? { ...run, isPaused: !run.isPaused } : run));
+  }, []);
+
+  /**
+   * The single function behind natural leg completion (Forklift.tsx's
+   * useFrame driver calling goToStep(current + 1) on arrival), the panel's
+   * Next/Previous buttons, and its step slider. Moving *forward* applies
+   * every leg's arrival event along the way, exactly as if the vehicle had
+   * actually traveled there — this is real simulation progress, not just a
+   * view change. Moving *backward* only repositions the displayed vehicle;
+   * it does not undo any pallet mutation already applied. There's no
+   * general undo for "which exact pallet was picked" to reverse, so
+   * scrubbing back is a navigation aid for reviewing the route, not a
+   * replay/rewind of warehouse state — matches what was asked ("brings the
+   * forklift to the next/previous slot") without pretending to be something
+   * it isn't.
+   */
+  const goToStep = useCallback(
+    (target: number) => {
+      if (!activeRun) return;
+      const clamped = Math.max(0, Math.min(activeRun.legs.length, target));
+      if (clamped > activeRun.currentLegIndex) {
+        for (let i = activeRun.currentLegIndex; i < clamped; i++) {
+          const arrivalEvent = activeRun.events[i + 1]; // leg i ends at stop i+1
+          if (arrivalEvent) applyEvent(arrivalEvent);
+        }
+      }
+      progressRef.current = 0;
+      if (clamped >= activeRun.legs.length && queueRef.current.length > 0) {
+        playNextRef.current();
+      } else {
+        setActiveRun({ ...activeRun, currentLegIndex: clamped });
+      }
+    },
+    [activeRun, applyEvent],
+  );
+
+  const nextStep = useCallback(() => goToStep((activeRun?.currentLegIndex ?? 0) + 1), [activeRun, goToStep]);
+  const previousStep = useCallback(() => goToStep((activeRun?.currentLegIndex ?? 0) - 1), [activeRun, goToStep]);
 
   const value = useMemo<SimulationContextValue>(
     () => ({
@@ -256,12 +290,27 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       playList,
       playQueue,
       stop,
+      togglePause,
+      goToStep,
+      nextStep,
+      previousStep,
       showPanel,
       setShowPanel,
       progressRef,
-      advanceLeg,
     }),
-    [activeRun, playbackMode, speed, playList, playQueue, stop, showPanel, advanceLeg],
+    [
+      activeRun,
+      playbackMode,
+      speed,
+      playList,
+      playQueue,
+      stop,
+      togglePause,
+      goToStep,
+      nextStep,
+      previousStep,
+      showPanel,
+    ],
   );
 
   return <SimulationContext.Provider value={value}>{children}</SimulationContext.Provider>;

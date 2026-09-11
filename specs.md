@@ -164,7 +164,11 @@ that was enough for the path's silhouette to occlude a flat label at nearly the 
 elevation — the same way a low curb can hide something just behind it viewed nearly
 edge-on. Moving the label inward onto the slot's own pad sidesteps that regardless of
 how close a path ever runs to a slot's edge, rather than only patching the one aisle
-width that happened to be a problem.
+width that happened to be a problem. Even so, a tall multi-tier rack standing on the
+slot itself could still hide it — the label's material now also sets
+`depthTest={false}` (§5.3 uses the same trick for the forklift simulation's stop-number
+labels), so it always renders in front regardless of what's actually closer to the
+camera.
 
 Editable in the Inspector when a single slot is selected: a Depth field (resizes
 `subSlots`, preserving existing content when growing, dropping the deepest sub-slots
@@ -559,9 +563,14 @@ now.
 inferred from stop order, per explicit user preference), with test data in
 `src/data/pickingLists.ts` (five lists: a simple pick, the exact multi-trip/capacity-
 chaining example given in the original request, a cross-building pick, a storing run,
-and a storing run that also crosses buildings). Reading direction is the same regardless
-of mode — only what each stop *does* changes (`planEvents()` in
-`SimulationContext.tsx`):
+and a storing run that also crosses buildings). A forklift **always starts its journey
+at its home lift station** (per user feedback) — `SimulationContext.tsx`'s
+`stopsWithDepot()` prepends the warehouse's first `LiftStation` as an extra depot stop
+ahead of whatever the list itself starts with, rather than the list needing to spell
+that out; the prepended stop is just an ordinary depot stop under the same event logic
+below (a picking run's first "deliver" is a no-op since nothing is held yet). Reading
+direction is the same regardless of mode — only what each stop *does* changes
+(`planEvents()`):
 - **picking**: a `slot` stop removes one real pallet (front-to-back, topmost tier —
   `EditorContext.tsx`'s new `pickPalletAuto`, the deepest-first `addPalletAuto` scan
   run in reverse) and adds it to the forklift's held load; a `depot` stop delivers
@@ -602,8 +611,8 @@ explicit user preference) in `SimulationContext.tsx`:
   there); a Canvas-nested `Vehicle` (`src/components/Forklift.tsx`) advances a *ref*
   (`progressRef`, not React state — avoids a re-render every frame) each `useFrame` tick
   by `speed * delta`, interpolating position/facing along the current leg's polyline;
-  reaching a leg's end calls back into the context to apply that stop's event and
-  advance to the next leg, the next queued list, or finish.
+  reaching a leg's end calls `goToStep(current + 1)` (see below) to apply that stop's
+  event and advance.
 - "Played one after the other": `playQueue(lists)` chains multiple lists through the
   same single-forklift mechanism, auto-advancing on completion (a brief `setTimeout`
   pause between *static* runs specifically, so each one is actually visible rather than
@@ -612,21 +621,51 @@ explicit user preference) in `SimulationContext.tsx`:
   `ViewFocusContext`'s `reset()` first, so a cross-building route isn't truncated by the
   per-building visibility rules in §5.1.
 
+**Transport controls** (music-player style, per explicit user request) — a single
+`goToStep(target)` in `SimulationContext.tsx` backs all of Play/Pause, Next/Previous, and
+the step slider (and the animated vehicle's own natural leg-completion): moving
+*forward* applies every leg's arrival event along the way, exactly as real simulation
+progress (a slider drag that skips several stops still picks/stores/delivers/loads at
+each one, same as if the animation had played through them); moving *backward* only
+repositions the displayed vehicle — it does **not** undo any pallet mutation already
+applied. There's no general "undo the exact pallet that was picked" mechanism, so
+scrubbing back is a navigation aid for reviewing the route (matching what was asked —
+"brings the forklift to the next/previous slot"), not a data-consistent rewind; see open
+question 18. `isPaused` on the active run just gates whether `Vehicle`'s `useFrame`
+advances `progressRef` — Play/Pause never resets it, so resuming continues exactly where
+it left off.
+
 Rendering (`Forklift.tsx`, mounted in `WarehouseScene.tsx`, **view-mode only** — gated
 so it doesn't clutter the editor, and so an in-progress animated run's clock actually
 *pauses* while its `Vehicle` is unmounted rather than silently ticking in the
-background): the route highlight reuses `Paths.tsx`'s already-generic `segmentsForPath`
-(exported, not duplicated) in a distinct orange accent (so it reads as a temporary
-overlay, not fixed infrastructure) with the same rounded-joint treatment; numbered stop
-markers make the visit order legible even in static mode; the vehicle is a simple
-placeholder box + a forward-facing cone (the same two-step rotation trick already used
-for `Paths.tsx`'s directional arrow).
+background): each leg's route highlight is its own offset polyline
+(`offsetPolyline()`) — every point shifted a fixed distance perpendicular to its own
+local travel direction, always to the same side ("the right of travel," a rotated
+direction vector) — reusing `Paths.tsx`'s already-generic `segmentsForPath` (exported,
+not duplicated) on the *offset* points, in a distinct orange accent (so it reads as a
+temporary overlay, not fixed infrastructure) with the same rounded-joint treatment, plus
+periodic yellow direction arrows along each lane. This one fixed-offset rule is what
+keeps two legs riding the same physical corridor in opposite directions from merging
+into one line (per user feedback): "right of travel" for one direction is "left of
+travel" for its reverse, so an outbound and a later inbound leg over the same corridor
+naturally separate into two parallel lanes with no explicit overlap detection needed.
+The vehicle rides this same offset lane (not the raw centerline) for consistency, and is
+itself a simple placeholder box + a forward-facing cone (the same two-step rotation
+trick already used for `Paths.tsx`'s directional arrow). Numbered stop markers (their
+own circle **and** label rendered with `depthTest={false}`, so a number is never hidden
+behind a tall pallet stack or a lane running past it — "above everything else," per user
+feedback) make the visit order legible even in static mode. A slot's own id label got
+the same `depthTest={false}` treatment for the same reason (§5.1's entry-marker
+paragraph) — a multi-tier rack standing right behind it was hiding it from most camera
+angles.
 
 UI: `src/components/PickingListPanel.tsx`, toggled from a new `Toolbar.tsx` button
 (mirroring the existing `History` toggle pattern) — lists every test list with its mode
 badge and stop sequence, a per-list Play button, checkboxes + "Play selected"/"Play all"
-for queuing, the Animated/Static toggle, a speed field (animated only), and a status
-line during playback.
+for queuing, the Animated/Static toggle, and a speed field (animated only). An animated
+run additionally shows a music-player-style transport bar: Previous/Play-Pause/Next/Stop
+buttons and a step slider (each tick = one leg/stop), backed by the single `goToStep`
+described above.
 
 ## 6. Core Features / Visualizations
 
@@ -744,11 +783,34 @@ line during playback.
 17. No picking-list validation: a hand-authored list that exceeds the hard-3 capacity, or
     references a slot/depot id that doesn't exist, degrades to a skipped pick/store with
     a `console.warn`, not a visible error in the UI.
+18. Stepping the transport controls *backward* (§5.3) only moves the displayed vehicle —
+    it doesn't undo the pallet mutation a forward step (or the animation) already
+    applied, since there's no general "which exact pallet was this" reversal mechanism.
+    Scrubbing back and then forward again re-applies that stop's event a second time (a
+    picking stop would try to pick another pallet from an already-visited slot). Fine
+    for the current use (reviewing a route), but worth a real look if this needs to
+    become data-consistent later.
 
 ## 10. Decision Log
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-11 — Follow-up pass on the forklift simulation, per user feedback: (1) a
+  forklift now always starts its journey at its home lift station — an extra depot stop
+  prepended ahead of the list's own stops, transparent to the list format itself; (2) a
+  music-player-style transport bar (Play/Pause, Next/Previous, a step slider) replaces
+  the old play-only control, backed by one `goToStep()` that applies real mutations when
+  stepping forward and only repositions the display when stepping backward (open
+  question 18 — no general mutation-undo exists, so this is a navigation aid, not a
+  data-consistent rewind); (3)+(4) the route highlight now offsets each leg's polyline a
+  fixed distance to "the right of its own travel direction," which — with no explicit
+  overlap detection — is enough to keep two legs riding the same corridor in opposite
+  directions from merging into one line, plus periodic direction arrows along each lane;
+  (5) stop-number markers now render with `depthTest={false}` so they're never hidden
+  behind a pallet stack or another lane; (6) gave a slot's own id label the same
+  `depthTest={false}` treatment, since a tall rack standing on the slot could still hide
+  it even after moving it onto the entry marker (previous entry). See §5.3 and §5.1's
+  entry-marker paragraph.
 - 2026-09-11 — Added the first dynamic layer on top of the static physical layout: a
   forklift picking-list simulation (§5.3). Key calls, each settled via clarifying
   questions before implementation: both an animated (real travel time) and a static

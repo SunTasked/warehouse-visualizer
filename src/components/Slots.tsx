@@ -203,6 +203,10 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
         </lineSegments>
       </group>
       <EntryMarker cellDepth={cellDepth} width={defaults.width} />
+      {/* depthTest disabled: a tall multi-tier rack standing right behind
+          the entry marker (see Rack.tsx) would otherwise hide this label
+          from most camera angles — it should always read as sitting above
+          the scene, not be occluded by whatever's stacked on the slot. */}
       <Text
         position={[
           0,
@@ -214,6 +218,8 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
         color={LABEL_COLOR}
         anchorX="center"
         anchorY="middle"
+        renderOrder={999}
+        material-depthTest={false}
       >
         {slot.id}
       </Text>
