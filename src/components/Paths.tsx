@@ -19,7 +19,7 @@ const STUB_LENGTH = 1.5;
 const ARROW_RADIUS = 0.35;
 const ARROW_LENGTH = 0.7;
 
-interface PathSegment {
+export interface PathSegment {
   position: [number, number, number];
   rotationY: number;
   length: number;
@@ -27,8 +27,10 @@ interface PathSegment {
 
 // Same length/angle/midpoint math as Walls.tsx's segmentsForLoop — a path is
 // just an open (not closed) polyline rendered flat at floor level instead of
-// at wall height.
-function segmentsForPath(points: Point[]): PathSegment[] {
+// at wall height. Exported (with the height parameterized rather than
+// hardcoded) so Forklift.tsx can reuse it for the picking-list route
+// highlight at its own height, instead of duplicating this math.
+export function segmentsForPath(points: Point[], height: number): PathSegment[] {
   const segments: PathSegment[] = [];
   for (let i = 0; i < points.length - 1; i++) {
     const p1 = points[i];
@@ -38,7 +40,7 @@ function segmentsForPath(points: Point[]): PathSegment[] {
     const length = Math.hypot(dx, dy);
     const angle = Math.atan2(dy, dx);
     segments.push({
-      position: [(p1.x + p2.x) / 2, PATH_HEIGHT / 2, -(p1.y + p2.y) / 2],
+      position: [(p1.x + p2.x) / 2, height / 2, -(p1.y + p2.y) / 2],
       rotationY: angle,
       length,
     });
@@ -111,7 +113,7 @@ function PathArrow({ arrow }: { arrow: ArrowMarker }) {
 function PathMesh({ path, focus }: { path: Path; focus: Focus }) {
   const width = path.width ?? PATH_DEFAULT_WIDTH;
   const view = useMemo(() => effectiveView(path, focus), [path, focus.buildingId]);
-  const segments = useMemo(() => segmentsForPath(view.points), [view.points]);
+  const segments = useMemo(() => segmentsForPath(view.points, PATH_HEIGHT), [view.points]);
   // A joint at every vertex, except the very last one when it's capped by an
   // arrow instead (the cone already reads as the path's end there).
   const joints = view.arrow ? view.points.slice(0, -1) : view.points;

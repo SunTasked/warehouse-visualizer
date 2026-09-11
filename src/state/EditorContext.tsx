@@ -81,6 +81,12 @@ interface EditorContextValue {
   addPalletAuto: (slotId: string) => void;
   /** Removes one pallet from a sub-slot. Commits immediately. */
   removePallet: (slotId: string, subSlotIndex: number, palletIndex: number) => void;
+  /**
+   * Picks one pallet from a slot for the forklift simulation (§5.3): the
+   * first (shallowest) occupied sub-slot's topmost pallet. Commits
+   * immediately. Returns false (no-op) if the slot has nothing to pick.
+   */
+  pickPalletAuto: (slotId: string) => boolean;
   /** Resizes one pallet's item count (1-10). Live-mutate only — caller commits. */
   setPalletItemCount: (slotId: string, subSlotIndex: number, palletIndex: number, count: number) => void;
   /** Renames a single slot's id, checking for collisions and following the selection. Live-mutate only — caller commits. */
@@ -320,6 +326,29 @@ export function EditorProvider({
     [mutateWarehouse, commit],
   );
 
+  // Mirrors addPalletAuto's deepest-first scan in reverse: the first
+  // (shallowest) sub-slot that actually has something, topmost pallet —
+  // the one a forklift could reach without unstacking anything else.
+  const pickPalletAuto = useCallback(
+    (slotId: string): boolean => {
+      const slot = warehouse.slots.find((s) => s.id === slotId);
+      const sourceIndex = (slot?.subSlots ?? []).findIndex((ss) => ss.pallets.length > 0);
+      if (sourceIndex === -1) {
+        console.warn(`pickPalletAuto: slot ${slotId} has no pallet to pick`);
+        return false;
+      }
+      mutateWarehouse((current) => ({
+        ...current,
+        slots: current.slots.map((s) =>
+          s.id !== slotId ? s : mapSubSlot(s, sourceIndex, (ss) => ({ ...ss, pallets: ss.pallets.slice(0, -1) })),
+        ),
+      }));
+      commit(`Pick pallet from ${slotId}`);
+      return true;
+    },
+    [warehouse, mutateWarehouse, commit],
+  );
+
   // Resizes one pallet's item count (1-10). Live-mutate only — caller commits on blur.
   const setPalletItemCount = useCallback(
     (slotId: string, subSlotIndex: number, palletIndex: number, count: number) => {
@@ -448,6 +477,7 @@ export function EditorProvider({
       setSlotDepth,
       addPalletAuto,
       removePallet,
+      pickPalletAuto,
       setPalletItemCount,
       renameSlot,
       deleteSlots,
@@ -481,6 +511,7 @@ export function EditorProvider({
       setSlotDepth,
       addPalletAuto,
       removePallet,
+      pickPalletAuto,
       setPalletItemCount,
       renameSlot,
       deleteSlots,

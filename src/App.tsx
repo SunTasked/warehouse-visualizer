@@ -5,6 +5,7 @@ import type { WarehouseConfig, WarehouseContent } from "./types/warehouse";
 import { mergeWarehouse } from "./lib/warehouseFiles";
 import { EditorProvider, useEditor } from "./state/EditorContext";
 import { ViewFocusProvider } from "./state/ViewFocusContext";
+import { SimulationProvider } from "./state/SimulationContext";
 import { WarehouseScene } from "./components/WarehouseScene";
 import { Toolbar } from "./components/Toolbar";
 import { Inspector } from "./components/Inspector";
@@ -13,6 +14,7 @@ import { SelectionOverlay } from "./components/SelectionOverlay";
 import { HoverCard } from "./components/HoverCard";
 import { FacilityTooltip } from "./components/FacilityTooltip";
 import { FocusBreadcrumb } from "./components/FocusBreadcrumb";
+import { PickingListPanel } from "./components/PickingListPanel";
 import "./App.css";
 
 // First the warehouse configuration (layout) loads, then its content
@@ -47,6 +49,7 @@ function AppShell() {
         <HoverCard />
         <FacilityTooltip />
         <FocusBreadcrumb />
+        <PickingListPanel />
       </div>
     </div>
   );
@@ -56,7 +59,9 @@ export default function App() {
   return (
     <EditorProvider initialWarehouse={initialWarehouse}>
       <ViewFocusProvider>
-        <AppShell />
+        <SimulationProvider>
+          <AppShell />
+        </SimulationProvider>
       </ViewFocusProvider>
     </EditorProvider>
   );

@@ -4,6 +4,67 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-11 (cont'd) — forklift picking-list simulation (major new feature)
+
+- User request: "warehouse management" — simulate the warehouse's life via a forklift
+  either **picking** (slots → delivery) or **storing** (delivery → slots), following
+  a picking list (an ordered slot/depot sequence) with real constraints (max 3 pallets,
+  must follow a path, must respect the given stop order); pathfinding between stops
+  should be the quickest route, computed, not authored; a picking list's pallet must
+  actually disappear from its slot when picked (and appear when stored); test picking
+  lists (including one spanning both buildings) should come from an overlay menu, playable
+  singly or queued; "playing" a list should show the forklift's route on the floor.
+- Per the user's own explicit instruction, asked 4 clarifying questions before designing
+  anything (playback scope, storing-list format, slot↔path connection precision,
+  forklift count) — all four materially changed the architecture; answers are recorded
+  verbatim in specs.md §5.3's opening and drove every subsequent design call.
+- Used plan mode given the size (new pathfinding engine, new state/rendering/UI layers).
+  Built `src/lib/pathGraph.ts`: `buildPathGraph()` dedupes every `Path`'s points into a
+  node/edge graph (safe with no fuzzy matching thanks to the pre-existing "exact
+  coincident point" convention); `connectPoint()` projects an arbitrary point onto the
+  *nearest point along any edge*, not just onto nodes (using only nodes would route a
+  slot to the nearest aisle *end*, sending every slot down a long aisle through the same
+  corner); `routeBetween()` runs Dijkstra (not literal BFS as suggested — segments have
+  unequal real lengths, so only Dijkstra actually minimizes travel distance) and returns
+  `[from, ...network..., to]` — using the *exact* slot/facility point as `from`/`to`
+  (not the snapped network point) means the polyline naturally notches into the slot,
+  exactly the visual the user asked for, with no extra mechanism needed.
+- `src/types/simulation.ts` + `src/data/pickingLists.ts`: five test lists — a simple
+  pick, the user's own multi-trip/capacity-chaining example verbatim, a cross-building
+  pick, a storing run, and a cross-building storing run.
+- `src/state/SimulationContext.tsx`: the core state machine. `planEvents()` derives what
+  each stop does (pick/store/deliver/load) from the list's explicit `mode` field;
+  `EditorContext.tsx` gained `pickPalletAuto` (mirrors `addPalletAuto`'s deepest-first
+  fill, in reverse — front-to-back sub-slot scan, topmost pallet). Playback progress for
+  the animated mode lives in a `useRef`, not React state, so the vehicle doesn't trigger
+  a re-render every frame; a `playNextRef` "always latest" ref pattern avoids a subtle
+  staleness bug where a `setTimeout`-deferred queue-continuation (added so consecutive
+  *static* runs are each actually visible, not just the last one) would otherwise close
+  over pre-mutation warehouse state.
+- `src/components/Forklift.tsx`: route highlight reuses `Paths.tsx`'s `segmentsForPath`
+  (exported, parameterized on height, rather than duplicated) in an orange accent with
+  numbered stop markers; the vehicle is a simple box + directional cone driven by
+  `useFrame`, advancing `progressRef` and calling back into the context on reaching each
+  leg's end. `src/components/PickingListPanel.tsx` (new Toolbar toggle, mirroring the
+  `History` pattern) exposes per-list Play, "Play selected"/"Play all" queuing, the
+  Animated/Static toggle, and a speed field.
+- Found and fixed one real bug during verification: the route/vehicle overlay was
+  rendering (and, worse, silently continuing to animate) even in edit mode, since
+  `Forklift.tsx` had no mode gate at all. Fixed by gating the whole component on
+  `mode === "view"` — unmounting (not just hiding) also correctly *pauses* an
+  in-progress animated run's clock while edit mode is active, rather than letting it
+  keep ticking in the background unseen.
+- Verified via Playwright: static playback highlights the full route and applies
+  inventory changes immediately (A02: 3→2 pallets after "Quick pick"; A05: 0→1 after
+  "Restock"); animated playback shows the vehicle actually traveling leg by leg (speed
+  bumped up during testing to keep runs short); the cross-building list's route
+  correctly spans both buildings without truncation; "Play selected" with two lists
+  chains them in sequence with a visible pause between static runs; edit mode
+  (Inspector, slot selection, wall handles) unaffected, and the overlay no longer leaks
+  into it. `tsc --noEmit` clean throughout.
+- specs.md updated: new §5.3 (full design write-up), two new open-questions bullets
+  (future multi-forklift rules; no picking-list validation), new decision log entry.
+
 ## 2026-09-11 (cont'd) — slot label redesign + a real click-handler regression found
 
 - User feedback (English, with a screenshot): slot labels (e.g. "A04") are no longer

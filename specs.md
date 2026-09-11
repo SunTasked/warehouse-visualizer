@@ -544,6 +544,90 @@ Remaining open question on this: default parameter values, and exactly how
 fast-movers) should work — reasonable to settle once we implement the generator and can
 eyeball results in 3D rather than deciding blind.
 
+### 5.3 Warehouse management: forklift picking-list simulation (decided, v1)
+
+The first *dynamic* layer on top of the static physical layout (§5.1): a single forklift
+follows picking lists — ordered work orders — over the existing path network,
+**actually mutating the live warehouse inventory** as it goes (a pallet disappears from
+a slot the instant it's picked, appears the instant it's stored), not just an animation
+over unchanged data. Explicitly scoped to one forklift at a time; multiple simultaneous
+forklifts with aisle-priority/direction rules are known future work (see §9), not built
+now.
+
+**Picking list semantics** (`src/types/simulation.ts`): `{ id, label, mode: "picking" |
+"storing", stops: [{kind: "slot"|"depot", id}] }` — an explicit `mode` field (not
+inferred from stop order, per explicit user preference), with test data in
+`src/data/pickingLists.ts` (five lists: a simple pick, the exact multi-trip/capacity-
+chaining example given in the original request, a cross-building pick, a storing run,
+and a storing run that also crosses buildings). Reading direction is the same regardless
+of mode — only what each stop *does* changes (`planEvents()` in
+`SimulationContext.tsx`):
+- **picking**: a `slot` stop removes one real pallet (front-to-back, topmost tier —
+  `EditorContext.tsx`'s new `pickPalletAuto`, the deepest-first `addPalletAuto` scan
+  run in reverse) and adds it to the forklift's held load; a `depot` stop delivers
+  (drops) everything currently held, resetting load to 0.
+- **storing**: a `depot` stop loads up to 3 *synthetic* pallets — specifically
+  `min(3, consecutive slot stops before the next depot stop or end of list)`, so the
+  forklift never visibly carries more than it needs (a delivery space carries no
+  tracked inventory of its own to remove them from); a `slot` stop stores one held
+  pallet there (the existing `addPalletAuto`, unchanged) and decrements held load.
+
+No validation UI — an authored list is trusted to respect the hard-3 capacity; a
+pick/store that can't be satisfied is skipped with a `console.warn`, not a crash.
+
+**Pathfinding** (`src/lib/pathGraph.ts`): `buildPathGraph(paths)` dedupes every `Path`'s
+`points` into graph nodes (keyed by rounded coordinate — safe with no fuzzy matching
+because of the "exact coincident point" authoring convention already established when
+`paths` were added) and adds a bidirectional, distance-weighted edge per consecutive
+pair — spanning every building already, since a cross-building connector like
+"Path-Bridge" is just another path in the same array. `connectPoint()` projects an
+arbitrary point (a slot's entry, a facility's center) onto the *nearest point along any
+edge*, not just onto existing nodes — using only nodes would route a slot to the nearest
+aisle *end* instead of the nearest aisle *point*, sending every slot along a long aisle
+through the same corner. `routeBetween()` runs **Dijkstra** (deliberately, not literal
+BFS as the original request suggested — edges have real, unequal lengths, so only
+Dijkstra actually minimizes travel distance; BFS would minimize hop-count instead) and
+returns `[from, ...network nodes..., to]` — because `from`/`to` are the *exact* input
+points rather than their snapped network points, the polyline automatically ends with a
+short notch off the aisle into the slot, with no separate mechanism needed for that (a
+directly-requested UX detail). A slot's world entry position — the notch/routing target
+— is `src/lib/geometry.ts`'s new `slotEntryPoint()`, derived with the same verified
+rotation convention `focusBounds.ts` uses for camera framing.
+
+**Two playback modes, both required, switched via a toggle** (not a single choice, per
+explicit user preference) in `SimulationContext.tsx`:
+- **static**: `playList` applies every stop's event immediately and highlights the full
+  route at once — no vehicle, "fast, pragmatic."
+- **animated**: stop 0's event applies immediately (the forklift "starts" already
+  there); a Canvas-nested `Vehicle` (`src/components/Forklift.tsx`) advances a *ref*
+  (`progressRef`, not React state — avoids a re-render every frame) each `useFrame` tick
+  by `speed * delta`, interpolating position/facing along the current leg's polyline;
+  reaching a leg's end calls back into the context to apply that stop's event and
+  advance to the next leg, the next queued list, or finish.
+- "Played one after the other": `playQueue(lists)` chains multiple lists through the
+  same single-forklift mechanism, auto-advancing on completion (a brief `setTimeout`
+  pause between *static* runs specifically, so each one is actually visible rather than
+  only the last one in a queue ever appearing on screen — static finishes synchronously,
+  so without this only the final list's route would ever render). Starting any run calls
+  `ViewFocusContext`'s `reset()` first, so a cross-building route isn't truncated by the
+  per-building visibility rules in §5.1.
+
+Rendering (`Forklift.tsx`, mounted in `WarehouseScene.tsx`, **view-mode only** — gated
+so it doesn't clutter the editor, and so an in-progress animated run's clock actually
+*pauses* while its `Vehicle` is unmounted rather than silently ticking in the
+background): the route highlight reuses `Paths.tsx`'s already-generic `segmentsForPath`
+(exported, not duplicated) in a distinct orange accent (so it reads as a temporary
+overlay, not fixed infrastructure) with the same rounded-joint treatment; numbered stop
+markers make the visit order legible even in static mode; the vehicle is a simple
+placeholder box + a forward-facing cone (the same two-step rotation trick already used
+for `Paths.tsx`'s directional arrow).
+
+UI: `src/components/PickingListPanel.tsx`, toggled from a new `Toolbar.tsx` button
+(mirroring the existing `History` toggle pattern) — lists every test list with its mode
+badge and stop sequence, a per-list Play button, checkboxes + "Play selected"/"Play all"
+for queuing, the Animated/Static toggle, a speed field (animated only), and a status
+line during playback.
+
 ## 6. Core Features / Visualizations
 
 - [x] **3D warehouse view (physical layer only)** — walls + slots render in 3D (§5.1);
@@ -652,11 +736,36 @@ eyeball results in 3D rather than deciding blind.
     `buildingId` being explicit throughout this feature). A longer connector with more
     than two points, or one that isn't a straight shot between exactly two doors, isn't
     handled by the current truncation logic.
+16. §5.3's forklift simulation is explicitly single-forklift, single-active-run — no
+    aisle-priority, right-of-way, or concurrent-forklift-collision rules exist yet. The
+    user has flagged this as coming later (aisle-direction/one-forklift-per-aisle rules),
+    at which point the path graph's edges would likely need the direction/capacity fields
+    already sketched (but not built) for §5.2's `Edge` type.
+17. No picking-list validation: a hand-authored list that exceeds the hard-3 capacity, or
+    references a slot/depot id that doesn't exist, degrades to a skipped pick/store with
+    a `console.warn`, not a visible error in the UI.
 
 ## 10. Decision Log
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-11 — Added the first dynamic layer on top of the static physical layout: a
+  forklift picking-list simulation (§5.3). Key calls, each settled via clarifying
+  questions before implementation: both an animated (real travel time) and a static
+  (instant) playback mode ship behind a toggle, not a single choice; a picking list has
+  an explicit `mode: "picking"|"storing"` field rather than an inferred direction; a
+  slot connects to the route at the nearest point on the existing path network (no new
+  per-slot spurs added), but the forklift still visually "enters" the slot — solved for
+  free by making the route's start/end points the slot's *exact* entry position rather
+  than the snapped network point, so a short notch falls out naturally with no separate
+  mechanism; scoped to one forklift for now, with multi-forklift aisle-priority rules
+  explicitly deferred (open question 16). Built a real Dijkstra-based router
+  (`src/lib/pathGraph.ts`) over the existing `paths` data rather than literal BFS as
+  first suggested, since path segments have unequal real lengths. Picking removes a real
+  pallet from a slot and delivers everything held at a depot; storing loads synthetic
+  pallets at a depot (delivery spaces carry no tracked inventory to remove them from) and
+  stores one at each slot stop — both actually mutate the live warehouse data, not just
+  animate over it. See §5.3 for the full design.
 - 2026-09-11 — Moved a slot's id label from just outside its footprint (in the aisle) to
   on top of the entry marker (inside the footprint), per user feedback that labels were
   now unreadable, hidden behind a Path running through that aisle. Enlarged

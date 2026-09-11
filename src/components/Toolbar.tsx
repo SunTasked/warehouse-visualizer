@@ -1,4 +1,5 @@
 import { useEditor } from "../state/EditorContext";
+import { useSimulation } from "../state/SimulationContext";
 
 export function Toolbar() {
   const {
@@ -16,6 +17,7 @@ export function Toolbar() {
     showHistory,
     setShowHistory,
   } = useEditor();
+  const { showPanel, setShowPanel } = useSimulation();
 
   const toggleMode = () => {
     const next = mode === "view" ? "edit" : "view";
@@ -54,6 +56,15 @@ export function Toolbar() {
             add/remove from the selection, or right-click-drag to box-select.
           </span>
         </>
+      )}
+
+      {mode === "view" && (
+        <button
+          className={showPanel ? "toolbar__btn toolbar__btn--active" : "toolbar__btn"}
+          onClick={() => setShowPanel(!showPanel)}
+        >
+          Picking Lists
+        </button>
       )}
 
       <div className="toolbar__spacer" />

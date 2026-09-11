@@ -19,6 +19,7 @@ import { LiftStations } from "./LiftStations";
 import { DeliverySpaces } from "./DeliverySpaces";
 import { Slots } from "./Slots";
 import { DragPlane } from "./DragPlane";
+import { Forklift } from "./Forklift";
 
 // Drives the view-mode camera drill-down: whenever `focus` changes, smoothly
 // moves the CameraControls to a fixed-angle shot of the relevant box
@@ -117,6 +118,7 @@ export function WarehouseScene() {
       <LiftStations stations={warehouse.liftStations} />
       <DeliverySpaces spaces={warehouse.deliverySpaces} />
       <Slots slots={warehouse.slots} defaults={warehouse.slotDefaults} />
+      <Forklift />
       <DragPlane />
 
       {mode === "edit" ? (

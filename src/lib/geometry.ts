@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import type { Point, Slot, SlotSize, Warehouse } from "../types/warehouse";
 
 /**
@@ -80,5 +81,25 @@ export function slotFootprint(slot: Slot, defaults: SlotSize): SlotFootprint {
     cellDepth,
     totalDepth: cellDepth * depth,
     footprintCenterZ: ((depth - 1) * cellDepth) / 2,
+  };
+}
+
+/**
+ * A slot's fixed entry edge, in warehouse (x,y) space — where a forklift
+ * would actually stop to load/unload (see specs.md §5.3's picking-list
+ * routing). Derived from the exact same rotation convention already
+ * verified elsewhere in this codebase (rotationDeg is a warehouse-space CCW
+ * angle that maps directly to a Three.js rotation.y with no sign flip — see
+ * this file's header comment): the entry point is the slot's local
+ * (0, -cellDepth/2) — the front edge center, before depth extends it — put
+ * through Three's standard Y-rotation matrix and back out of scene space.
+ */
+export function slotEntryPoint(slot: Slot, defaults: SlotSize): Point {
+  const { cellDepth } = slotFootprint(slot, defaults);
+  const halfCellDepth = cellDepth / 2;
+  const rotationRad = THREE.MathUtils.degToRad(slot.rotationDeg ?? 0);
+  return {
+    x: slot.x - halfCellDepth * Math.sin(rotationRad),
+    y: slot.y + halfCellDepth * Math.cos(rotationRad),
   };
 }
