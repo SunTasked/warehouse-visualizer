@@ -4,6 +4,31 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-11 (cont'd) — dead-end aisle trim, reversal-turn offset bug, 3-stop gradient
+
+- Three follow-up fixes, all on top of the immediately preceding session's
+  picking-list-simulation/usage-coloring work (see specs.md §5.3 "Further follow-ups"
+  and its decision log entry — not duplicated here):
+  - `Path-Main` (`scripts/generate-example-warehouse.js`) trimmed from starting at x=0
+    (a dead end into a wall pillar, leftover from the removed "Door-West") to x=2,
+    flush with A01/B01's own west edge. Regenerated `schema/warehouse.example.json`;
+    diff confirmed only this one point changed.
+  - `src/lib/offset.ts`'s `offsetPolyline()` had a real remaining bug at near-180°
+    reversal vertices (not just sharp corners) — the "Quick pick" route's A02→DS01 leg
+    U-turns at (10,6), where the previous session's miter/bevel fix still picked the
+    wrong side for the outgoing segment, rendering a diagonal streak. Fixed by emitting
+    two offset points at a detected reversal (dot product of unit directions < -0.8)
+    instead of one.
+  - `usageColor()` (`src/lib/usageColor.ts`) changed from a 2-stop green→red lerp to a
+    3-stop green→amber→red gradient (muddy midpoint color complaint). Public signature
+    unchanged, no caller changes needed.
+- Verified: `tsc --noEmit -p .` clean; Playwright confirmed all three (no dead-end wall
+  run-in, clean rectangular jog at the reversal junction at multiple zoom levels, legend
+  now green→amber→red).
+- specs.md updated: new "Further follow-ups" sub-section under §5.3, new decision log
+  entry. No new open questions.
+- Next: unchanged — same open items as before (§9).
+
 ## 2026-09-11 (cont'd) — dead-end door removed, "warehouse" camera zoom fixed
 
 - Two small, unrelated feedback-driven fixes (see specs.md §10 today's top entry —

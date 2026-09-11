@@ -767,6 +767,42 @@ are now visibly separated and thinner; a played "Quick pick" list ends with 4 st
 (single-count case renders pure green) and disappears after Reset; Reset warehouse
 restores pallets and clears the legend. `tsc --noEmit -p .` clean throughout.
 
+#### Further follow-ups: dead-end aisle trim, reversal-turn offset bug, 3-stop gradient
+
+Three more feedback-driven fixes on top of the above:
+
+- **`Path-Main` dead-end trimmed**: it used to start at x=0 (the west wall), a leftover
+  from the since-removed "Door-West" (previous session). With no door there anymore,
+  that 2m of corridor ran into a solid wall pillar with nothing beyond it — a dead end,
+  flagged via screenshot. Trimmed the start point to x=2, flush with A01/B01's own west
+  edge (`slotDefaults` width=4, so those slots span [2,6]) — nothing west of x=2 was ever
+  needed to reach any slot on the row. Regenerated `schema/warehouse.example.json`; diff
+  confirmed only this one point changed.
+- **`offset.ts` reversal-turn bug**: `offsetPolyline()`'s miter-join logic (previous
+  session's fix) still broke down specifically at a near-180° reversal vertex, not just a
+  sharp corner — e.g. the "Quick pick" route's A02→DS01 leg, which (since
+  Path-Delivery-Spur only tees off the network at (10,6)) must travel past x=14 to x=10
+  and double back, a genuine U-turn forced by corridor topology, not a routing bug. At a
+  reversal, "right of travel" flips to the opposite physical side, so the old
+  single-shared-offset-point fallback put the outgoing segment's lane on the wrong side,
+  rendering as a diagonal cut across to the wrong lane. Fixed by detecting a near-reversal
+  (dot product of the incoming/outgoing unit direction vectors < -0.8) and emitting two
+  offset points at that vertex instead of one (the incoming segment's own correct-side
+  end, immediately followed by the outgoing segment's own correct-side start) — a short
+  perpendicular cross-over instead of a diagonal streak. Every consumer of
+  `offsetPolyline`'s output (`segmentsForPath`, `pointAtDistance`) just walks the returned
+  polyline generically, so this needed no other code changes.
+- **3-stop usage gradient**: `usageColor()` (`src/lib/usageColor.ts`) changed from a
+  direct 2-color green→red lerp (which passed through a muddy olive/brown midpoint) to a
+  3-stop green (`#22c55e`) → amber (`#f59e0b`) → red (`#dc2626`) gradient, via a small
+  `colorAt(t)` helper mapping `t` onto whichever of the two gradient segments it falls in.
+  The public `usageColor(count, min, max)` signature and `usageRange` are unchanged, so no
+  caller (`Paths.tsx`, `UsageLegend.tsx`) needed to change.
+
+Verified via Playwright: no dead-end wall run-in on `Path-Main`; a clean rectangular jog
+(no diagonal) at the A02→DS01 reversal junction at multiple zoom levels; the legend now
+reads green→amber→red. `tsc --noEmit -p .` clean throughout.
+
 ## 6. Core Features / Visualizations
 
 - [x] **3D warehouse view (physical layer only)** — walls + slots render in 3D (§5.1);
@@ -895,6 +931,19 @@ restores pallets and clears the legend. `tsc --noEmit -p .` clean throughout.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-11 — Three follow-up fixes on top of §5.3's "Follow-up fixes &
+  usage-heatmap coloring" ("Further follow-ups" sub-section): (1) trimmed `Path-Main`'s
+  start point from x=0 to x=2 (`scripts/generate-example-warehouse.js` +
+  regenerated `schema/warehouse.example.json`) — it was a dead end running into a wall
+  pillar, a leftover from the already-removed "Door-West"; (2) fixed a real geometry bug
+  in `src/lib/offset.ts`'s `offsetPolyline()` at near-180° reversal vertices (e.g. the
+  "Quick pick" route's A02→DS01 U-turn at (10,6)), where the previous miter/bevel fix
+  still put the outgoing segment's lane on the wrong side, rendering as a diagonal
+  streak — now emits two offset points at a detected reversal (dot product < -0.8)
+  instead of one; (3) changed `usageColor()` (`src/lib/usageColor.ts`) from a 2-stop
+  green→red lerp to a 3-stop green→amber→red gradient, since the direct lerp passed
+  through a muddy midpoint color. All three verified via `tsc --noEmit -p .` (clean) and
+  Playwright.
 - 2026-09-11 — Two small, unrelated feedback-driven fixes. (1) Removed "Door-West" from
   the example warehouse (`scripts/generate-example-warehouse.js` and the regenerated
   `schema/warehouse.example.json`) — it opened onto nothing (no facility, no adjacent

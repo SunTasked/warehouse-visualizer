@@ -226,8 +226,12 @@ const liftStations = [{ id: "CL01", x: 6, y: 4, rotationDeg: 0, buildingId: MAIN
 const deliverySpaces = [{ id: "DS01", x: 14, y: 4, rotationDeg: 0, buildingId: MAIN_BUILDING_ID }];
 
 const paths = [
-  // Main east-west aisle (y=13, the A/B aisle), spanning its full length from
-  // the west wall, past the service-branch tee at x=24, then jogging around the N/M block (whose
+  // Main east-west aisle (y=13, the A/B aisle). Starts at x=2 — flush with
+  // A01/B01's own west edge (x=[2,6]), not the building's west wall at x=0 —
+  // there's nothing west of that edge to reach (no door there — see
+  // Decision Log) so extending the corridor two more meters into the wall
+  // would just be a dead end drawn on top of it. Then past the
+  // service-branch tee at x=24, then jogging around the N/M block (whose
   // footprint spans x=[26,32] at this y) instead of cutting through it: a
   // clear meter outside its west edge (x=25 — the path's own half-width
   // means centering exactly on x=26 would still overlap the block by 0.75m)
@@ -236,7 +240,7 @@ const paths = [
   {
     id: "Path-Main",
     points: [
-      { x: 0, y: 13 },
+      { x: 2, y: 13 },
       { x: 24, y: 13 },
       { x: 25, y: 13 },
       { x: 25, y: 19 },
