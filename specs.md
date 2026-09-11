@@ -266,7 +266,7 @@ unchanged) to drei's `CameraControls` (view mode only) in `WarehouseScene.tsx` �
 both at once, and since they share the same underlying Three.js camera object,
 switching modes doesn't reset framing.
 
-Every level frames via one unified `frameBox(box, angle)` helper in
+Every level frames via one unified `frameBox(box, angle, aspect)` helper in
 `src/lib/focusBounds.ts`, not `CameraControls.fitToBox` — `fitToBox` dollies along
 whatever direction the camera already happens to be facing, so repeated clicks never
 arrived from a consistent angle, and it was also found to dolly absurdly close on a
@@ -277,11 +277,36 @@ currently is. Two angles: `"top"` (plant/warehouse — nearly straight down, mat
 site plan; the offset's x-component is 0, not diagonal like `"iso"`, so the floor/walls
 read axis-aligned on screen rather than rotated into a diamond) and `"iso"`
 (slot/slot-space/pallet — a fixed above-and-to-the-side 3/4 view, reusing the same
-ratios as the scene's initial default camera). Box math itself is unchanged: computed
-*analytically* (not read off rendered meshes) so a box is available even for geometry
-that isn't yet mounted, reusing the exact depth/footprint math `Slots.tsx`/`Rack.tsx`
-render with. `@react-three/drei`'s `CameraControls` (and its `camera-controls` peer
-dependency) was already installed — no new npm package was needed.
+ratios as the scene's initial default camera, still fit via the cruder
+`Math.max(size.x, size.y, size.z, 1) * FRAME_PADDING` heuristic — fine for the roughly
+square slot/slot-space/pallet boxes this angle frames). Box math itself is unchanged:
+computed *analytically* (not read off rendered meshes) so a box is available even for
+geometry that isn't yet mounted, reusing the exact depth/footprint math
+`Slots.tsx`/`Rack.tsx` render with. `@react-three/drei`'s `CameraControls` (and its
+`camera-controls` peer dependency) was already installed — no new npm package was
+needed.
+
+**"top"-angle fit is aspect-aware, not size-only** (fixed after feedback that the
+building-level zoom left too much empty margin): the old `"top"` span used the same
+crude `Math.max(size.x, size.y, size.z, 1) * FRAME_PADDING` heuristic as `"iso"`,
+which ignores the viewport's own aspect ratio — for an elongated building (e.g. the
+example's 40x22m footprint) viewed in a viewport whose aspect ratio doesn't happen to
+match the building's own, this left a large empty margin on whichever axis wasn't the
+(arbitrary) one that happened to be largest, so the building only filled ~30% of the
+screen. `frameBox`'s `"top"` branch now solves analytically instead: given the
+camera's real vertical FOV (`CAMERA_FOV_DEG`, a new exported constant, 45° — must stay
+in sync with the Canvas's own `fov` prop, which now imports it rather than hardcoding
+45 separately) and the viewport's actual aspect ratio (a new `aspect` parameter,
+defaulting to 16/9 when omitted, threaded from `WarehouseScene.tsx`'s
+`FocusCameraDriver` via r3f's `useThree().size`), it computes the exact camera
+distance that makes the box's width (`size.x`) *and* depth (`size.z`) each just reach
+the frustum's edges, and uses whichever constraint is tighter. A new, smaller
+`TOP_FRAME_PADDING` (1.3, vs. the existing `FRAME_PADDING` 1.6 still used unchanged by
+`"iso"`) governs the margin now that the fit itself is exact rather than a guess.
+Verified via Playwright screenshot comparison against the user's own reference
+screenshot of the desired zoom — the building now fills the vast majority of the
+canvas; other focus levels (plant, slot, slot-space, pallet — only "top"'s span
+formula changed, not "iso") are unaffected.
 
 Implementation gotcha worth remembering: a slot's `<lineSegments>` edge outline (purely
 decorative) needs `raycast={() => null}` — Three.js's default line-raycast threshold is
@@ -870,6 +895,19 @@ restores pallets and clears the legend. `tsc --noEmit -p .` clean throughout.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-11 — Two small, unrelated feedback-driven fixes. (1) Removed "Door-West" from
+  the example warehouse (`scripts/generate-example-warehouse.js` and the regenerated
+  `schema/warehouse.example.json`) — it opened onto nothing (no facility, no adjacent
+  building on that side); user feedback: "elle ne mène nulle part." Updated the
+  generator's own comments to match (no longer claims two exterior doors). `Path-Main`
+  still starts at x=0 (the west wall) unchanged — that's just where the internal aisle
+  ends, not a claim of anything beyond the wall. (2) Fixed the "warehouse"-level camera
+  zoom being too far out for an elongated building — `frameBox()`'s `"top"` angle now
+  solves analytically for the viewport's real aspect ratio and FOV instead of a
+  size-only heuristic; see §5.1 "View mode..." → "'top'-angle fit is aspect-aware, not
+  size-only" for the full design. Both verified via `tsc --noEmit -p .` (clean) and
+  Playwright screenshots; edit mode and the other focus levels (plant, slot,
+  slot-space, pallet) are unaffected.
 - 2026-09-11 — Second follow-up pass on the forklift simulation (§5.3 "Follow-up fixes &
   usage-heatmap coloring"), per user feedback: (1) fixed a route-lane offset math bug
   (raw vs. unit-vector direction summing skewed corner offsets past the corridor's true

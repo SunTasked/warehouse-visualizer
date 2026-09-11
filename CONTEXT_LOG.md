@@ -4,6 +4,31 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-11 (cont'd) — dead-end door removed, "warehouse" camera zoom fixed
+
+- Two small, unrelated feedback-driven fixes (see specs.md §10 today's top entry —
+  not duplicated here):
+  - Removed "Door-West" from the example warehouse: it led nowhere (no facility/
+    adjacent building on that side). Deleted from `scripts/generate-example-
+    warehouse.js` and regenerated `schema/warehouse.example.json` (re-ran the
+    generator; diff confirmed only the door removal changed, content file
+    untouched); updated the generator's own stale comments to match.
+  - Fixed `frameBox()`'s `"top"` angle (`src/lib/focusBounds.ts`) leaving too much
+    empty margin around an elongated building (~30% screen fill) because it sized
+    the shot off `Math.max(size.x/y/z)` with no regard for the viewport's own aspect
+    ratio. Now solves analytically for the exact distance that fits both size.x and
+    size.z given the real vertical FOV (`CAMERA_FOV_DEG`, new exported constant,
+    kept in sync with the Canvas's `fov` prop) and the viewport's actual aspect
+    ratio (`frameBox`'s new `aspect` param, threaded from `WarehouseScene.tsx` via
+    `useThree().size`). New `TOP_FRAME_PADDING` (1.3) replaces `FRAME_PADDING` for
+    just this angle; `"iso"` untouched.
+  - Verified: `tsc --noEmit -p .` clean; Playwright screenshots confirm the door
+    opening is gone (solid wall) and the building-level zoom now closely matches the
+    user's reference screenshot; edit mode / other focus levels unaffected.
+- specs.md updated: §5.1 "View mode..." gained a new sub-paragraph on the
+  aspect-aware "top" fit; new decision log entry covering both fixes.
+- Next: unchanged — same open items as before (§9).
+
 ## 2026-09-11 (cont'd) — forklift simulation: lane-offset fix, reset button, usage heatmap
 
 - Another round of feedback/fixes on top of §5.3 (see specs.md "Follow-up fixes &

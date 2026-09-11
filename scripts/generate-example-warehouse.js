@@ -26,7 +26,7 @@
 // and ~10% partial (a varied smaller count) — deterministic, not random, so
 // re-running this script reproduces the same file (no noisy diffs).
 //
-// The main building also gets two exterior doors (west, south), a lift
+// The main building also gets an exterior door (south), a lift
 // station (CL01) and a delivery space (DS01), and a corridor network that
 // routes AROUND all of them (never through a slot/lift-station/delivery-space
 // footprint) — see specs.md §5.1 "Doors, paths & the carriage lift station".
@@ -213,7 +213,6 @@ const MAIN_BUILDING_ID = "Batiment 13A";
 const ANNEX_BUILDING_ID = "Entrepot Annexe";
 
 const doors = [
-  { id: "Door-West", x: 0, y: 13, rotationDeg: 90, buildingId: MAIN_BUILDING_ID },
   { id: "Door-South", x: 10, y: 0, rotationDeg: 0, buildingId: MAIN_BUILDING_ID },
   // Faces the main building's south door across the 3m gap between them.
   { id: "Door-Annex-North", x: 10, y: -3, rotationDeg: 0, buildingId: ANNEX_BUILDING_ID },
@@ -227,8 +226,8 @@ const liftStations = [{ id: "CL01", x: 6, y: 4, rotationDeg: 0, buildingId: MAIN
 const deliverySpaces = [{ id: "DS01", x: 14, y: 4, rotationDeg: 0, buildingId: MAIN_BUILDING_ID }];
 
 const paths = [
-  // Main east-west aisle (y=13, the A/B aisle), from the west door, past the
-  // service-branch tee at x=24, then jogging around the N/M block (whose
+  // Main east-west aisle (y=13, the A/B aisle), spanning its full length from
+  // the west wall, past the service-branch tee at x=24, then jogging around the N/M block (whose
   // footprint spans x=[26,32] at this y) instead of cutting through it: a
   // clear meter outside its west edge (x=25 — the path's own half-width
   // means centering exactly on x=26 would still overlap the block by 0.75m)

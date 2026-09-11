@@ -114,13 +114,47 @@ export interface FramedView {
 const TOP_DOWN_RATIO = { x: 0, y: 1.3, z: 0.2 };
 const ISO_RATIO = { x: 0.6, y: 0.9, z: 0.8 };
 const FRAME_PADDING = 1.6;
+// A tighter margin than the iso shots' FRAME_PADDING — since the "top" fit
+// below is now an exact aspect-aware solve (not a crude size-only guess), it
+// doesn't need as much slack to guarantee nothing clips.
+const TOP_FRAME_PADDING = 1.3;
+// Must match the Canvas's own camera fov (WarehouseScene.tsx) — the "top"
+// fit below needs the real vertical FOV to convert a world-space extent
+// into the camera distance that makes it just reach the frustum's edge.
+export const CAMERA_FOV_DEG = 45;
 
-/** Computes a fixed-angle camera shot ("top" or "iso") that frames `box`. */
-export function frameBox(box: THREE.Box3, angle: "top" | "iso"): FramedView {
+/**
+ * Computes a fixed-angle camera shot ("top" or "iso") that frames `box`.
+ *
+ * "top" solves for the exact distance that makes the box's own footprint —
+ * both its width (size.x) *and* its depth (size.z) — just reach the
+ * frustum's edges, given the viewport's own aspect ratio. Fitting only
+ * whichever single dimension happens to be largest (as "iso" below still
+ * does — a deliberately cruder heuristic, fine for near-square slot/pallet
+ * boxes) ignores the viewport's shape entirely: an elongated building
+ * viewed in a viewport whose aspect ratio doesn't match its own left a lot
+ * of empty floor on whichever axis wasn't the (arbitrary) one accounted
+ * for — this was the "zoom level isn't good" feedback on the building-level
+ * view. Solving for both axes and taking whichever is tighter means however
+ * the box is shaped, and however wide the window is, it always fills the
+ * frame the same way.
+ */
+export function frameBox(box: THREE.Box3, angle: "top" | "iso", aspect = 16 / 9): FramedView {
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
-  const span = Math.max(size.x, size.y, size.z, 1) * FRAME_PADDING;
   const ratio = angle === "top" ? TOP_DOWN_RATIO : ISO_RATIO;
+
+  let span: number;
+  if (angle === "top") {
+    const cameraDistanceFactor = Math.hypot(ratio.x, ratio.y, ratio.z); // camera sits this many `span`s from the target
+    const halfVFov = THREE.MathUtils.degToRad(CAMERA_FOV_DEG) / 2;
+    const spanForDepth = ((size.z / 2) * TOP_FRAME_PADDING) / (cameraDistanceFactor * Math.tan(halfVFov));
+    const spanForWidth = ((size.x / 2) * TOP_FRAME_PADDING) / (cameraDistanceFactor * Math.tan(halfVFov) * aspect);
+    span = Math.max(spanForDepth, spanForWidth, 1);
+  } else {
+    span = Math.max(size.x, size.y, size.z, 1) * FRAME_PADDING;
+  }
+
   return {
     position: [center.x + span * ratio.x, center.y + span * ratio.y, center.z + span * ratio.z],
     target: [center.x, center.y, center.z],

@@ -1,4 +1,4 @@
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { Grid, OrbitControls, CameraControls } from "@react-three/drei";
 import { useEffect, useMemo, useState } from "react";
 import { boundsCenter, boundsSpan, computeBounds, toSceneXZ } from "../lib/geometry";
@@ -9,6 +9,7 @@ import {
   buildingWorldBox,
   plantWorldBox,
   frameBox,
+  CAMERA_FOV_DEG,
 } from "../lib/focusBounds";
 import { useEditor } from "../state/EditorContext";
 import { useViewFocus } from "../state/ViewFocusContext";
@@ -33,6 +34,8 @@ import { Forklift } from "./Forklift";
 function FocusCameraDriver() {
   const { warehouse } = useEditor();
   const { focus, cameraControlsRef } = useViewFocus();
+  const { size } = useThree();
+  const aspect = size.width / size.height;
 
   useEffect(() => {
     const controls = cameraControlsRef.current;
@@ -40,11 +43,11 @@ function FocusCameraDriver() {
 
     let view;
     if (focus.level === "plant") {
-      view = frameBox(plantWorldBox(warehouse), "top");
+      view = frameBox(plantWorldBox(warehouse), "top", aspect);
     } else if (focus.level === "warehouse") {
       const loop = warehouse.walls.find((w) => w.id === focus.buildingId);
       if (!loop) return;
-      view = frameBox(buildingWorldBox(loop, WALL_HEIGHT), "top");
+      view = frameBox(buildingWorldBox(loop, WALL_HEIGHT), "top", aspect);
     } else {
       const slot = warehouse.slots.find((s) => s.id === focus.slotId);
       if (!slot) return;
@@ -60,7 +63,7 @@ function FocusCameraDriver() {
     const [px, py, pz] = view.position;
     const [tx, ty, tz] = view.target;
     void controls.setLookAt(px, py, pz, tx, ty, tz, true);
-  }, [focus, warehouse, cameraControlsRef]);
+  }, [focus, warehouse, cameraControlsRef, aspect]);
 
   return null;
 }
@@ -89,7 +92,7 @@ export function WarehouseScene() {
 
   return (
     <Canvas
-      camera={{ position: initialView.cameraPosition, fov: 45, near: 0.1, far: initialView.far }}
+      camera={{ position: initialView.cameraPosition, fov: CAMERA_FOV_DEG, near: 0.1, far: initialView.far }}
       onCreated={({ camera }) => {
         cameraRef.current = camera;
       }}
