@@ -28,14 +28,24 @@ const DIVIDER_COLOR = "#b7c6ef";
 // color already in use (slot fill, black edge, pale divider, orange
 // selection, hover highlight).
 const ENTRY_COLOR = "#22c55e";
-const ENTRY_MARKER_DEPTH = 0.25;
+// Deep enough to comfortably hold the id label on top of it (see below) —
+// previously just a thin 0.25m threshold stripe. Extends inward from the
+// slot's own entry edge, not outward past it: past the edge is the aisle,
+// where a Path may now run (see specs.md §5.1) — routing every path clear of
+// every slot keeps that side free for good, but a label sitting out there
+// isn't just barely above a path's own low floor-level box height (~0.04m);
+// from the fixed 3/4 camera angle used at every zoom level, that's enough
+// for the path's silhouette to occlude a flat label at nearly the same
+// elevation, the same way a low curb can hide something just behind it when
+// viewed nearly edge-on. Sitting inward instead sidesteps that regardless of
+// how close a path ever runs to a slot's edge.
+const ENTRY_MARKER_DEPTH = 0.6;
 // Raised like a real painted threshold bar (taller than the slot pad itself)
 // so it still reads clearly even where a rack's corner posts stand on it.
 const ENTRY_MARKER_HEIGHT = 0.14;
-// How far outside the slot's fixed entry edge (see cellDepth/footprintCenterZ
-// below) the id label sits — the operator-access side, assumed to stay clear
-// of any other slot's footprint.
-const LABEL_OFFSET = 0.4;
+// Label clearance above the entry marker's own top surface.
+const LABEL_CLEARANCE = 0.03;
+const LABEL_COLOR = "#000000";
 
 // Draws the boundary between two adjacent sub-slots (depth subdivision),
 // running across the slot's width at local Z = z.
@@ -48,15 +58,21 @@ function DepthDivider({ z, width }: { z: number; width: number }) {
   );
 }
 
+// Shared by EntryMarker and the id label (Text) below, so the label always
+// sits centered on the marker regardless of ENTRY_MARKER_DEPTH.
+function entryMarkerCenterZ(cellDepth: number): number {
+  return -cellDepth / 2 + ENTRY_MARKER_DEPTH / 2;
+}
+
 // A painted strip on the pad surface at the slot's fixed entry edge —
-// materializes where an operator accesses the slot, right on the slot
-// itself (as opposed to the id label, which sits just outside it).
+// materializes where an operator accesses the slot, and doubles as the
+// label's background (see the id Text below, positioned on top of it).
 function EntryMarker({ cellDepth, width }: { cellDepth: number; width: number }) {
   const geometry = useMemo(
     () => new THREE.BoxGeometry(width * 0.96, ENTRY_MARKER_HEIGHT, ENTRY_MARKER_DEPTH),
     [width],
   );
-  const z = -cellDepth / 2 + ENTRY_MARKER_DEPTH / 2;
+  const z = entryMarkerCenterZ(cellDepth);
   return (
     <mesh geometry={geometry} position={[0, SLOT_HEIGHT / 2 + ENTRY_MARKER_HEIGHT / 2, z]}>
       <meshStandardMaterial color={ENTRY_COLOR} />
@@ -124,13 +140,18 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
     setHover(null);
   };
 
+  // View-mode "select this slot" fires on onClick, not onPointerDown — see
+  // handlePointerDown's comment below for why mixing the two event types
+  // for competing handlers (this slot vs. the building floor beneath it)
+  // caused a real bug: whichever fired later always won, regardless of which
+  // object the raycast actually preferred.
+  const handleClick = (e: ThreeEvent<MouseEvent>) => {
+    if (mode !== "view" || e.nativeEvent.button !== 0) return;
+    e.stopPropagation();
+    focusSlot(slot.id, buildingId);
+  };
+
   const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
-    if (mode === "view") {
-      if (e.nativeEvent.button !== 0) return;
-      e.stopPropagation();
-      focusSlot(slot.id, buildingId);
-      return;
-    }
     if (mode !== "edit" || addSlotMode) return; // let the event fall through to the drag plane
     if (e.nativeEvent.button !== 0) return; // right button is for box-select
     e.stopPropagation();
@@ -162,6 +183,7 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
     <group
       position={[slot.x, SLOT_HEIGHT / 2, -slot.y]}
       rotation={[0, rotationRad, 0]}
+      onClick={handleClick}
       onPointerDown={handlePointerDown}
       onPointerOver={handlePointerOver}
       onPointerMove={handlePointerMove}
@@ -182,10 +204,14 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
       </group>
       <EntryMarker cellDepth={cellDepth} width={defaults.width} />
       <Text
-        position={[0, SLOT_HEIGHT / 2 + 0.05, -cellDepth / 2 - LABEL_OFFSET]}
+        position={[
+          0,
+          SLOT_HEIGHT / 2 + ENTRY_MARKER_HEIGHT + LABEL_CLEARANCE,
+          entryMarkerCenterZ(cellDepth),
+        ]}
         rotation={[-Math.PI / 2, 0, 0]}
         fontSize={0.5}
-        color="#0b1330"
+        color={LABEL_COLOR}
         anchorX="center"
         anchorY="middle"
       >
@@ -198,7 +224,8 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
       {slot.subSlots?.map((subSlot, i) => {
         if (subSlot.pallets.length === 0) return null;
         if (mode === "view" && !isSlotSpaceVisible(focus, slot.id, i)) return null;
-        const handleSubSlotPointerDown = (e: ThreeEvent<PointerEvent>) => {
+        // onClick, not onPointerDown — see SlotMesh's handleClick comment.
+        const handleSubSlotClick = (e: ThreeEvent<MouseEvent>) => {
           // Reachable once this slot is focused at any drill-down level —
           // mirrors "select a slot space only if pallets are on it" (empty
           // sub-slots render no Rack at all, so there's nothing to click).
@@ -222,7 +249,7 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
           <group
             key={subSlot.id}
             position={[0, SLOT_HEIGHT / 2, i * cellDepth]}
-            onPointerDown={handleSubSlotPointerDown}
+            onClick={handleSubSlotClick}
             onPointerOver={handleSubSlotPointerOver}
             onPointerMove={handleSubSlotPointerOver}
             onPointerOut={handleSubSlotPointerOut}

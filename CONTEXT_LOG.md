@@ -4,6 +4,46 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-11 (cont'd) — slot label redesign + a real click-handler regression found
+
+- User feedback (English, with a screenshot): slot labels (e.g. "A04") are no longer
+  readable, hidden behind a Path running through the aisle just past the slot's entry
+  edge. Suggested enlarging the green entry-marker area to fit the label on it.
+- Moved the id label from outside the slot's footprint onto the entry marker itself
+  (`Slots.tsx`): enlarged `ENTRY_MARKER_DEPTH` (0.25m → 0.6m) so it comfortably holds the
+  label, added a shared `entryMarkerCenterZ()` helper so the label always centers on the
+  marker regardless of its depth, changed label color to black (was dark navy, tuned for
+  the white floor). Deliberately moved the label *inward* rather than just raising its Y
+  elevation to clear the path — a Path is only ever authored through open aisle space
+  (never a slot's own footprint, per the routing work), so this sidesteps the whole
+  category of problem for good, not just today's specific aisle width.
+- While verifying this, found a real, previously-undetected regression: clicking a slot
+  **directly from "plant"** (skipping "warehouse") was landing on "warehouse" instead of
+  drilling to "slot". Traced it with temporary console logging in `Slots.tsx`/`Rack.tsx`/
+  `Walls.tsx`: the slot's `onPointerDown` handler fired first (mutating focus to
+  "slot"), and then, a few milliseconds later, the browser's separate "click" event
+  re-raycast the scene and hit `BuildingFloor` underneath (still mounted at that instant,
+  since React hadn't yet flushed the unmount) — its `onClick` handler ran and silently
+  overwrote the slot selection with a "warehouse"-level one. This is the *same* category
+  of bug already fixed for `BuildingFloor` itself yesterday, just from the other
+  direction: mixing `onPointerDown` and `onClick` across *competing* handlers means
+  whichever event type fires later in the pointerdown→pointerup→click sequence always
+  wins, regardless of which object the raycast actually preferred.
+- Fixed by moving every remaining "select/focus" handler in the view-mode system to
+  `onClick`: `Slots.tsx` (slot click split into a new `onClick` for view-mode selection
+  vs. `onPointerDown` kept only for edit-mode drag-start; sub-slot click), `Rack.tsx`
+  (pallet click), `Walls.tsx` (wall segment click). `onPointerDown` is now reserved
+  exclusively for actually starting an edit-mode drag gesture, never for a one-shot
+  selection action, anywhere in the codebase.
+- Verified via Playwright: direct slot click from plant now correctly reaches "Slot:
+  A01"; sub-slot and pallet drill-down still work; wall click, floor click, and facility
+  pad click-passthrough all still work; edit mode (Inspector, slot selection, wall-corner
+  drag) unaffected. `tsc --noEmit` clean throughout; all temporary debug logging removed
+  before committing.
+- specs.md updated: the entry-marker/label paragraph rewritten, a new paragraph in the
+  view-mode section explaining why `onClick` vs `onPointerDown` is load-bearing (not a
+  style choice), and a new decision log entry.
+
 ## 2026-09-11 — path visual polish, floor-click bug, facility tooltips
 
 - User feedback (French, with a screenshot) on the previous round's work, three items:

@@ -234,7 +234,12 @@ export function Rack({
           hover?.slotId === slotId &&
           hover.subSlotIndex === subSlotIndex &&
           hover.palletIndex === level;
-        const handlePalletPointerDown = (e: ThreeEvent<PointerEvent>) => {
+        // onClick, not onPointerDown — mixing event types between competing
+        // handlers (this pallet vs. whatever's beneath it) meant whichever
+        // fired later in the pointerdown/click sequence always won,
+        // regardless of which object the raycast actually preferred. See
+        // Slots.tsx's SlotMesh handleClick comment for the full story.
+        const handlePalletClick = (e: ThreeEvent<MouseEvent>) => {
           // Reachable once this pallet's own sub-slot is focused (at any
           // drill-down level) — mirrors the slot -> sub-slot -> pallet order.
           if (mode !== "view" || focus.slotId !== slotId || focus.subSlotIndex !== subSlotIndex) return;
@@ -255,7 +260,7 @@ export function Rack({
         return (
           <group
             key={pallet.id}
-            onPointerDown={handlePalletPointerDown}
+            onClick={handlePalletClick}
             onPointerOver={handlePalletPointerOver}
             onPointerMove={handlePalletPointerOver}
             onPointerOut={handlePalletPointerOut}

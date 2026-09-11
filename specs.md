@@ -148,16 +148,23 @@ of rails connecting all four corner posts (not just front/back bars) so the stru
 reads as one physical, operable shelf. Tires resize to always span the full pallet
 width (a partial pallet has fewer, larger-spaced tires, not a half-empty row). Empty
 sub-slots (no pallets) render only a thin divider line, no rack — matching the
-reference screenshot's "#N/A" cells. A slot's id label sits *outside* its footprint, at
-the fixed entry edge (the side that doesn't move as depth changes — see below); that
-space is assumed to be the aisle an operator uses to access the slot, so no other
-slot's footprint will occupy it. The outer edge of a whole slot's footprint renders in
-solid black (vs. the pale sub-slot dividers), for a clear "these cells belong together,
-that's a different slot" contrast. The entry itself is also marked *on* the slot: a
+reference screenshot's "#N/A" cells. The outer edge of a whole slot's footprint renders
+in solid black (vs. the pale sub-slot dividers), for a clear "these cells belong
+together, that's a different slot" contrast. The entry is marked *on* the slot: a
 raised green threshold bar (`EntryMarker` in `Slots.tsx`) sits right at the fixed entry
-edge, on the pad surface — tall enough to still read clearly even where a rack's
-corner posts stand on it, distinct from every other color already in use (slot fill,
-black edge, pale divider, orange selection, gray dimming).
+edge, on the pad surface — tall enough to still read clearly even where a rack's corner
+posts stand on it, distinct from every other color already in use (slot fill, black
+edge, pale divider, orange selection, gray dimming). The id label sits *on top of* this
+same marker (not outside the footprint, in the aisle, as it used to) — the marker is
+sized deep enough (`ENTRY_MARKER_DEPTH`) to hold it comfortably, black text on the green
+background. This moved after a Path started running through the aisle just past a
+slot's entry edge (§5.1): a label sitting out there was only barely above a path's low
+floor-level box height, and from the fixed 3/4 camera angle used at every zoom level,
+that was enough for the path's silhouette to occlude a flat label at nearly the same
+elevation — the same way a low curb can hide something just behind it viewed nearly
+edge-on. Moving the label inward onto the slot's own pad sidesteps that regardless of
+how close a path ever runs to a slot's edge, rather than only patching the one aisle
+width that happened to be a problem.
 
 Editable in the Inspector when a single slot is selected: a Depth field (resizes
 `subSlots`, preserving existing content when growing, dropping the deepest sub-slots
@@ -203,7 +210,23 @@ are required) so each level's highlight is mutually exclusive with the others (e
 slot pad only lights up when `subSlotIndex` is unset). Clicking drills one level at a time — a building,
 then a slot, then (only if it has stocked sub-slots — empty ones render no rack at all,
 so there's nothing to click) a sub-slot, then a pallet tier — smoothly zooming the
-camera each time. **Whenever a level is focused, every sibling at that level disappears
+camera each time.
+
+Every one of these "select/focus" click handlers — building floor, wall segment, slot,
+sub-slot, pallet, facility pad — uses `onClick`, never `onPointerDown`, and this is load
+-bearing, not a style preference: `onPointerDown` fires *before* the browser's own
+"click" event, so if its handler mutates state that a *different* element's own click
+handler also depends on (e.g. a slot sitting above a building floor that's rendered
+conditionally on the current focus level), the two can race — whichever handler's event
+type happens to fire later in the pointerdown→pointerup→click sequence always wins,
+regardless of which object the raycast actually preferred. This caused two real bugs in
+practice (a building-floor click self-reverting, and — worse — a slot click landing on
+"warehouse" instead of "slot" because a floor click-catcher's later `onClick` silently
+overwrote the slot's earlier `onPointerDown`); see the decision log. `onPointerDown` is
+reserved exclusively for what it's semantically for: *starting* an edit-mode drag
+gesture (wall corner handles, slot dragging) — never for a one-shot selection action.
+
+**Whenever a level is focused, every sibling at that level disappears
 entirely** (not rendered — see `src/lib/visibility.ts`'s `isBuildingVisible`/
 `isSlotVisible`/`isSlotSpaceVisible`, each a plain boolean, no color blending), so a
 hidden thing is also automatically un-hoverable/unclickable. Pallets are the one
@@ -634,6 +657,29 @@ eyeball results in 3D rather than deciding blind.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-11 — Moved a slot's id label from just outside its footprint (in the aisle) to
+  on top of the entry marker (inside the footprint), per user feedback that labels were
+  now unreadable, hidden behind a Path running through that aisle. Enlarged
+  `ENTRY_MARKER_DEPTH` so the marker comfortably holds the label; text is now black on
+  the marker's own green rather than dark navy on white floor. Chose to move the label
+  rather than just raise its elevation, since a Path will only ever run through open
+  aisle space (§5.1), never through a slot's own footprint — moving the label onto the
+  slot sidesteps the occlusion category of problem entirely, rather than only patching
+  the specific aisle width that happened to be an issue today.
+
+  Also found, while investigating why a *direct* slot click from "plant" was landing on
+  "warehouse" instead of "slot": every "select/focus" click handler in the view-mode
+  system now must use `onClick`, not `onPointerDown` — `Slots.tsx` (slot, sub-slot),
+  `Rack.tsx` (pallet), and `Walls.tsx` (wall segment) were still on `onPointerDown` even
+  though `BuildingFloor` had already been switched (previous entry). Since a slot's
+  `onPointerDown` fired and mutated focus *before* the building floor beneath it
+  (rendered underneath everything at "plant" level) received its own, separate `onClick`
+  a few ms later, the floor's later-firing handler silently overwrote the slot's
+  earlier one on every single click — a real, previously-undetected regression from the
+  building-floor-click feature, not something introduced today. Confirmed via
+  Playwright with temporary console logging showing the exact handler firing order
+  before the fix. See §5.1's new paragraph on why `onClick` vs `onPointerDown` is
+  load-bearing here, not a style choice.
 - 2026-09-11 — Three fixes on the physical-layer feature, per user feedback: (1) paths
   repainted black with a rounded cylinder joint at every vertex, fixing the square-notch
   look where two angled box segments met; (2) fixed a real bug where clicking a

@@ -226,7 +226,11 @@ export function Walls({ walls, doors }: { walls: WallLoop[]; doors: Door[] }) {
       {segments.map((segment) => {
         if (segment.isBuilding && !isBuildingVisible(focus, segment.loopId)) return null;
 
-        const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
+        // onClick, not onPointerDown — see BuildingFloor's handleClick
+        // comment above (mixing event types between competing handlers
+        // meant whichever fired later always won, regardless of which
+        // object the raycast actually preferred).
+        const handleClick = (e: ThreeEvent<MouseEvent>) => {
           if (mode !== "view") return;
           e.stopPropagation();
           // A different building's wall (or any wall from plant, since
@@ -263,7 +267,7 @@ export function Walls({ walls, doors }: { walls: WallLoop[]; doors: Door[] }) {
             key={segment.key}
             position={segment.position}
             rotation={[0, segment.rotationY, 0]}
-            onPointerDown={handlePointerDown}
+            onClick={handleClick}
             onPointerOver={handlePointerOver}
             onPointerMove={handlePointerOver}
             onPointerOut={handlePointerOut}
