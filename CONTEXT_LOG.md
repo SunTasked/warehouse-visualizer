@@ -4,6 +4,36 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-11 (cont'd) — forklift simulation: lane-offset fix, reset button, usage heatmap
+
+- Another round of feedback/fixes on top of §5.3 (see specs.md "Follow-up fixes &
+  usage-heatmap coloring" and its decision log entry — not duplicated here):
+  - Fixed a real route-lane offset bug: `offsetPolyline()` summed raw (non-unit)
+    adjacent-segment vectors to pick a corner's offset direction, letting the longer
+    segment dominate and occasionally push the offset past the corridor's true width.
+    Replaced with a proper unit-vector miter join + `MITER_LIMIT` bevel fallback for
+    sharp turns; extracted into new shared `src/lib/offset.ts`.
+  - Visual tuning: `LANE_OFFSET` 0.3→0.55, `ROUTE_WIDTH` 0.5→0.28, `PATH_DEFAULT_WIDTH`
+    1.5→1.0.
+  - Forklift now ends its run at the home lift station too (`stopsWithDepot()` appends,
+    not just prepends).
+  - New "Reset warehouse" button (`PickingListPanel.tsx` / `SimulationContext.tsx`'s
+    `resetWarehouse()`): `editor.jumpTo(0)` + clears active run + clears usage tallies.
+  - New path-segment usage coloring: `pathGraph.ts`'s `routeBetween()` now returns
+    `{points, edges}`; `SimulationContext.tsx` tallies direction-sensitive `edgeUsage`;
+    `Paths.tsx` renders traveled segments as split green→red colored lanes (new
+    `src/lib/usageColor.ts`); new `src/components/UsageLegend.tsx` shows the color scale
+    in view mode whenever anything's been traveled.
+- Verification done this session (per the requester, not redone here): `tsc --noEmit -p .`
+  clean; Playwright confirmed the lane-offset fix, thinner/separated lanes, a full 4-stop
+  "Quick pick" run in both playback modes with no console errors, the legend appearing/
+  showing "1 pass / 1 pass" then disappearing after Reset, and Reset restoring pallets.
+- specs.md updated: §5.3 gained the new subsection above; new decision log entry. No new
+  open questions — Reset gives a coarse discard-everything workaround but open question
+  18 (no fine-grained per-step undo) still stands as-is.
+- Next: unchanged — same open items as before (§9), plus open question 16 (multi-forklift/
+  aisle-priority rules) is the most likely next ask given this session's direction.
+
 ## 2026-09-11 (cont'd) — forklift simulation follow-up: transport bar, lanes, occlusion
 
 - User feedback on the just-shipped forklift simulation, six items with screenshots: (1)

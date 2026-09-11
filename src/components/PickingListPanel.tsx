@@ -131,6 +131,13 @@ export function PickingListPanel() {
         <button className="picking-panel__btn picking-panel__btn--stop" disabled={!isPlaying} onClick={simulation.stop}>
           Stop
         </button>
+        <button
+          className="picking-panel__btn picking-panel__btn--reset"
+          onClick={simulation.resetWarehouse}
+          title="Undo every pallet moved by the simulation and clear the usage coloring"
+        >
+          Reset warehouse
+        </button>
       </div>
 
       {run && run.mode === "animated" ? (

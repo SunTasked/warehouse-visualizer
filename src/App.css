@@ -615,3 +615,45 @@
   color: #5a6270;
   text-align: center;
 }
+
+.picking-panel__btn--reset {
+  flex-basis: 100%;
+  color: #92400e;
+}
+
+.usage-legend {
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
+  width: 220px;
+  background: #ffffff;
+  border: 1px solid #d7dbe3;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.12);
+  font-size: 0.78rem;
+  padding: 0.6rem 0.75rem;
+}
+
+.usage-legend__title {
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+  color: #1f2937;
+}
+
+.usage-legend__bar {
+  display: flex;
+  height: 10px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.usage-legend__swatch {
+  flex: 1;
+}
+
+.usage-legend__labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.3rem;
+  color: #5a6270;
+}

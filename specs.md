@@ -667,6 +667,81 @@ run additionally shows a music-player-style transport bar: Previous/Play-Pause/N
 buttons and a step slider (each tick = one leg/stop), backed by the single `goToStep`
 described above.
 
+#### Follow-up fixes & usage-heatmap coloring
+
+A further round of feedback-driven fixes/features on top of the above:
+
+- **Route lane offset bug fix**: `offsetPolyline()` (the shared perpendicular-offset
+  logic behind both a run's route lanes and, now, path usage coloring below) previously
+  derived each interior vertex's offset direction by summing the incoming/outgoing
+  segments' *raw* (non-unit) displacement vectors, so whichever adjacent segment
+  happened to be longer dominated the direction — occasionally skewing a corner's offset
+  point past the corridor's true footprint (reported as the path sometimes extending
+  past the strict minimum). Fixed with a proper unit-vector angle-bisector miter join,
+  with a `MITER_LIMIT` (2x the base offset) that falls back to a bevel-ish join (the
+  incoming segment's own perpendicular) on sharp/near-reversal turns instead of letting
+  the miter shoot outward unboundedly. `offsetPolyline`/`rightOf` moved out of
+  `Forklift.tsx` into a new shared `src/lib/offset.ts` so both the route-lane rendering
+  and the new usage-coloring rendering (below) use one implementation.
+- **Visual tuning**, per feedback that lanes/routes/corridors were reading too
+  close-together/thick: `LANE_OFFSET` (`Forklift.tsx`, separation between
+  opposite-direction lanes on the same corridor) 0.3 → 0.55; `ROUTE_WIDTH`
+  (`Forklift.tsx`) 0.5 → 0.28; `PATH_DEFAULT_WIDTH` (`Paths.tsx`) 1.5 → 1.0.
+- **Forklift now also *ends* at the home lift station**, mirroring the existing
+  start-at-lift-station behavior: `stopsWithDepot()` (`SimulationContext.tsx`) now
+  appends a trailing depot stop at the home lift station too (skipped if the list's own
+  last stop is already that lift station, avoiding a zero-length final leg). Needed no
+  change to `planEvents` — the trailing stop is just an ordinary no-op deliver/load
+  event under the existing logic, same as the prepended one.
+- **Reset warehouse button** (`SimulationContext.tsx`'s new `resetWarehouse()`, wired
+  into `PickingListPanel.tsx`'s actions row): reuses the editor's own undo/history
+  system — `editor.jumpTo(0)` discards every pallet mutation a simulation run has made,
+  back to the originally-loaded state — and also clears the active run and all edge
+  usage tallies (below). Not a general per-step undo (open question 18 is still open),
+  but gives a one-click way to discard everything a played run changed and start clean.
+- **Path-segment usage coloring** — a green→red heat map of how many times each
+  directed path segment has actually been traveled, so a played run leaves a visible
+  trace on the persistent corridor network itself, not just the transient route overlay:
+  - `src/lib/pathGraph.ts`'s `routeBetween()` now returns a `Route` (`{ points, edges }`)
+    rather than a bare point list — `edges` is the ordered list of real graph-node-to-
+    graph-node directed hops the route actually rides along the persistent path network
+    (excluding the synthetic notch/connector legs at either end). New exported
+    `nodeKey()`/`edgeKey()` helpers so other modules derive matching node-id keys.
+  - `SimulationContext.tsx` tracks `edgeUsage: Record<string, number>`, keyed
+    `"${nodeIdA}→${nodeIdB}"` — direction-sensitive by explicit user request, so a
+    corridor traveled out and back tallies as two independent per-direction counts.
+    Incremented via `applyLegUsage()` only when a leg is actually traveled for real (the
+    static-mode instant-completion path, and `goToStep`'s forward loop) — mirroring the
+    existing "backward doesn't undo" asymmetry already documented for `goToStep`.
+    Cleared by `resetWarehouse()`.
+  - New `src/lib/usageColor.ts`: `usageColor(count, min, max)` maps a count to a
+    green (`#22c55e`, lowest nonzero) → red (`#dc2626`, highest) hex color;
+    `usageRange(edgeUsage)` returns the overall `{min, max}` across all nonzero directed
+    counts, or `null` if nothing's been traveled yet.
+  - `Paths.tsx`: a segment with zero usage in both directions renders exactly as before
+    (unchanged for the vast majority of the network). A segment with any nonzero usage
+    splits into two independently-offset parallel lanes (own small end-cap joints, not
+    blended with neighbors — a deliberate simplification for a heat-map overlay, at the
+    cost of an imperfect join where two "hot" segments meet at a sharp turn), one lane
+    per direction, colored via `usageColor` if that direction's count > 0, or a muted
+    neutral gray (`#94a3b8`) if that specific direction was never traveled — so "used the
+    other way only" reads as visually distinct from "used, just the fewest times" (which
+    is green). Cross-building stub truncation (`effectiveView`/`STUB_LENGTH`) gained a
+    `stubOriginalIndex` field on `RenderedPath` so a truncated stub's synthetic
+    coordinates can still look up the correct real edge's usage count.
+  - New `src/components/UsageLegend.tsx`, mounted in `App.tsx` alongside
+    `PickingListPanel`: a small fixed bottom-right card, shown in view mode whenever
+    `usageRange()` is non-null, with a 6-stop green→red gradient bar and min/max
+    "N passes" labels. Independent of whether the picking panel is open, since the
+    coloring persists on the 3D view after a run finishes.
+
+Verified via Playwright: the lane-offset fix shows no visible overshoot at turns; lanes
+are now visibly separated and thinner; a played "Quick pick" list ends with 4 stops
+(CL01→A02→DS01→CL01, both animated and static) with zero console errors through to
+"Finished"; the usage legend appears after playing a list showing "1 pass / 1 pass"
+(single-count case renders pure green) and disappears after Reset; Reset warehouse
+restores pallets and clears the legend. `tsc --noEmit -p .` clean throughout.
+
 ## 6. Core Features / Visualizations
 
 - [x] **3D warehouse view (physical layer only)** — walls + slots render in 3D (§5.1);
@@ -795,6 +870,21 @@ described above.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-11 — Second follow-up pass on the forklift simulation (§5.3 "Follow-up fixes &
+  usage-heatmap coloring"), per user feedback: (1) fixed a route-lane offset math bug
+  (raw vs. unit-vector direction summing skewed corner offsets past the corridor's true
+  footprint) with a proper miter join + limit/bevel-fallback, and extracted
+  `offsetPolyline`/`rightOf` into shared `src/lib/offset.ts`; (2) tuned lane/route/path
+  widths down/apart per feedback (`LANE_OFFSET` 0.3→0.55, `ROUTE_WIDTH` 0.5→0.28,
+  `PATH_DEFAULT_WIDTH` 1.5→1.0); (3) the forklift now also *ends* its run at the home
+  lift station (mirroring the existing start-there behavior); (4) added a "Reset
+  warehouse" button that replays the editor's own undo history back to the initial load
+  state and clears simulation/usage state; (5) new path-segment usage coloring — a
+  direction-sensitive green→red heat map of how many times each persistent path edge has
+  been traveled, tallied in `SimulationContext.tsx`'s `edgeUsage`, rendered in `Paths.tsx`
+  as split colored lanes on any traveled segment, with a new `UsageLegend.tsx` explaining
+  the color scale. Required `pathGraph.ts`'s `routeBetween()` to start returning the
+  route's real graph edges alongside its points.
 - 2026-09-11 — Follow-up pass on the forklift simulation, per user feedback: (1) a
   forklift now always starts its journey at its home lift station — an extra depot stop
   prepended ahead of the list's own stops, transparent to the list format itself; (2) a

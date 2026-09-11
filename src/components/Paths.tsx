@@ -1,14 +1,18 @@
 import { useMemo } from "react";
 import type { Path, Point } from "../types/warehouse";
 import { useViewFocus, type Focus } from "../state/ViewFocusContext";
+import { useSimulation } from "../state/SimulationContext";
 import { isAnyBuildingVisible } from "../lib/visibility";
+import { nodeKey } from "../lib/pathGraph";
+import { rightOf } from "../lib/offset";
+import { usageColor, usageRange } from "../lib/usageColor";
 
 // Black — reads as a painted floor marking, distinct from the pallet
 // fill-rate colors (Rack.tsx's PALLET_FULL_COLOR/PALLET_PARTIAL_COLOR) so a
 // corridor never reads as stock.
 const PATH_COLOR = "#000000";
 const PATH_HEIGHT = 0.04;
-const PATH_DEFAULT_WIDTH = 1.5;
+const PATH_DEFAULT_WIDTH = 1.0;
 // Radius-matching disc rendered at every vertex, so a turn reads as a
 // smooth rounded corner instead of the square notch left where two
 // perpendicular-cut box segments meet at an angle.
@@ -18,6 +22,21 @@ const JOINT_RADIUS_FACTOR = 0.5; // of the path's own width
 const STUB_LENGTH = 1.5;
 const ARROW_RADIUS = 0.35;
 const ARROW_LENGTH = 0.7;
+
+// A segment with any recorded travel (either direction) splits into two
+// parallel directional lanes instead of one centered box — the picking-list
+// usage heat-map (§5.3). An untraveled segment keeps the original single
+// centered look unchanged, so the vast majority of the network (most demo
+// runs only ever touch a handful of corridors) isn't visually disrupted by a
+// feature that has nothing to show there yet.
+const LANE_WIDTH = 0.45;
+const LANE_OFFSET = 0.32;
+const LANE_JOINT_RADIUS = LANE_WIDTH / 2;
+// A lane whose own direction was never traveled (only the *other* direction
+// of that same segment was) — muted gray, not on the green-red scale at
+// all, so "never taken this way" reads as visually distinct from "taken the
+// fewest times" (green).
+const NEUTRAL_LANE_COLOR = "#94a3b8";
 
 export interface PathSegment {
   position: [number, number, number];
@@ -57,6 +76,8 @@ interface ArrowMarker {
 interface RenderedPath {
   points: Point[];
   arrow?: ArrowMarker;
+  /** Set only when `points` is a truncated cross-building stub: which original path.points segment index (into the *untruncated* path) it's standing in for — needed to look up that real edge's usage counts, since the stub's own (synthetic, partial) coordinates aren't real graph nodes. */
+  stubOriginalIndex?: number;
 }
 
 /**
@@ -89,6 +110,7 @@ function effectiveView(path: Path, focus: Focus): RenderedPath {
   return {
     points: nearIsStart ? [near, tip] : [tip, near],
     arrow: { position: tip, angleRad: Math.atan2(dy, dx) },
+    stubOriginalIndex: nearIsStart ? 0 : points.length - 2,
   };
 }
 
@@ -110,29 +132,101 @@ function PathArrow({ arrow }: { arrow: ArrowMarker }) {
   );
 }
 
-function PathMesh({ path, focus }: { path: Path; focus: Focus }) {
+interface SegmentUsage {
+  forward: number;
+  backward: number;
+}
+
+function segmentUsage(path: Path, originalIndex: number, edgeUsage: Record<string, number>): SegmentUsage {
+  const a = path.points[originalIndex];
+  const b = path.points[originalIndex + 1];
+  return {
+    forward: edgeUsage[`${nodeKey(a)}→${nodeKey(b)}`] ?? 0,
+    backward: edgeUsage[`${nodeKey(b)}→${nodeKey(a)}`] ?? 0,
+  };
+}
+
+/** One directional lane's box + its own two end-cap joints, offset a fixed distance from a single (2-point) segment's own centerline. Independent per segment (not blended with neighbors) — simple and robust, at the cost of a small gap/overlap with an adjoining hot segment's own lanes at a turn, an acceptable trade for a heat-map overlay. */
+function UsageLane({ a, b, offset, color }: { a: Point; b: Point; offset: number; color: string }) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const perp = rightOf(dx / len, dy / len);
+  const laneA: Point = { x: a.x + perp.x * offset, y: a.y + perp.y * offset };
+  const laneB: Point = { x: b.x + perp.x * offset, y: b.y + perp.y * offset };
+  const [segment] = segmentsForPath([laneA, laneB], PATH_HEIGHT);
+  return (
+    <>
+      <mesh position={segment.position} rotation={[0, segment.rotationY, 0]} raycast={() => null}>
+        <boxGeometry args={[segment.length, PATH_HEIGHT, LANE_WIDTH]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+      {[laneA, laneB].map((p, i) => (
+        <mesh key={i} position={[p.x, PATH_HEIGHT / 2, -p.y]} raycast={() => null}>
+          <cylinderGeometry args={[LANE_JOINT_RADIUS, LANE_JOINT_RADIUS, PATH_HEIGHT, 16]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+      ))}
+    </>
+  );
+}
+
+function PathMesh({
+  path,
+  focus,
+  edgeUsage,
+  range,
+}: {
+  path: Path;
+  focus: Focus;
+  edgeUsage: Record<string, number>;
+  range: { min: number; max: number } | null;
+}) {
   const width = path.width ?? PATH_DEFAULT_WIDTH;
   const view = useMemo(() => effectiveView(path, focus), [path, focus.buildingId]);
   const segments = useMemo(() => segmentsForPath(view.points, PATH_HEIGHT), [view.points]);
-  // A joint at every vertex, except the very last one when it's capped by an
-  // arrow instead (the cone already reads as the path's end there).
-  const joints = view.arrow ? view.points.slice(0, -1) : view.points;
   const jointRadius = width * JOINT_RADIUS_FACTOR;
+
+  const originalIndexFor = (i: number) => (view.stubOriginalIndex !== undefined ? view.stubOriginalIndex : i);
+  const usageFor = (i: number) => segmentUsage(path, originalIndexFor(i), edgeUsage);
+  const laneColor = (count: number) => (count > 0 && range ? usageColor(count, range.min, range.max) : NEUTRAL_LANE_COLOR);
+
+  // Cold (never-traveled either way) vertices/segments render exactly as
+  // before — a single centered box and a single rounded joint. Only a
+  // vertex whose *both* adjoining segments are cold keeps its classic joint;
+  // a hot segment always draws its own end caps instead (see UsageLane).
+  const coldAt = (i: number) => {
+    const prevCold = i > 0 ? usageFor(i - 1).forward + usageFor(i - 1).backward === 0 : true;
+    const nextCold = i < segments.length ? usageFor(i).forward + usageFor(i).backward === 0 : true;
+    return prevCold && nextCold;
+  };
+  const coldJoints = (view.arrow ? view.points.slice(0, -1) : view.points).filter((_, i) => coldAt(i));
 
   return (
     <>
-      {segments.map((segment, i) => (
-        <mesh
-          key={i}
-          position={segment.position}
-          rotation={[0, segment.rotationY, 0]}
-          raycast={() => null}
-        >
-          <boxGeometry args={[segment.length, PATH_HEIGHT, width]} />
-          <meshStandardMaterial color={PATH_COLOR} />
-        </mesh>
-      ))}
-      {joints.map((p, i) => (
+      {segments.map((segment, i) => {
+        const usage = usageFor(i);
+        if (usage.forward === 0 && usage.backward === 0) {
+          return (
+            <mesh key={i} position={segment.position} rotation={[0, segment.rotationY, 0]} raycast={() => null}>
+              <boxGeometry args={[segment.length, PATH_HEIGHT, width]} />
+              <meshStandardMaterial color={PATH_COLOR} />
+            </mesh>
+          );
+        }
+        return (
+          <group key={i}>
+            <UsageLane a={view.points[i]} b={view.points[i + 1]} offset={LANE_OFFSET} color={laneColor(usage.forward)} />
+            <UsageLane
+              a={view.points[i]}
+              b={view.points[i + 1]}
+              offset={-LANE_OFFSET}
+              color={laneColor(usage.backward)}
+            />
+          </group>
+        );
+      })}
+      {coldJoints.map((p, i) => (
         <mesh key={`joint-${i}`} position={[p.x, PATH_HEIGHT / 2, -p.y]} raycast={() => null}>
           <cylinderGeometry args={[jointRadius, jointRadius, PATH_HEIGHT, 16]} />
           <meshStandardMaterial color={PATH_COLOR} />
@@ -145,11 +239,13 @@ function PathMesh({ path, focus }: { path: Path; focus: Focus }) {
 
 export function Paths({ paths }: { paths: Path[] }) {
   const { focus } = useViewFocus();
+  const simulation = useSimulation();
+  const range = useMemo(() => usageRange(simulation.edgeUsage), [simulation.edgeUsage]);
   return (
     <group>
       {paths.map((path) => {
         if (!isAnyBuildingVisible(focus, path.buildingIds)) return null;
-        return <PathMesh key={path.id} path={path} focus={focus} />;
+        return <PathMesh key={path.id} path={path} focus={focus} edgeUsage={simulation.edgeUsage} range={range} />;
       })}
     </group>
   );

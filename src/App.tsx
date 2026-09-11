@@ -15,6 +15,7 @@ import { HoverCard } from "./components/HoverCard";
 import { FacilityTooltip } from "./components/FacilityTooltip";
 import { FocusBreadcrumb } from "./components/FocusBreadcrumb";
 import { PickingListPanel } from "./components/PickingListPanel";
+import { UsageLegend } from "./components/UsageLegend";
 import "./App.css";
 
 // First the warehouse configuration (layout) loads, then its content
@@ -50,6 +51,7 @@ function AppShell() {
         <FacilityTooltip />
         <FocusBreadcrumb />
         <PickingListPanel />
+        <UsageLegend />
       </div>
     </div>
   );

@@ -11,7 +11,7 @@ import {
 import type { Point, Warehouse } from "../types/warehouse";
 import type { PickingList, PickingStop } from "../types/simulation";
 import { pickingLists as exampleLists } from "../data/pickingLists";
-import { buildPathGraph, routeBetween, type PathGraph } from "../lib/pathGraph";
+import { buildPathGraph, routeBetween, type PathGraph, type RouteEdge } from "../lib/pathGraph";
 import { slotEntryPoint } from "../lib/geometry";
 import { useEditor } from "./EditorContext";
 import { useViewFocus } from "./ViewFocusContext";
@@ -24,6 +24,8 @@ export interface Leg {
   /** Route polyline for this leg, riding the path network (see src/lib/pathGraph.ts). */
   points: Point[];
   length: number;
+  /** Real-node-to-real-node hops this leg's route actually rides, in order — used to tally directed per-segment usage counts once the leg is traveled for real (see edgeUsage below). */
+  edges: RouteEdge[];
 }
 
 type StopEvent =
@@ -67,6 +69,10 @@ interface SimulationContextValue {
   setShowPanel: (value: boolean) => void;
   /** Distance traveled (meters) within the active run's current leg — a ref, not state, so the per-frame vehicle animation (Forklift.tsx) doesn't trigger a React re-render every frame. */
   progressRef: MutableRefObject<number>;
+  /** Directed per-segment travel tallies keyed `"${nodeIdA}→${nodeIdB}"` (see applyLegUsage) — read by Paths.tsx for the green-to-red usage coloring. */
+  edgeUsage: Record<string, number>;
+  /** Reverts every simulated pallet mutation (via the editor's own undo history) and clears all usage tallies — the picking panel's Reset button. */
+  resetWarehouse: () => void;
 }
 
 const SimulationContext = createContext<SimulationContextValue | null>(null);
@@ -80,15 +86,19 @@ function totalLength(points: Point[]): number {
 }
 
 /**
- * The forklift always starts its journey at its home lift station (per user
- * feedback) — prepended as an extra depot stop ahead of whatever the list
- * itself starts with. Falls back to the list's own stops unchanged if the
- * warehouse has no lift station at all.
+ * The forklift always starts *and* ends its journey at its home lift station
+ * (per user feedback) — prepended/appended as extra depot stops around
+ * whatever the list itself contains. Skips the trailing append when the list
+ * already ends there itself (avoids a zero-length final leg). Falls back to
+ * the list's own stops unchanged if the warehouse has no lift station at all.
  */
 function stopsWithDepot(list: PickingList, warehouse: Warehouse): PickingStop[] {
   const home = warehouse.liftStations[0];
   if (!home) return list.stops;
-  return [{ kind: "depot", id: home.id }, ...list.stops];
+  const homeStop: PickingStop = { kind: "depot", id: home.id };
+  const last = list.stops[list.stops.length - 1];
+  const alreadyEndsAtHome = last && last.kind === "depot" && last.id === home.id;
+  return [homeStop, ...list.stops, ...(alreadyEndsAtHome ? [] : [homeStop])];
 }
 
 /**
@@ -140,8 +150,8 @@ function buildLegs(stops: PickingStop[], warehouse: Warehouse, graph: PathGraph)
       console.warn(`SimulationContext: unresolved stop (${from.id} -> ${to.id})`);
       continue;
     }
-    const points = routeBetween(graph, fromPoint, toPoint);
-    legs.push({ from, to, points, length: totalLength(points) });
+    const route = routeBetween(graph, fromPoint, toPoint);
+    legs.push({ from, to, points: route.points, length: totalLength(route.points), edges: route.edges });
   }
   return legs;
 }
@@ -153,6 +163,15 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   const [playbackMode, setPlaybackMode] = useState<PlaybackMode>("animated");
   const [speed, setSpeed] = useState(2); // m/s — a plausible forklift travel speed
   const [showPanel, setShowPanel] = useState(false);
+  // Directed per-segment travel tallies for the green-to-red route coloring
+  // (Paths.tsx) — keyed `"${nodeIdA}→${nodeIdB}"` (RouteEdge's own ids,
+  // already the same convention pathGraph.ts's nodeKey/edgeKey use), so a
+  // corridor traveled one way and back is two independent counts, not one
+  // merged total. Only incremented for a leg actually traveled for real
+  // (goToStep moving forward, or a static run's instant completion) — never
+  // for scrubbing backward, matching goToStep's existing "backward doesn't
+  // undo" asymmetry.
+  const [edgeUsage, setEdgeUsage] = useState<Record<string, number>>({});
   const progressRef = useRef(0);
   const queueRef = useRef<PickingList[]>([]);
 
@@ -168,6 +187,18 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     },
     [editor],
   );
+
+  const applyLegUsage = useCallback((leg: Leg) => {
+    if (leg.edges.length === 0) return;
+    setEdgeUsage((current) => {
+      const next = { ...current };
+      for (const edge of leg.edges) {
+        const key = `${edge.a}→${edge.b}`;
+        next[key] = (next[key] ?? 0) + 1;
+      }
+      return next;
+    });
+  }, []);
 
   // playNext calls itself (directly for static-mode's immediate completion
   // path, deferred via setTimeout for queue chaining below) — always
@@ -191,6 +222,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
 
     if (playbackMode === "static") {
       for (const event of events) applyEvent(event);
+      for (const leg of legs) applyLegUsage(leg);
       setActiveRun({ list, mode: "static", stops, events, legs, currentLegIndex: legs.length, isPaused: false });
       // Static runs finish synchronously — pause briefly before the next
       // queued list so each one is actually visible, rather than only the
@@ -213,7 +245,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       return;
     }
     setActiveRun({ list, mode: "animated", stops, events, legs, currentLegIndex: 0, isPaused: false });
-  }, [applyEvent, editor.warehouse, graph, playbackMode, resetFocus]);
+  }, [applyEvent, applyLegUsage, editor.warehouse, graph, playbackMode, resetFocus]);
 
   playNextRef.current = playNext;
 
@@ -264,6 +296,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
         for (let i = activeRun.currentLegIndex; i < clamped; i++) {
           const arrivalEvent = activeRun.events[i + 1]; // leg i ends at stop i+1
           if (arrivalEvent) applyEvent(arrivalEvent);
+          applyLegUsage(activeRun.legs[i]);
         }
       }
       progressRef.current = 0;
@@ -273,11 +306,27 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
         setActiveRun({ ...activeRun, currentLegIndex: clamped });
       }
     },
-    [activeRun, applyEvent],
+    [activeRun, applyEvent, applyLegUsage],
   );
 
   const nextStep = useCallback(() => goToStep((activeRun?.currentLegIndex ?? 0) + 1), [activeRun, goToStep]);
   const previousStep = useCallback(() => goToStep((activeRun?.currentLegIndex ?? 0) - 1), [activeRun, goToStep]);
+
+  /**
+   * Discards every simulation-driven pallet mutation by jumping the editor's
+   * own history back to entries[0] (the originally loaded state) — reusing
+   * the existing undo/history system rather than a separate snapshot, since
+   * every pick/store this simulation makes already flows through it. Also
+   * clears any in-progress run and every usage tally, so the route-coloring
+   * scale (Paths.tsx) goes back to "nothing traveled yet" along with the
+   * inventory.
+   */
+  const resetWarehouse = useCallback(() => {
+    queueRef.current = [];
+    setActiveRun(null);
+    setEdgeUsage({});
+    editor.jumpTo(0);
+  }, [editor]);
 
   const value = useMemo<SimulationContextValue>(
     () => ({
@@ -297,6 +346,8 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       showPanel,
       setShowPanel,
       progressRef,
+      edgeUsage,
+      resetWarehouse,
     }),
     [
       activeRun,
@@ -310,6 +361,8 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       nextStep,
       previousStep,
       showPanel,
+      edgeUsage,
+      resetWarehouse,
     ],
   );
 

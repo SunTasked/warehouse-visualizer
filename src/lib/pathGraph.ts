@@ -16,8 +16,14 @@ export interface PathGraph {
   adjacency: Map<string, { to: string; distance: number }[]>;
 }
 
-function nodeKey(p: Point): string {
+/** Exported so callers outside this module (Paths.tsx's usage-count coloring) can derive the same node id for a raw (x,y) — e.g. to key a directed edge's usage count the same way buildPathGraph keys its own nodes. */
+export function nodeKey(p: Point): string {
   return `${p.x.toFixed(3)},${p.y.toFixed(3)}`;
+}
+
+/** A directed edge's usage-count map key — `nodeKey(a)→nodeKey(b)`, order-sensitive by design (see RouteEdge/Route). */
+export function edgeKey(a: Point, b: Point): string {
+  return `${nodeKey(a)}→${nodeKey(b)}`;
 }
 
 function distance(a: Point, b: Point): number {
@@ -179,6 +185,19 @@ function dijkstra(
   return path;
 }
 
+/** A directed hop between two *real* graph nodes (§5.3's usage-count coloring keys on these — not on the synthetic connector points a route's ends snap through, which aren't persistent path segments). */
+export interface RouteEdge {
+  a: string;
+  b: string;
+}
+
+export interface Route {
+  /** [from, ...network points..., to] — always starts/ends with the exact input points, see below. */
+  points: Point[];
+  /** Every real-node-to-real-node hop traveled, in order, for usage-count tracking. Excludes the notch legs at either end (from/to a synthetic connector point), since those aren't part of the persistent path network. */
+  edges: RouteEdge[];
+}
+
 /**
  * The quickest route between two arbitrary points, riding the path network
  * in between. Always starts and ends with the *exact* input points (not the
@@ -186,7 +205,7 @@ function dijkstra(
  * position, the returned polyline naturally includes a short notch off the
  * aisle into the slot, with no separate mechanism needed for that.
  */
-export function routeBetween(graph: PathGraph, from: Point, to: Point): Point[] {
+export function routeBetween(graph: PathGraph, from: Point, to: Point): Route {
   const fromConn = connectPoint(graph, from);
   const toConn = connectPoint(graph, to);
 
@@ -201,12 +220,22 @@ export function routeBetween(graph: PathGraph, from: Point, to: Point): Point[] 
     return graph.nodes.get(id)!;
   };
 
+  const edgesAlong = (ids: string[]): RouteEdge[] => {
+    const edges: RouteEdge[] = [];
+    for (let i = 0; i < ids.length - 1; i++) {
+      const a = ids[i];
+      const b = ids[i + 1];
+      if (graph.nodes.has(a) && graph.nodes.has(b)) edges.push({ a, b });
+    }
+    return edges;
+  };
+
   if (fromConn.nodeId === toConn.nodeId) {
-    return [from, fromConn.point, to];
+    return { points: [from, fromConn.point, to], edges: [] };
   }
 
   const nodeIds = dijkstra(adjacency, fromConn.nodeId, toConn.nodeId);
-  if (!nodeIds) return [from, to]; // unreachable — shouldn't happen with real data, but don't crash
+  if (!nodeIds) return { points: [from, to], edges: [] }; // unreachable — shouldn't happen with real data, but don't crash
 
-  return [from, ...nodeIds.map(pointOf), to];
+  return { points: [from, ...nodeIds.map(pointOf), to], edges: edgesAlong(nodeIds) };
 }

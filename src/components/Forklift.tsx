@@ -5,6 +5,7 @@ import * as THREE from "three";
 import type { Point } from "../types/warehouse";
 import { useEditor } from "../state/EditorContext";
 import { useSimulation, type Leg } from "../state/SimulationContext";
+import { offsetPolyline } from "../lib/offset";
 import { segmentsForPath, type PathSegment } from "./Paths";
 
 // Orange — a distinct accent from the black infrastructure paths (Paths.tsx)
@@ -13,7 +14,7 @@ const ROUTE_COLOR = "#f97316";
 // Above PATH_HEIGHT (0.04) so the route overlay never z-fights with the
 // infrastructure paths it often runs alongside or directly over.
 const ROUTE_HEIGHT = 0.1;
-const ROUTE_WIDTH = 0.5;
+const ROUTE_WIDTH = 0.28;
 const JOINT_RADIUS = ROUTE_WIDTH / 2;
 // How far a lane is shifted off the path's true centerline, perpendicular to
 // its own travel direction — so a leg traveled one way and a later leg
@@ -22,7 +23,15 @@ const JOINT_RADIUS = ROUTE_WIDTH / 2;
 // always applied (every lane sits a little off-center, even one traveled
 // only once) so the rule is uniform rather than conditional on detecting an
 // actual overlap.
-const LANE_OFFSET = 0.3;
+const LANE_OFFSET = 0.55;
+// Caps how far a corner's offset point can be pushed out along the miter
+// bisector, as a multiple of LANE_OFFSET. Without a cap, a joint between a
+// short segment (e.g. a slot notch) and a long one — or any near-reversal
+// turn — can push the miter point well past the corridor's true footprint,
+// which is exactly the "extends past the strict minimum" artifact from
+// user feedback. Past the cap, the join falls back to the incoming
+// segment's own perpendicular (a bevel-ish join) instead of a sharp miter.
+const MITER_LIMIT = 2;
 
 const ARROW_COLOR = "#facc15";
 const ARROW_SPACING = 3; // meters between direction arrows along a lane
@@ -46,41 +55,6 @@ const FORKLIFT_LENGTH = 1.4; // along travel direction (local X)
 const FORKLIFT_WIDTH = 1.0; // across (local Z)
 const FORKLIFT_HEIGHT = 0.9;
 const FORKLIFT_COLOR = "#f59e0b";
-
-/**
- * Shifts every point of a polyline perpendicular to its own local travel
- * direction (the average of its incoming/outgoing segment directions, so
- * turns still read as one continuous offset line rather than two disjoint
- * ones) by a fixed distance. Two legs riding the same physical corridor in
- * opposite directions end up offset to *opposite* sides of the true
- * centerline — rotating a direction vector by a fixed 90° always points to
- * its "right," and "right of forward" for one direction is "left of
- * forward" for the reverse of it — so this one rule is enough to separate
- * outbound/inbound lanes with no explicit overlap detection.
- */
-function offsetPolyline(points: Point[], offset: number): Point[] {
-  return points.map((p, i) => {
-    const prev = points[i - 1];
-    const next = points[i + 1];
-    let dx = 0;
-    let dy = 0;
-    if (prev) {
-      dx += p.x - prev.x;
-      dy += p.y - prev.y;
-    }
-    if (next) {
-      dx += next.x - p.x;
-      dy += next.y - p.y;
-    }
-    const len = Math.hypot(dx, dy);
-    if (len < 1e-6) return p;
-    const ux = dx / len;
-    const uy = dy / len;
-    // Rotate travel direction -90° (x,y) -> (y,-x) — a fixed "always the
-    // right side of travel" convention, not a per-case choice.
-    return { x: p.x + uy * offset, y: p.y - ux * offset };
-  });
-}
 
 function ArrowMarker({ position, angleRad }: { position: Point; angleRad: number }) {
   return (
@@ -122,7 +96,7 @@ function LaneArrows({ segments }: { segments: PathSegment[] }) {
 
 /** One leg's lane: its own offset polyline (see offsetPolyline), rendered with Paths.tsx's segment/joint treatment plus periodic direction arrows. */
 function LegLane({ points }: { points: Point[] }) {
-  const offsetPoints = useMemo(() => offsetPolyline(points, LANE_OFFSET), [points]);
+  const offsetPoints = useMemo(() => offsetPolyline(points, LANE_OFFSET, MITER_LIMIT), [points]);
   const segments = useMemo(() => segmentsForPath(offsetPoints, ROUTE_HEIGHT), [offsetPoints]);
 
   return (
@@ -203,7 +177,7 @@ function Vehicle() {
   // draws.
   const offsetLegPoints = useMemo(() => {
     if (!run || run.mode !== "animated" || run.currentLegIndex >= run.legs.length) return null;
-    return offsetPolyline(run.legs[run.currentLegIndex].points, LANE_OFFSET);
+    return offsetPolyline(run.legs[run.currentLegIndex].points, LANE_OFFSET, MITER_LIMIT);
   }, [run]);
 
   useFrame((_, delta) => {
