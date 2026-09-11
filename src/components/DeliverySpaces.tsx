@@ -10,6 +10,7 @@ export const DELIVERY_SPACE_WIDTH = 6;
 export const DELIVERY_SPACE_DEPTH = 2;
 const DELIVERY_SPACE_HEIGHT = 0.06;
 const DELIVERY_SPACE_COLOR = "#eab308";
+const DELIVERY_SPACE_DESCRIPTION = "Delivery space";
 
 export function DeliverySpaces({ spaces }: { spaces: DeliverySpace[] }) {
   const { focus } = useViewFocus();
@@ -29,6 +30,8 @@ export function DeliverySpaces({ spaces }: { spaces: DeliverySpace[] }) {
             color={DELIVERY_SPACE_COLOR}
             label={space.id}
             labelColor="#3f2d00"
+            buildingId={space.buildingId}
+            description={DELIVERY_SPACE_DESCRIPTION}
           />
         );
       })}

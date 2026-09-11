@@ -3,12 +3,16 @@ import type { Path, Point } from "../types/warehouse";
 import { useViewFocus, type Focus } from "../state/ViewFocusContext";
 import { isAnyBuildingVisible } from "../lib/visibility";
 
-// A muted red/maroon, deliberately distinct from the pallet fill-rate colors
-// (Rack.tsx's PALLET_FULL_COLOR/PALLET_PARTIAL_COLOR) so a corridor marking on
-// the floor never reads as stock.
-const PATH_COLOR = "#b91c1c";
+// Black — reads as a painted floor marking, distinct from the pallet
+// fill-rate colors (Rack.tsx's PALLET_FULL_COLOR/PALLET_PARTIAL_COLOR) so a
+// corridor never reads as stock.
+const PATH_COLOR = "#000000";
 const PATH_HEIGHT = 0.04;
 const PATH_DEFAULT_WIDTH = 1.5;
+// Radius-matching disc rendered at every vertex, so a turn reads as a
+// smooth rounded corner instead of the square notch left where two
+// perpendicular-cut box segments meet at an angle.
+const JOINT_RADIUS_FACTOR = 0.5; // of the path's own width
 // How far a cross-building connector's stub reaches into view once the
 // building on its far side is hidden (see effectiveView() below).
 const STUB_LENGTH = 1.5;
@@ -108,6 +112,10 @@ function PathMesh({ path, focus }: { path: Path; focus: Focus }) {
   const width = path.width ?? PATH_DEFAULT_WIDTH;
   const view = useMemo(() => effectiveView(path, focus), [path, focus.buildingId]);
   const segments = useMemo(() => segmentsForPath(view.points), [view.points]);
+  // A joint at every vertex, except the very last one when it's capped by an
+  // arrow instead (the cone already reads as the path's end there).
+  const joints = view.arrow ? view.points.slice(0, -1) : view.points;
+  const jointRadius = width * JOINT_RADIUS_FACTOR;
 
   return (
     <>
@@ -119,6 +127,12 @@ function PathMesh({ path, focus }: { path: Path; focus: Focus }) {
           raycast={() => null}
         >
           <boxGeometry args={[segment.length, PATH_HEIGHT, width]} />
+          <meshStandardMaterial color={PATH_COLOR} />
+        </mesh>
+      ))}
+      {joints.map((p, i) => (
+        <mesh key={`joint-${i}`} position={[p.x, PATH_HEIGHT / 2, -p.y]} raycast={() => null}>
+          <cylinderGeometry args={[jointRadius, jointRadius, PATH_HEIGHT, 16]} />
           <meshStandardMaterial color={PATH_COLOR} />
         </mesh>
       ))}

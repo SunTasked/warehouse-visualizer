@@ -20,6 +20,8 @@ export interface HoverPoint {
   subSlotIndex?: number;
   /** Set only when hovering a pallet tier (at "slot-space" level). */
   palletIndex?: number;
+  /** Set when hovering a lift station/delivery space pad — mutually exclusive with everything above. */
+  facility?: { id: string; description: string };
   /** Page (client) coordinates, for positioning the HTML hover card. */
   x: number;
   y: number;

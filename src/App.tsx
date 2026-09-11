@@ -11,6 +11,7 @@ import { Inspector } from "./components/Inspector";
 import { HistoryPanel } from "./components/HistoryPanel";
 import { SelectionOverlay } from "./components/SelectionOverlay";
 import { HoverCard } from "./components/HoverCard";
+import { FacilityTooltip } from "./components/FacilityTooltip";
 import { FocusBreadcrumb } from "./components/FocusBreadcrumb";
 import "./App.css";
 
@@ -44,6 +45,7 @@ function AppShell() {
         <HistoryPanel />
         <SelectionOverlay containerRef={sceneRef} />
         <HoverCard />
+        <FacilityTooltip />
         <FocusBreadcrumb />
       </div>
     </div>

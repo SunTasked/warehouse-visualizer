@@ -9,6 +9,7 @@ export const LIFT_STATION_WIDTH = 6;
 export const LIFT_STATION_DEPTH = 2;
 const LIFT_STATION_HEIGHT = 0.06;
 const LIFT_STATION_COLOR = "#7c3aed";
+const LIFT_STATION_DESCRIPTION = "Carriage lift station";
 
 export function LiftStations({ stations }: { stations: LiftStation[] }) {
   const { focus } = useViewFocus();
@@ -27,6 +28,8 @@ export function LiftStations({ stations }: { stations: LiftStation[] }) {
             height={LIFT_STATION_HEIGHT}
             color={LIFT_STATION_COLOR}
             label={station.id}
+            buildingId={station.buildingId}
+            description={LIFT_STATION_DESCRIPTION}
           />
         );
       })}

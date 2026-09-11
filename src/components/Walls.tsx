@@ -179,7 +179,16 @@ function BuildingFloor({ loop }: { loop: WallLoop }) {
 
   if (mode !== "view") return null;
 
-  const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
+  // onClick, not onPointerDown: focusWarehouse() flips focus.level away from
+  // "plant" on this same click, which unmounts every BuildingFloor (see the
+  // conditional render below) since only "plant" renders them. onPointerDown
+  // fires *before* the browser's own "click" event, so with the mutation on
+  // pointerdown, that subsequent click re-raycasts against the now-changed
+  // scene, finds nothing here anymore, and the Canvas's onPointerMissed
+  // fires back() — a select that immediately un-selects itself. onClick is
+  // the terminal event in the down/up/click sequence, so nothing raycasts
+  // again afterward to miss.
+  const handleClick = (e: ThreeEvent<MouseEvent>) => {
     e.stopPropagation();
     focusWarehouse(loop.id);
   };
@@ -193,7 +202,7 @@ function BuildingFloor({ loop }: { loop: WallLoop }) {
     <mesh
       geometry={geometry}
       position={[0, FLOOR_Y, 0]}
-      onPointerDown={handlePointerDown}
+      onClick={handleClick}
       onPointerOver={handlePointerOver}
       onPointerMove={handlePointerOver}
       onPointerOut={handlePointerOut}

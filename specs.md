@@ -303,16 +303,30 @@ without needing any new schema on top of what's here today.
 Rendering (`src/components/Doors.tsx`/`Paths.tsx`/`LiftStations.tsx`/
 `DeliverySpaces.tsx`, wired into `WarehouseScene.tsx` after `Walls`): a door is a green
 flat rectangle (matching `Slots.tsx`'s `ENTRY_COLOR` — the same "access point" meaning);
-a path is a chain of thin flat boxes between consecutive points, using the same
-length/angle/midpoint math `Walls.tsx`'s `segmentsForLoop` computes for wall segments,
-colored a muted red (`#b91c1c`) deliberately distinct from the pallet fill-rate
-red/orange so a corridor marking never reads as stock; a lift station/delivery space is a
-purple/yellow 6x2 pad with a black edge outline and an id label
-(`src/components/FacilityPad.tsx`, shared by both). All four are **non-interactive by
-design**: every mesh opts out of raycasting (`raycast={() => null}`, the same fix already
-used for the slot edge-outline's Three.js line-raycast gotcha), so clicking through one
-in view mode still falls through to whatever's beneath — the building floor click-catcher
-at "plant" level (below), or the existing click-empty-floor `back()` behavior elsewhere.
+a path is black — a chain of thin flat boxes between consecutive points (the same
+length/angle/midpoint math `Walls.tsx`'s `segmentsForLoop` computes for wall segments),
+plus a flat cylinder (radius = half the path's own width) at every vertex so a turn reads
+as a smooth rounded corner instead of the square notch left where two perpendicular-cut
+box segments meet at an angle; a lift station/delivery space is a purple/yellow 6x2 pad
+with a black edge outline and an id label (`src/components/FacilityPad.tsx`, shared by
+both, and hoverable — see below). Doors and paths stay **non-interactive by design**:
+every mesh opts out of raycasting (`raycast={() => null}`, the same fix already used for
+the slot edge-outline's Three.js line-raycast gotcha), so clicking through one in view
+mode still falls through to whatever's beneath.
+
+**Facility hover tooltip + click passthrough**: `FacilityPad`'s solid box (lift
+station/delivery space) *is* raycastable in view mode, so it can show an HTML tooltip on
+hover (`src/components/FacilityTooltip.tsx`, mirroring `HoverCard.tsx`'s positioning/
+styling; `ViewFocusContext`'s `HoverPoint` gained an optional `facility: {id,
+description}`) — a small correctness wrinkle followed from that: once a mesh is
+raycastable, merely being *hit* (regardless of whether a handler is attached) is enough
+to suppress the Canvas's `onPointerMissed`, so a bare hover-only pad would have silently
+swallowed clicks that used to fall through it. `FacilityPad` compensates with an explicit
+click handler that replicates what the click would have done passing through to what's
+beneath: `focusWarehouse` at "plant" level (matching the building floor beneath it — see
+below) or `back()` at any deeper level (matching empty floor). Doors and plain paths
+don't have this wrinkle since they stay non-raycastable — only facility pads needed it,
+because they're the one element type that's meant to be hoverable.
 
 **Wall openings**: a door doesn't just sit decoratively on an unbroken wall — the wall
 itself now has an actual gap there. `Walls.tsx`'s `segmentsForEdge` projects each door
@@ -330,13 +344,22 @@ conversion is needed) and renders it as an invisible mesh just above the Grid, r
 exact same hover state (in-scene wall highlight) and click routing (`focusWarehouse`) a
 wall segment already uses. Only rendered/interactive in view mode and only at "plant"
 (once inside a building there's nothing else to pick); sits below a slot pad in height so
-a slot click still wins over the floor beneath it. Fixed a real bug found while wiring
-this in: `Slots.tsx`'s hover handlers didn't call `e.stopPropagation()`, which was
-harmless before (nothing interactive sat beneath a slot) but meant a slot hover's
-`setHover` call kept propagating down to the new floor catcher's own `setHover`
-underneath it, silently overwriting the slot hover with a building hover on every
-mouse-move — fixed by stopping propagation there, same as every other hover handler in
-the codebase already does.
+a slot click still wins over the floor beneath it.
+
+Two real bugs found and fixed while wiring this in. First: `Slots.tsx`'s hover handlers
+didn't call `e.stopPropagation()`, which was harmless before (nothing interactive sat
+beneath a slot) but meant a slot hover's `setHover` call kept propagating down to the new
+floor catcher's own `setHover` underneath it, silently overwriting the slot hover with a
+building hover on every mouse-move — fixed by stopping propagation there, same as every
+other hover handler in the codebase already does. Second, more subtle: the floor's click
+handler originally used `onPointerDown`, which fires *before* the browser's native
+"click" event — since `focusWarehouse()` flips `focus.level` away from `"plant"` on that
+same interaction, and `BuildingFloor` only renders `"plant"`, the mesh unmounted between
+the two events, so the subsequent "click" event re-raycast against the now-changed scene,
+found nothing there anymore, and the Canvas's `onPointerMissed` fired `back()` — a click
+that selected a building and then immediately un-selected it again, every time. Switched
+to `onClick`, the terminal event in the down/up/click sequence, so nothing raycasts again
+afterward to miss.
 
 **Cross-building path truncation + arrow**: a `Path` can optionally carry
 `endpointBuildingIds: [string, string]` (only meaningful when `buildingIds.length > 1`) —
@@ -611,6 +634,20 @@ eyeball results in 3D rather than deciding blind.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-11 — Three fixes on the physical-layer feature, per user feedback: (1) paths
+  repainted black with a rounded cylinder joint at every vertex, fixing the square-notch
+  look where two angled box segments met; (2) fixed a real bug where clicking a
+  building's open floor selected it and then immediately un-selected it again — the
+  click handler was on `onPointerDown`, which fires before the browser's own "click"
+  event, and since selecting unmounts `BuildingFloor` (only rendered at "plant"), the
+  click's own re-raycast found nothing there and `onPointerMissed` fired `back()`;
+  switched to `onClick`, the sequence's terminal event, so nothing raycasts again
+  afterward to miss; (3) added a hover tooltip to the lift station/delivery space pads,
+  which required making them raycastable (previously opted out like every other
+  physical-layer decoration) and, to avoid silently breaking the click-passthrough
+  behavior that raycast-opt-out used to provide for free, giving `FacilityPad` an
+  explicit click handler that replicates it: `focusWarehouse` at "plant", `back()`
+  otherwise. See §5.1 "Doors, paths, the carriage lift station & the delivery space".
 - 2026-09-10 — Follow-up pass on the doors/paths/lift-station feature, per user feedback
   (with an annotated screenshot) plus new requirements, explicitly keeping next steps
   (chariot pathfinding/BFS) in mind for the data shape: (1) rerouted the example

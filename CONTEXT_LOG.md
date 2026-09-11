@@ -4,6 +4,43 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-11 — path visual polish, floor-click bug, facility tooltips
+
+- User feedback (French, with a screenshot) on the previous round's work, three items:
+  (1) clicking a warehouse's open floor selects it then immediately deselects again;
+  (2) paths look wrong at turns (square notches instead of a clean joint) — wants
+  rounded corners, and wants paths repainted black; (3) add a hover tooltip on the lift
+  station/delivery space pads explaining what they are.
+- **Floor click bug**: root-caused via the pointerdown→click→onPointerMissed sequence —
+  `BuildingFloor`'s click handler was on `onPointerDown`, which mutates `focus.level`
+  away from `"plant"` before the browser's own "click" event fires; since
+  `BuildingFloor` is only rendered at `"plant"`, it unmounts in between, so the click's
+  own re-raycast (a fresh one, not a reuse of pointerdown's hit) finds nothing there and
+  the Canvas's `onPointerMissed` fires `back()` — select, then immediate un-select.
+  Fixed by moving the handler to `onClick` (the terminal event in that sequence, so
+  nothing raycasts again afterward to miss). Verified via Playwright: floor-clicking
+  both the main building and the annex now stays focused.
+- **Path rendering**: `PATH_COLOR` changed to black; added a flat cylinder joint
+  (radius = half the path's width) at every vertex in `Paths.tsx`, so a turn reads as a
+  smooth rounded corner instead of the notch left where two perpendicular-cut box
+  segments meet at an angle (skipped at a truncated path's arrow-capped tip, to avoid
+  overlapping the cone).
+- **Facility tooltips**: `FacilityPad`'s solid box is now raycastable in view mode (it
+  wasn't before, like every other physical-layer decoration) so it can show an HTML
+  tooltip on hover (new `FacilityTooltip.tsx`, mirroring `HoverCard.tsx`; `HoverPoint`
+  gained an optional `facility: {id, description}`). Caught a correctness wrinkle before
+  it shipped: once a mesh is raycastable, being *hit* alone (even with no handler)
+  suppresses `onPointerMissed`, so a bare hover-only pad would have silently swallowed
+  clicks that used to fall through it to the building floor/back() beneath. Fixed by
+  giving `FacilityPad` an explicit click handler that replicates that passthrough:
+  `focusWarehouse` at "plant" (matching the floor), `back()` otherwise (matching empty
+  floor) — verified via Playwright that clicking CL01 at "plant" focuses the building,
+  and clicking it again at "warehouse" level backs out to "plant".
+- Verified via Playwright throughout; edit mode (Inspector, slot selection, wall-corner
+  handles) unaffected. `tsc --noEmit` clean.
+- specs.md updated (§5.1 rendering/floor-click/facility paragraphs revised, new decision
+  log entry).
+
 ## 2026-09-10 (cont'd — path routing, wall openings, delivery space, cross-building link)
 
 - User follow-up (English, with an annotated screenshot of the previous round's plant
