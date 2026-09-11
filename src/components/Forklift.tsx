@@ -5,6 +5,7 @@ import * as THREE from "three";
 import type { Point } from "../types/warehouse";
 import { useEditor } from "../state/EditorContext";
 import { useSimulation, type Leg } from "../state/SimulationContext";
+import { useLayers } from "../state/LayerContext";
 import { offsetPolyline } from "../lib/offset";
 import { segmentsForPath, type PathSegment } from "./Paths";
 
@@ -167,7 +168,13 @@ function pointAtDistance(points: Point[], distance: number): { point: Point; ang
   return { point: points[points.length - 1], angleRad: 0 };
 }
 
-function Vehicle() {
+/**
+ * `visible` hides the vehicle's meshes without unmounting the component,
+ * because its useFrame is what actually advances the run — a hidden
+ * forklift still has to drive, or turning the Route layer off mid-queue
+ * would silently freeze the simulation instead of just hiding it.
+ */
+function Vehicle({ visible }: { visible: boolean }) {
   const simulation = useSimulation();
   const groupRef = useRef<THREE.Group>(null);
   const run = simulation.activeRun;
@@ -184,7 +191,11 @@ function Vehicle() {
     const run = simulation.activeRun;
     if (!run || run.mode !== "animated" || run.isPaused || run.currentLegIndex >= run.legs.length) return;
     const leg: Leg = run.legs[run.currentLegIndex];
-    simulation.progressRef.current += simulation.speed * delta;
+    // A Next-step fast-forward overrides the run's own speed until the leg
+    // it was fired on completes (see SimulationContext.nextStep) — goToStep
+    // clears the ref on arrival, so the following leg is back to normal.
+    const speed = simulation.fastForwardSpeedRef.current ?? simulation.speed;
+    simulation.progressRef.current += speed * delta;
     if (simulation.progressRef.current >= leg.length) {
       simulation.goToStep(run.currentLegIndex + 1);
       return; // next frame picks up the new leg (or stops) fresh
@@ -195,7 +206,7 @@ function Vehicle() {
     groupRef.current?.rotation.set(0, angleRad, 0);
   });
 
-  if (!run || run.mode !== "animated" || run.currentLegIndex >= run.legs.length) return null;
+  if (!visible || !run || run.mode !== "animated" || run.currentLegIndex >= run.legs.length) return null;
 
   return (
     <group ref={groupRef}>
@@ -219,6 +230,7 @@ function Vehicle() {
 export function Forklift() {
   const { mode } = useEditor();
   const simulation = useSimulation();
+  const { isVisible } = useLayers();
   const run = simulation.activeRun;
   // View-mode only — this is simulation overlay, not part of the physical
   // layout being edited. Unmounting (rather than just hiding) also pauses
@@ -228,15 +240,17 @@ export function Forklift() {
   // ticking in the background.
   if (mode !== "view" || !run || run.legs.length === 0) return null;
 
+  // The Route layer hides the drawn route, not the run itself — Vehicle
+  // stays mounted either way (see its doc comment).
+  const showRoute = isVisible("route");
   const stopPoints: Point[] = [run.legs[0].points[0], ...run.legs.map((leg) => leg.points[leg.points.length - 1])];
 
   return (
     <group>
-      {run.legs.map((leg, i) => (
-        <LegLane key={i} points={leg.points} />
-      ))}
-      <StopMarkers points={stopPoints} />
-      <Vehicle />
+      {showRoute &&
+        run.legs.map((leg, i) => <LegLane key={i} points={leg.points} />)}
+      {showRoute && <StopMarkers points={stopPoints} />}
+      <Vehicle visible={showRoute} />
     </group>
   );
 }

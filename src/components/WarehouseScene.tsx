@@ -21,6 +21,9 @@ import { DeliverySpaces } from "./DeliverySpaces";
 import { Slots } from "./Slots";
 import { DragPlane } from "./DragPlane";
 import { Forklift } from "./Forklift";
+import { SlotHeatmap } from "./SlotHeatmap";
+import { StepBlink } from "./StepBlink";
+import { useLayers } from "../state/LayerContext";
 
 // Drives the view-mode camera drill-down: whenever `focus` changes, smoothly
 // moves the CameraControls to a fixed-angle shot of the relevant box
@@ -71,6 +74,7 @@ function FocusCameraDriver() {
 export function WarehouseScene() {
   const { mode, warehouse, orbitRef, cameraRef } = useEditor();
   const { back, cameraControlsRef } = useViewFocus();
+  const layers = useLayers();
   const bounds = useMemo(() => computeBounds(warehouse), [warehouse]);
   const center = boundsCenter(bounds);
   const span = boundsSpan(bounds) || 20;
@@ -115,13 +119,29 @@ export function WarehouseScene() {
         infiniteGrid={false}
       />
 
-      <Walls walls={warehouse.walls} doors={warehouse.doors} />
-      <Doors doors={warehouse.doors} />
+      {/* Layer gating lives here rather than inside each component, so the
+          layer model stays readable as one list (see LayerContext). Paths
+          and Forklift are the exceptions: each needs to know *which* of its
+          own layers is on to decide what to draw (Paths swaps corridors for
+          heatmap lanes; Forklift keeps its animation driver mounted while
+          hidden), so they read the layer state themselves. */}
+      {layers.isVisible("structure") && (
+        <>
+          <Walls walls={warehouse.walls} doors={warehouse.doors} />
+          <Doors doors={warehouse.doors} />
+        </>
+      )}
       <Paths paths={warehouse.paths} />
-      <LiftStations stations={warehouse.liftStations} />
-      <DeliverySpaces spaces={warehouse.deliverySpaces} />
-      <Slots slots={warehouse.slots} defaults={warehouse.slotDefaults} />
+      {layers.isVisible("facilities") && (
+        <>
+          <LiftStations stations={warehouse.liftStations} />
+          <DeliverySpaces spaces={warehouse.deliverySpaces} />
+        </>
+      )}
+      {layers.isVisible("storage") && <Slots slots={warehouse.slots} defaults={warehouse.slotDefaults} />}
+      <SlotHeatmap />
       <Forklift />
+      <StepBlink />
       <DragPlane />
 
       {mode === "edit" ? (

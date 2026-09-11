@@ -803,6 +803,101 @@ Verified via Playwright: no dead-end wall run-in on `Path-Main`; a clean rectang
 (no diagonal) at the A02→DS01 reversal junction at multiple zoom levels; the legend now
 reads green→amber→red. `tsc --noEmit -p .` clean throughout.
 
+### 5.4 Layer system, path/slot heatmaps & operations list (decided, v1)
+
+Prompted by user feedback that the view had become hard to read: "the paths are hard to
+read and a lot of data is on top of another." Root cause: a single corridor could carry
+up to four parallel ribbons at once — the black base path, its two directional usage
+lanes (§5.3), and an active run's route overlay — all drawn over each other. This section
+is a large, view-mode-wide pass to fix that, not just a §5.3 tweak.
+
+**Layer system** (`src/state/LayerContext.tsx`, `src/components/LayerPanel.tsx`, gating in
+`src/components/WarehouseScene.tsx`): seven independently-toggleable layers, split by
+*subject* — what the data is — rather than by render style: `structure` (walls, doors),
+`storage` (slots/racks/pallets), `facilities` (lift station, delivery spaces), `paths`
+(corridor network), `route` (active run + forklift), `pathHeatmap`, `slotHeatmap`. Plus a
+`labelCounts` display *option*, not a layer, that draws numeric counts alongside whichever
+heatmaps are on — deliberately not its own layer: the user's own original proposal was
+"heatmap colors" and "heatmap values" as two separate layers, but numbers with no
+coloring isn't a view anyone actually wants, so it's a modifier instead. Panel is docked
+bottom-left, always visible in view mode, collapsible. Gating lives centrally in
+`WarehouseScene.tsx` for most components (so the layer model reads as one list in one
+place), with two deliberate exceptions that read layer state themselves: `Paths.tsx`
+(needs to know which of its own two layers — `paths`/`pathHeatmap` — is on to choose its
+render mode, see below) and `Forklift.tsx` (keeps its animation driver mounted while
+visually hidden when `route` is off — unmounting it, like the existing edit-mode gate
+already does, would silently freeze an in-progress queue instead of just hiding it).
+
+**The core clutter fix** (`Paths.tsx`): a path segment now renders EITHER as the plain
+black corridor OR as its two directional heatmap lanes — never both, closing the
+"drawn over each other" complaint directly. With `pathHeatmap` on, a measured segment
+*becomes* the coloring; only untraveled segments keep the plain corridor, and only if
+`paths` is also on. Previously the colored lanes were drawn on top of the corridor they
+measured, which was the specific clutter reported.
+
+**Slot heatmap** (`src/components/SlotHeatmap.tsx`): one tally per forklift interaction
+with a slot — a pick or a store, each +1 — answering "is the workload balanced across the
+racks," a question the path tallies can't answer since many slots share one corridor.
+Rendered as its own flat translucent patch floating just above the slot pad, not as a tint
+inside `Slots.tsx`: the two answer different questions (what's stored here vs. how busy is
+it), and a measurement needs to stay readable even with `storage` off entirely. Slots with
+zero recorded activity draw nothing — absence is the signal; painting every untouched slot
+would bury the few that matter.
+
+**Capture arming** (`SimulationContext.tsx`): both heatmaps only accumulate while capture
+is explicitly armed (a record toggle in the picking panel, with a pulsing dot and a live
+"N segments · M slots" readout) — playing a list to demo or debug it must not silently
+contaminate a measurement. New `clearCapture()` wipes `edgeUsage` and `slotUsage`.
+Critically, `resetWarehouse()` no longer clears either heatmap — it restores pallet
+inventory only. Deliberately decoupled with the user: restocking between runs is normal
+*during* a capture, and coupling the two would discard the measurement every time someone
+topped the warehouse back up.
+
+**Measurement timing changed**: a run's whole measurement is now committed once, upfront,
+the instant its route is computed (new `captureRun(legs, events)`), instead of accumulating
+leg-by-leg as the forklift arrived (the old `applyLegUsage`, called from `goToStep`, is
+removed). Rationale, per the user: measurement is a property of the route, which is fully
+known upfront; the animation is a *presentation* of that route ("a nice-to-have to make
+sure everything is ok and to impress management"), not the thing being measured.
+Consequences: a heatmap now reads identically whether a run was played animated, played
+static, or stepped through by hand; it doesn't creep upward while someone watches; and
+stepping back and forth over the same legs can no longer inflate it. Pallet inventory
+stays the deliberate opposite case, still applied on arrival at each stop — watching stock
+change as the forklift works is the point of the animation.
+
+**Operations list** (`PickingListPanel.tsx`): replaced the old step slider with a
+list-by-list, step-by-step breakdown. The active run is expanded into its ordered
+operations (verb + target, e.g. "Pick A04") with done/current/todo states; queued lists
+are previewed below from their declared stops. Hovering any row blinks that stop's slot or
+facility in the 3D scene (new `src/components/StepBlink.tsx` — a pulsing translucent
+column, drawn as its own overlay rather than by tinting `Slots.tsx` so it works for slots
+and facilities alike, regardless of which layers are on). Clicking a row jumps the
+forklift to that step. `hoveredStep` is stored as the resolved `PickingStop` rather than a
+(list, index) pair specifically so it also works for queued lists whose routes haven't
+been computed yet.
+
+**Fast-forward stepping** (`SimulationContext.nextStep`, `Forklift.tsx`): the transport
+bar's Next no longer teleports. It sets the speed that covers whatever remains of the
+current leg in `FAST_FORWARD_SECONDS` (0.5s) and lets the vehicle's own `useFrame`
+complete the leg and arrive through the normal `goToStep` path — so the forklift's
+movement stays continuous and legible ("where it went"), not a jump-cut. Un-pauses
+automatically (a paused vehicle would otherwise ignore the new speed). Falls back to a
+plain jump for static or already-finished runs.
+
+**Legend** (`UsageLegend.tsx`): now renders a separate scale per active heatmap rather
+than one shared scale. Deliberate: a corridor is traversed far more often than any single
+slot is picked from, so forcing both onto one shared range would flatten the slot heatmap
+to a single color.
+
+Verified via Playwright, zero console errors: layer panel renders and every toggle works;
+capture disarmed → Play measures 0 segments/0 slots; armed → measures for real (e.g. "24
+segments · 13 slots" after Play all); `Reset warehouse` leaves counts untouched while
+`Clear` zeroes them; the pure-measurement view (`storage`/`paths` off, both heatmaps on)
+is dramatically cleaner than the old always-both-lanes rendering; count labels render;
+hovering an operations row highlights it and pulses the matching rack in 3D; Next advances
+step 1 → step 2 via the 0.5s fast-forward, continuously; both legend scales render with
+correct pluralisation. `tsc --noEmit -p .` clean throughout.
+
 ## 6. Core Features / Visualizations
 
 - [x] **3D warehouse view (physical layer only)** — walls + slots render in 3D (§5.1);
@@ -926,11 +1021,39 @@ reads green→amber→red. `tsc --noEmit -p .` clean throughout.
     picking stop would try to pick another pallet from an already-visited slot). Fine
     for the current use (reviewing a route), but worth a real look if this needs to
     become data-consistent later.
+19. §5.4's layer system has no persisted preference — toggles reset to the
+    `DEFAULT_VISIBILITY` set on every reload, and there's no per-scenario saved layer
+    combination (e.g. "my measurement view"). Worth revisiting if capture sessions become
+    a regular workflow rather than one-off demos.
 
 ## 10. Decision Log
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-11 — Added a layer system, path/slot usage heatmaps, and an operations-list UI
+  (§5.4), on top of §5.3's picking-list simulation — prompted by feedback that the view
+  had become cluttered, root-caused to a single corridor carrying up to four overlapping
+  ribbons (base path, two usage lanes, route overlay) at once. Key calls: seven layers
+  split by *subject* (structure/storage/facilities/paths/route/pathHeatmap/slotHeatmap),
+  not by render style, with `labelCounts` kept as a display option rather than an eighth
+  layer (per the user's own original "colors vs. values" proposal, revised together —
+  numbers with no color isn't a view anyone wants); a path segment now renders either the
+  plain corridor or its heatmap lanes, never both (the actual clutter fix); a new
+  `SlotHeatmap.tsx` tallies picks/stores per slot, rendered as its own overlay patch so it
+  stays legible with Storage off; heatmap capture is explicitly armed (a record toggle)
+  so demo/debug playback doesn't contaminate a measurement, and `resetWarehouse()` was
+  deliberately decoupled from clearing the heatmaps (restocking mid-capture is normal,
+  clearing shouldn't be implicit); a run's usage is now committed once, upfront, when its
+  route is computed (`captureRun`) rather than accumulated leg-by-leg during playback,
+  since the user's framing is that measurement is a property of the route, not of
+  watching the animation; the transport bar's Next now fast-forwards the vehicle through
+  the remainder of the current leg (`FAST_FORWARD_SECONDS`) instead of teleporting;
+  `PickingListPanel.tsx` replaced its step slider with an operations list (verb + target,
+  done/current/todo), with hover-to-blink (`StepBlink.tsx`) and click-to-jump per row; the
+  usage legend now shows one scale per active heatmap instead of one shared scale, since
+  slot picks are far rarer than corridor passes. Verified via Playwright end to end
+  (capture arm/disarm, Reset vs. Clear, layer toggles, fast-forward continuity, both
+  legend scales); `tsc --noEmit -p .` clean.
 - 2026-09-11 — Three follow-up fixes on top of §5.3's "Follow-up fixes &
   usage-heatmap coloring" ("Further follow-ups" sub-section): (1) trimmed `Path-Main`'s
   start point from x=0 to x=2 (`scripts/generate-example-warehouse.js` +

@@ -18,6 +18,9 @@ import { useViewFocus } from "./ViewFocusContext";
 
 export type PlaybackMode = "animated" | "static";
 
+/** How long a Next-step fast-forward takes to finish the leg it's on — short enough to click through a list quickly, long enough to still read as the forklift *driving* there. */
+export const FAST_FORWARD_SECONDS = 0.5;
+
 export interface Leg {
   from: PickingStop;
   to: PickingStop;
@@ -28,11 +31,20 @@ export interface Leg {
   edges: RouteEdge[];
 }
 
-type StopEvent =
+export type StopEvent =
   | { type: "pick"; slotId: string }
   | { type: "store"; slotId: string }
   | { type: "deliver" }
   | { type: "load" };
+
+/**
+ * The stop the operations list is currently hovered over (PickingListPanel) —
+ * the scene blinks its slot/facility so the row and the 3D element read as
+ * the same thing. Stored as the resolved stop rather than a
+ * (list, index) pair so it works for a queued list's declared stops too, not
+ * only the run whose route has already been computed.
+ */
+export type HoveredStep = PickingStop;
 
 export interface ActiveRun {
   list: PickingList;
@@ -69,10 +81,23 @@ interface SimulationContextValue {
   setShowPanel: (value: boolean) => void;
   /** Distance traveled (meters) within the active run's current leg — a ref, not state, so the per-frame vehicle animation (Forklift.tsx) doesn't trigger a React re-render every frame. */
   progressRef: MutableRefObject<number>;
-  /** Directed per-segment travel tallies keyed `"${nodeIdA}→${nodeIdB}"` (see applyLegUsage) — read by Paths.tsx for the green-to-red usage coloring. */
+  /** Non-null while a Next-step fast-forward is in flight: the m/s that finishes the current leg's *remaining* distance in FAST_FORWARD_SECONDS. A ref for the same reason progressRef is. */
+  fastForwardSpeedRef: MutableRefObject<number | null>;
+  /** Lists waiting behind the active run, so the operations list can show what's still coming ("list by list"). */
+  queuedLists: PickingList[];
+  /** Directed per-segment travel tallies keyed `"${nodeIdA}→${nodeIdB}"` — read by Paths.tsx for the path heatmap. Only accumulates while capture is armed. */
   edgeUsage: Record<string, number>;
-  /** Reverts every simulated pallet mutation (via the editor's own undo history) and clears all usage tallies — the picking panel's Reset button. */
+  /** Per-slot interaction tallies (one per pick or store) — read by SlotHeatmap.tsx. Only accumulates while capture is armed. */
+  slotUsage: Record<string, number>;
+  /** While armed, every list played adds to both heatmaps; while off, runs play and animate but measure nothing. */
+  captureArmed: boolean;
+  setCaptureArmed: (value: boolean) => void;
+  /** Wipes both heatmaps, leaving inventory alone. */
+  clearCapture: () => void;
+  /** Reverts every simulated pallet mutation via the editor's own undo history, leaving the captured heatmaps alone — so stock can be restored mid-capture without losing the measurement. */
   resetWarehouse: () => void;
+  hoveredStep: HoveredStep | null;
+  setHoveredStep: (value: HoveredStep | null) => void;
 }
 
 const SimulationContext = createContext<SimulationContextValue | null>(null);
@@ -163,17 +188,28 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   const [playbackMode, setPlaybackMode] = useState<PlaybackMode>("animated");
   const [speed, setSpeed] = useState(2); // m/s — a plausible forklift travel speed
   const [showPanel, setShowPanel] = useState(false);
-  // Directed per-segment travel tallies for the green-to-red route coloring
-  // (Paths.tsx) — keyed `"${nodeIdA}→${nodeIdB}"` (RouteEdge's own ids,
-  // already the same convention pathGraph.ts's nodeKey/edgeKey use), so a
-  // corridor traveled one way and back is two independent counts, not one
-  // merged total. Only incremented for a leg actually traveled for real
-  // (goToStep moving forward, or a static run's instant completion) — never
-  // for scrubbing backward, matching goToStep's existing "backward doesn't
-  // undo" asymmetry.
+  // Directed per-segment travel tallies for the path heatmap (Paths.tsx) —
+  // keyed `"${nodeIdA}→${nodeIdB}"` (RouteEdge's own ids, already the same
+  // convention pathGraph.ts's nodeKey/edgeKey use), so a corridor traveled
+  // one way and back is two independent counts, not one merged total.
   const [edgeUsage, setEdgeUsage] = useState<Record<string, number>>({});
+  // One tally per pick or store at a slot, for the slot heatmap
+  // (SlotHeatmap.tsx) — answers "is load balanced across the racks", which
+  // the path tallies can't, since several slots share one corridor.
+  const [slotUsage, setSlotUsage] = useState<Record<string, number>>({});
+  const [captureArmed, setCaptureArmed] = useState(false);
+  const [queuedLists, setQueuedLists] = useState<PickingList[]>([]);
+  const [hoveredStep, setHoveredStep] = useState<HoveredStep | null>(null);
   const progressRef = useRef(0);
+  const fastForwardSpeedRef = useRef<number | null>(null);
   const queueRef = useRef<PickingList[]>([]);
+
+  // queueRef stays the source of truth (it's mutated synchronously mid-run,
+  // where a state value would be a render behind); this mirrors it into state
+  // purely so the panel can render what's still coming.
+  const syncQueuedLists = useCallback(() => {
+    setQueuedLists([...queueRef.current]);
+  }, []);
 
   const graph = useMemo(() => buildPathGraph(editor.warehouse.paths), [editor.warehouse.paths]);
 
@@ -188,17 +224,47 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     [editor],
   );
 
-  const applyLegUsage = useCallback((leg: Leg) => {
-    if (leg.edges.length === 0) return;
-    setEdgeUsage((current) => {
-      const next = { ...current };
-      for (const edge of leg.edges) {
-        const key = `${edge.a}→${edge.b}`;
-        next[key] = (next[key] ?? 0) + 1;
-      }
-      return next;
-    });
-  }, []);
+  /**
+   * Commits a whole run's measurements at once, the moment its route is
+   * computed — deliberately *not* leg-by-leg as the forklift arrives.
+   * Measurement is a property of the route, which is fully known upfront;
+   * the animation is a presentation of that route, not the thing being
+   * measured. So a heatmap reads the same whether the run was played
+   * animated, played static, or stepped through by hand, and it doesn't
+   * creep upward while someone is watching the truck drive. Inventory is
+   * the opposite case and still applies on arrival (see applyEvent's
+   * callers) — watching stock change as the forklift reaches each slot is
+   * the point of the animation.
+   *
+   * A no-op unless capture is armed: playing a list to demo it shouldn't
+   * silently contaminate a measurement.
+   */
+  const captureRun = useCallback(
+    (legs: Leg[], events: StopEvent[]) => {
+      if (!captureArmed) return;
+
+      setEdgeUsage((current) => {
+        const next = { ...current };
+        for (const leg of legs) {
+          for (const edge of leg.edges) {
+            const key = `${edge.a}→${edge.b}`;
+            next[key] = (next[key] ?? 0) + 1;
+          }
+        }
+        return next;
+      });
+
+      setSlotUsage((current) => {
+        const next = { ...current };
+        for (const event of events) {
+          if (event.type !== "pick" && event.type !== "store") continue;
+          next[event.slotId] = (next[event.slotId] ?? 0) + 1;
+        }
+        return next;
+      });
+    },
+    [captureArmed],
+  );
 
   // playNext calls itself (directly for static-mode's immediate completion
   // path, deferred via setTimeout for queue chaining below) — always
@@ -210,6 +276,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
 
   const playNext = useCallback(() => {
     const list = queueRef.current.shift();
+    syncQueuedLists();
     if (!list) {
       setActiveRun(null);
       return;
@@ -220,9 +287,12 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     const events = planEvents(stops, list.mode);
     const legs = buildLegs(stops, editor.warehouse, graph);
 
+    // The whole run's measurement lands here, before a wheel has turned —
+    // see captureRun's doc comment.
+    captureRun(legs, events);
+
     if (playbackMode === "static") {
       for (const event of events) applyEvent(event);
-      for (const leg of legs) applyLegUsage(leg);
       setActiveRun({ list, mode: "static", stops, events, legs, currentLegIndex: legs.length, isPaused: false });
       // Static runs finish synchronously — pause briefly before the next
       // queued list so each one is actually visible, rather than only the
@@ -236,6 +306,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     // stop's event applies on arrival, via goToStep below.
     applyEvent(events[0]);
     progressRef.current = 0;
+    fastForwardSpeedRef.current = null;
     if (legs.length === 0) {
       // A single-stop (or fully unresolved) list has nothing to animate —
       // nothing would ever call goToStep to finish/advance the queue, so do
@@ -245,7 +316,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       return;
     }
     setActiveRun({ list, mode: "animated", stops, events, legs, currentLegIndex: 0, isPaused: false });
-  }, [applyEvent, applyLegUsage, editor.warehouse, graph, playbackMode, resetFocus]);
+  }, [applyEvent, captureRun, editor.warehouse, graph, playbackMode, resetFocus, syncQueuedLists]);
 
   playNextRef.current = playNext;
 
@@ -267,7 +338,9 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
 
   const stop = useCallback(() => {
     queueRef.current = [];
+    fastForwardSpeedRef.current = null;
     setActiveRun(null);
+    setQueuedLists([]);
   }, []);
 
   const togglePause = useCallback(() => {
@@ -277,16 +350,17 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   /**
    * The single function behind natural leg completion (Forklift.tsx's
    * useFrame driver calling goToStep(current + 1) on arrival), the panel's
-   * Next/Previous buttons, and its step slider. Moving *forward* applies
-   * every leg's arrival event along the way, exactly as if the vehicle had
-   * actually traveled there — this is real simulation progress, not just a
-   * view change. Moving *backward* only repositions the displayed vehicle;
-   * it does not undo any pallet mutation already applied. There's no
-   * general undo for "which exact pallet was picked" to reverse, so
-   * scrubbing back is a navigation aid for reviewing the route, not a
-   * replay/rewind of warehouse state — matches what was asked ("brings the
-   * forklift to the next/previous slot") without pretending to be something
-   * it isn't.
+   * transport buttons, and clicking a row in the operations list. Moving
+   * *forward* applies every leg's arrival event along the way, exactly as if
+   * the vehicle had actually traveled there. Moving *backward* only
+   * repositions the displayed vehicle; it does not undo any pallet mutation
+   * already applied. There's no general undo for "which exact pallet was
+   * picked" to reverse, so scrubbing back is a navigation aid for reviewing
+   * the route, not a replay/rewind of warehouse state.
+   *
+   * Heatmaps are deliberately untouched here — a run's measurement is
+   * committed once, upfront (see captureRun), so stepping back and forth
+   * through the same legs can't inflate it.
    */
   const goToStep = useCallback(
     (target: number) => {
@@ -296,35 +370,66 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
         for (let i = activeRun.currentLegIndex; i < clamped; i++) {
           const arrivalEvent = activeRun.events[i + 1]; // leg i ends at stop i+1
           if (arrivalEvent) applyEvent(arrivalEvent);
-          applyLegUsage(activeRun.legs[i]);
         }
       }
       progressRef.current = 0;
+      fastForwardSpeedRef.current = null;
       if (clamped >= activeRun.legs.length && queueRef.current.length > 0) {
         playNextRef.current();
       } else {
         setActiveRun({ ...activeRun, currentLegIndex: clamped });
       }
     },
-    [activeRun, applyEvent, applyLegUsage],
+    [activeRun, applyEvent],
   );
 
-  const nextStep = useCallback(() => goToStep((activeRun?.currentLegIndex ?? 0) + 1), [activeRun, goToStep]);
+  /**
+   * Next *drives* to the following stop rather than teleporting to it: it
+   * sets the speed that covers whatever's left of the current leg in
+   * FAST_FORWARD_SECONDS, and the vehicle's own useFrame (Forklift.tsx)
+   * completes the leg from there, arriving through the normal goToStep path.
+   * Keeps the forklift's movement continuous — you can see *where* it went,
+   * not just that the marker moved — while still being quick enough to click
+   * through a list. Falls back to a plain jump when there's nothing being
+   * animated (static runs, or an already-finished one).
+   */
+  const nextStep = useCallback(() => {
+    const run = activeRun;
+    if (!run || run.mode !== "animated" || run.currentLegIndex >= run.legs.length) {
+      goToStep((activeRun?.currentLegIndex ?? 0) + 1);
+      return;
+    }
+    const remaining = Math.max(0, run.legs[run.currentLegIndex].length - progressRef.current);
+    fastForwardSpeedRef.current = remaining / FAST_FORWARD_SECONDS;
+    // A fast-forward is movement, so un-pause — otherwise the vehicle's
+    // useFrame would ignore the new speed and nothing would happen.
+    if (run.isPaused) setActiveRun({ ...run, isPaused: false });
+  }, [activeRun, goToStep]);
+
   const previousStep = useCallback(() => goToStep((activeRun?.currentLegIndex ?? 0) - 1), [activeRun, goToStep]);
+
+  /** Wipes both captured heatmaps. Inventory is left exactly as it is, so a capture can be discarded and restarted without disturbing stock. */
+  const clearCapture = useCallback(() => {
+    setEdgeUsage({});
+    setSlotUsage({});
+  }, []);
 
   /**
    * Discards every simulation-driven pallet mutation by jumping the editor's
    * own history back to entries[0] (the originally loaded state) — reusing
    * the existing undo/history system rather than a separate snapshot, since
-   * every pick/store this simulation makes already flows through it. Also
-   * clears any in-progress run and every usage tally, so the route-coloring
-   * scale (Paths.tsx) goes back to "nothing traveled yet" along with the
-   * inventory.
+   * every pick/store this simulation makes already flows through it.
+   *
+   * Deliberately leaves the captured heatmaps alone (clearCapture is its own
+   * action): restocking between runs is a normal thing to do *during* a
+   * capture, and coupling the two would throw away the measurement every
+   * time someone topped the warehouse back up.
    */
   const resetWarehouse = useCallback(() => {
     queueRef.current = [];
+    fastForwardSpeedRef.current = null;
     setActiveRun(null);
-    setEdgeUsage({});
+    setQueuedLists([]);
     editor.jumpTo(0);
   }, [editor]);
 
@@ -346,8 +451,16 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       showPanel,
       setShowPanel,
       progressRef,
+      fastForwardSpeedRef,
+      queuedLists,
       edgeUsage,
+      slotUsage,
+      captureArmed,
+      setCaptureArmed,
+      clearCapture,
       resetWarehouse,
+      hoveredStep,
+      setHoveredStep,
     }),
     [
       activeRun,
@@ -361,8 +474,13 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       nextStep,
       previousStep,
       showPanel,
+      queuedLists,
       edgeUsage,
+      slotUsage,
+      captureArmed,
+      clearCapture,
       resetWarehouse,
+      hoveredStep,
     ],
   );
 

@@ -16,6 +16,8 @@ import { FacilityTooltip } from "./components/FacilityTooltip";
 import { FocusBreadcrumb } from "./components/FocusBreadcrumb";
 import { PickingListPanel } from "./components/PickingListPanel";
 import { UsageLegend } from "./components/UsageLegend";
+import { LayerPanel } from "./components/LayerPanel";
+import { LayerProvider } from "./state/LayerContext";
 import "./App.css";
 
 // First the warehouse configuration (layout) loads, then its content
@@ -51,6 +53,7 @@ function AppShell() {
         <FacilityTooltip />
         <FocusBreadcrumb />
         <PickingListPanel />
+        <LayerPanel />
         <UsageLegend />
       </div>
     </div>
@@ -62,7 +65,9 @@ export default function App() {
     <EditorProvider initialWarehouse={initialWarehouse}>
       <ViewFocusProvider>
         <SimulationProvider>
-          <AppShell />
+          <LayerProvider>
+            <AppShell />
+          </LayerProvider>
         </SimulationProvider>
       </ViewFocusProvider>
     </EditorProvider>

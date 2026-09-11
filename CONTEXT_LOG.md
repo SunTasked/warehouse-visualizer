@@ -4,6 +4,35 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-11 (cont'd) — layer system, path/slot heatmaps, operations list (§5.4)
+
+- Large feature set on top of §5.3, prompted by "the paths are hard to read and a lot of
+  data is on top of another" — root cause: a corridor could carry up to four overlapping
+  ribbons (base path, two usage lanes, route overlay). Full design in specs.md new §5.4
+  and its decision log entry — not duplicated here.
+- New: `src/state/LayerContext.tsx` (7 layers by subject, not render style),
+  `src/components/LayerPanel.tsx` (bottom-left, always visible in view mode),
+  `src/components/SlotHeatmap.tsx` (per-slot pick/store tally, own overlay patch),
+  `src/components/StepBlink.tsx` (hover-to-pulse a stop's slot/facility).
+- Changed: `Paths.tsx` (segment renders plain OR heatmap lanes, never both — the actual
+  clutter fix; reads layer state directly, one of two deliberate exceptions to
+  WarehouseScene-central gating, the other being `Forklift.tsx` staying mounted-but-hidden
+  so a hidden Route layer doesn't freeze an in-progress queue); `SimulationContext.tsx`
+  (capture arming + `clearCapture()`, `resetWarehouse()` no longer clears heatmaps,
+  measurement moved from leg-by-leg `applyLegUsage` to upfront `captureRun()`, new
+  `nextStep()` fast-forward via `FAST_FORWARD_SECONDS`); `PickingListPanel.tsx` (step
+  slider replaced by an operations list with done/current/todo + hover/click);
+  `UsageLegend.tsx` (one scale per active heatmap, not one shared scale).
+- Verified via Playwright, zero console errors: layer toggles; capture disarmed → 0/0,
+  armed → real counts; Reset vs. Clear behave as designed; pure-measurement view
+  (Storage+Paths off, both heatmaps on) confirmed dramatically cleaner; operations-row
+  hover/click; Next's continuous fast-forward; both legend scales. `tsc --noEmit -p .`
+  clean.
+- specs.md updated: new §5.4, new open question 19 (no persisted layer preference), new
+  decision log entry.
+- Next: unchanged — same open items as before (§9), plus open question 19 is new but
+  low-priority.
+
 ## 2026-09-11 (cont'd) — dead-end aisle trim, reversal-turn offset bug, 3-stop gradient
 
 - Three follow-up fixes, all on top of the immediately preceding session's

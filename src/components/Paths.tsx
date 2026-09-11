@@ -1,7 +1,9 @@
+import { Text } from "@react-three/drei";
 import { useMemo } from "react";
 import type { Path, Point } from "../types/warehouse";
 import { useViewFocus, type Focus } from "../state/ViewFocusContext";
 import { useSimulation } from "../state/SimulationContext";
+import { useLayers } from "../state/LayerContext";
 import { isAnyBuildingVisible } from "../lib/visibility";
 import { nodeKey } from "../lib/pathGraph";
 import { rightOf } from "../lib/offset";
@@ -37,6 +39,14 @@ const LANE_JOINT_RADIUS = LANE_WIDTH / 2;
 // all, so "never taken this way" reads as visually distinct from "taken the
 // fewest times" (green).
 const NEUTRAL_LANE_COLOR = "#94a3b8";
+
+// Count labels (the "label with counts" layer option) float just above the
+// lane they annotate, depth-test off so a rack never swallows them.
+const LABEL_HEIGHT = 0.6;
+const LABEL_SIZE = 0.55;
+// Shorter than this and the count would overhang the lane it belongs to,
+// reading as if it labelled the neighbouring corridor instead.
+const MIN_LABEL_SEGMENT_LENGTH = 1.6;
 
 export interface PathSegment {
   position: [number, number, number];
@@ -147,7 +157,21 @@ function segmentUsage(path: Path, originalIndex: number, edgeUsage: Record<strin
 }
 
 /** One directional lane's box + its own two end-cap joints, offset a fixed distance from a single (2-point) segment's own centerline. Independent per segment (not blended with neighbors) — simple and robust, at the cost of a small gap/overlap with an adjoining hot segment's own lanes at a turn, an acceptable trade for a heat-map overlay. */
-function UsageLane({ a, b, offset, color }: { a: Point; b: Point; offset: number; color: string }) {
+function UsageLane({
+  a,
+  b,
+  offset,
+  color,
+  count,
+  showLabel,
+}: {
+  a: Point;
+  b: Point;
+  offset: number;
+  color: string;
+  count: number;
+  showLabel: boolean;
+}) {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const len = Math.hypot(dx, dy) || 1;
@@ -155,6 +179,9 @@ function UsageLane({ a, b, offset, color }: { a: Point; b: Point; offset: number
   const laneA: Point = { x: a.x + perp.x * offset, y: a.y + perp.y * offset };
   const laneB: Point = { x: b.x + perp.x * offset, y: b.y + perp.y * offset };
   const [segment] = segmentsForPath([laneA, laneB], PATH_HEIGHT);
+  // Only a lane that was actually traveled, and is long enough to hold the
+  // text without it spilling over the neighbouring corridor, gets a count.
+  const labelled = showLabel && count > 0 && segment.length >= MIN_LABEL_SEGMENT_LENGTH;
   return (
     <>
       <mesh position={segment.position} rotation={[0, segment.rotationY, 0]} raycast={() => null}>
@@ -167,6 +194,22 @@ function UsageLane({ a, b, offset, color }: { a: Point; b: Point; offset: number
           <meshStandardMaterial color={color} />
         </mesh>
       ))}
+      {labelled && (
+        <Text
+          position={[(laneA.x + laneB.x) / 2, LABEL_HEIGHT, -(laneA.y + laneB.y) / 2]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          fontSize={LABEL_SIZE}
+          color="#111827"
+          outlineWidth={0.05}
+          outlineColor="#ffffff"
+          anchorX="center"
+          anchorY="middle"
+          renderOrder={999}
+          material-depthTest={false}
+        >
+          {count}
+        </Text>
+      )}
     </>
   );
 }
@@ -176,11 +219,17 @@ function PathMesh({
   focus,
   edgeUsage,
   range,
+  showPaths,
+  showHeatmap,
+  labelCounts,
 }: {
   path: Path;
   focus: Focus;
   edgeUsage: Record<string, number>;
   range: { min: number; max: number } | null;
+  showPaths: boolean;
+  showHeatmap: boolean;
+  labelCounts: boolean;
 }) {
   const width = path.width ?? PATH_DEFAULT_WIDTH;
   const view = useMemo(() => effectiveView(path, focus), [path, focus.buildingId]);
@@ -191,22 +240,33 @@ function PathMesh({
   const usageFor = (i: number) => segmentUsage(path, originalIndexFor(i), edgeUsage);
   const laneColor = (count: number) => (count > 0 && range ? usageColor(count, range.min, range.max) : NEUTRAL_LANE_COLOR);
 
-  // Cold (never-traveled either way) vertices/segments render exactly as
-  // before — a single centered box and a single rounded joint. Only a
-  // vertex whose *both* adjoining segments are cold keeps its classic joint;
-  // a hot segment always draws its own end caps instead (see UsageLane).
-  const coldAt = (i: number) => {
-    const prevCold = i > 0 ? usageFor(i - 1).forward + usageFor(i - 1).backward === 0 : true;
-    const nextCold = i < segments.length ? usageFor(i).forward + usageFor(i).backward === 0 : true;
-    return prevCold && nextCold;
+  // A segment renders EITHER as the plain corridor OR as its two directional
+  // heatmap lanes — never both. Stacking the lanes on top of the corridor
+  // they measure was the single worst source of the "a lot of data on top of
+  // another" clutter: one aisle could end up carrying a black centerline,
+  // two usage lanes and a route lane at once. With the heatmap layer on, the
+  // measured segments *become* the coloring and only untraveled ones keep
+  // the plain corridor (as context, and only if the Paths layer is on too).
+  const isHot = (i: number) => {
+    const usage = usageFor(i);
+    return showHeatmap && usage.forward + usage.backward > 0;
   };
-  const coldJoints = (view.arrow ? view.points.slice(0, -1) : view.points).filter((_, i) => coldAt(i));
+
+  // A classic rounded joint only belongs where plain corridor meets plain
+  // corridor — a hot segment draws its own lane end caps instead.
+  const plainJointAt = (i: number) => {
+    if (!showPaths) return false;
+    const prevPlain = i > 0 ? !isHot(i - 1) : true;
+    const nextPlain = i < segments.length ? !isHot(i) : true;
+    return prevPlain && nextPlain;
+  };
+  const plainJoints = (view.arrow ? view.points.slice(0, -1) : view.points).filter((_, i) => plainJointAt(i));
 
   return (
     <>
       {segments.map((segment, i) => {
-        const usage = usageFor(i);
-        if (usage.forward === 0 && usage.backward === 0) {
+        if (!isHot(i)) {
+          if (!showPaths) return null;
           return (
             <mesh key={i} position={segment.position} rotation={[0, segment.rotationY, 0]} raycast={() => null}>
               <boxGeometry args={[segment.length, PATH_HEIGHT, width]} />
@@ -214,25 +274,35 @@ function PathMesh({
             </mesh>
           );
         }
+        const usage = usageFor(i);
         return (
           <group key={i}>
-            <UsageLane a={view.points[i]} b={view.points[i + 1]} offset={LANE_OFFSET} color={laneColor(usage.forward)} />
+            <UsageLane
+              a={view.points[i]}
+              b={view.points[i + 1]}
+              offset={LANE_OFFSET}
+              color={laneColor(usage.forward)}
+              count={usage.forward}
+              showLabel={labelCounts}
+            />
             <UsageLane
               a={view.points[i]}
               b={view.points[i + 1]}
               offset={-LANE_OFFSET}
               color={laneColor(usage.backward)}
+              count={usage.backward}
+              showLabel={labelCounts}
             />
           </group>
         );
       })}
-      {coldJoints.map((p, i) => (
+      {plainJoints.map((p, i) => (
         <mesh key={`joint-${i}`} position={[p.x, PATH_HEIGHT / 2, -p.y]} raycast={() => null}>
           <cylinderGeometry args={[jointRadius, jointRadius, PATH_HEIGHT, 16]} />
           <meshStandardMaterial color={PATH_COLOR} />
         </mesh>
       ))}
-      {view.arrow && <PathArrow arrow={view.arrow} />}
+      {showPaths && view.arrow && <PathArrow arrow={view.arrow} />}
     </>
   );
 }
@@ -240,12 +310,29 @@ function PathMesh({
 export function Paths({ paths }: { paths: Path[] }) {
   const { focus } = useViewFocus();
   const simulation = useSimulation();
+  const { isVisible, labelCounts } = useLayers();
   const range = useMemo(() => usageRange(simulation.edgeUsage), [simulation.edgeUsage]);
+
+  const showPaths = isVisible("paths");
+  const showHeatmap = isVisible("pathHeatmap");
+  if (!showPaths && !showHeatmap) return null;
+
   return (
     <group>
       {paths.map((path) => {
         if (!isAnyBuildingVisible(focus, path.buildingIds)) return null;
-        return <PathMesh key={path.id} path={path} focus={focus} edgeUsage={simulation.edgeUsage} range={range} />;
+        return (
+          <PathMesh
+            key={path.id}
+            path={path}
+            focus={focus}
+            edgeUsage={simulation.edgeUsage}
+            range={range}
+            showPaths={showPaths}
+            showHeatmap={showHeatmap}
+            labelCounts={labelCounts}
+          />
+        );
       })}
     </group>
   );
