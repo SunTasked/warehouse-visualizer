@@ -729,7 +729,10 @@
   position: absolute;
   top: 1rem;
   left: 50%;
-  transform: translateX(-50%);
+  /* Centred with a margin rather than a transform: a transformed ancestor
+     becomes the containing block for position:fixed descendants, which would
+     trap the step tooltip inside this panel's own clipped box. */
+  margin-left: -230px;
   width: 460px;
   max-width: calc(100% - 26rem);
   max-height: calc(100% - 2rem);
@@ -1420,4 +1423,354 @@
 
 .delta--bad {
   color: #b91c1c;
+}
+
+/* --- App header: title, identity, tabs --- */
+
+.app__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+}
+
+.app__title-row h1 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.app__subtitle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: #5a6270;
+}
+
+.app__info {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid #c7ccd6;
+  background: #ffffff;
+  color: #5a6270;
+  font-size: 0.65rem;
+  font-style: italic;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.app__info:hover {
+  background: #eef1f6;
+}
+
+.app__info-card {
+  position: absolute;
+  top: 130%;
+  left: 0;
+  z-index: 40;
+  min-width: 200px;
+  background: #ffffff;
+  border: 1px solid #d7dbe3;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.16);
+  padding: 0.5rem 0.65rem;
+  font-size: 0.78rem;
+}
+
+.app__info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.12rem 0;
+  color: #2a3244;
+}
+
+.app__info-row span:first-child {
+  color: #5a6270;
+}
+
+.app__tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-top: 0.5rem;
+}
+
+.app__tab {
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 0.85rem;
+  color: #5a6270;
+  cursor: pointer;
+  padding: 0.3rem 0.6rem;
+  border-bottom: 2px solid transparent;
+}
+
+.app__tab--active {
+  color: #1a2233;
+  font-weight: 600;
+  border-bottom-color: #4d7cfe;
+}
+
+.app__tab:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* --- Run console additions --- */
+
+.run-console__opt {
+  border: 1px solid #d7dbe3;
+  background: #ffffff;
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+  color: #5a6270;
+}
+
+.run-console__opt--on {
+  border-color: #4d7cfe;
+  background: #eef4ff;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.run-console__speed {
+  width: 3.2rem;
+  padding: 0.2rem 0.3rem;
+  border: 1px solid #c7ccd6;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  text-align: right;
+}
+
+.run-console__expand {
+  border: none;
+  background: none;
+  color: #5a6270;
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0.2rem 0.3rem;
+}
+
+/* --- Step metrics tooltip --- */
+
+.ops__step-item {
+  position: relative;
+}
+
+.step-tip {
+  display: none;
+  position: fixed;
+  z-index: 60;
+  min-width: 180px;
+  background: #1f2937;
+  color: #f3f4f6;
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.72rem;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.3);
+  pointer-events: none;
+}
+
+.ops__step-item:hover .step-tip {
+  display: block;
+}
+
+.step-tip__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.step-tip__row--total {
+  border-top: 1px solid #4b5563;
+  margin-top: 0.25rem;
+  padding-top: 0.25rem;
+  font-weight: 600;
+}
+
+.step-tip__sub {
+  color: #9ca3af;
+  font-size: 0.68rem;
+  margin-bottom: 0.15rem;
+}
+
+/* --- Picking panel collapse --- */
+
+.picking-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.picking-panel__chevron {
+  color: #5a6270;
+  font-size: 0.75rem;
+}
+
+/* --- Pie chart --- */
+
+.pie {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.pie__svg {
+  width: 100%;
+  max-width: 480px;
+  height: auto;
+}
+
+.pie__label text {
+  font-size: 11px;
+  fill: #2a3244;
+}
+
+.pie__label .pie__label-value {
+  fill: #5a6270;
+  font-size: 10px;
+}
+
+.pie__rest {
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.15rem 1rem;
+  width: 100%;
+}
+
+.pie__rest li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+}
+
+/* --- Splits --- */
+
+.splits__head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  color: #9aa3b5;
+  border-bottom: 1px solid #e2e6ee;
+  padding-bottom: 0.2rem;
+  margin-bottom: 0.2rem;
+}
+
+.splits__spacer {
+  flex: 1;
+}
+
+.splits__sort {
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 0.7rem;
+  color: #9aa3b5;
+  cursor: pointer;
+  padding: 0.1rem 0.25rem;
+  border-radius: 3px;
+}
+
+.splits__sort:hover {
+  background: #f2f5fa;
+  color: #5a6270;
+}
+
+.splits__sort--active {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+/* Five rows tall, then scroll. */
+.splits__scroll {
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.splits__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 32px;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid #f1f4f9;
+}
+
+.splits__index {
+  width: 1.4rem;
+  color: #9aa3b5;
+  flex: none;
+}
+
+.splits__time {
+  width: 4.2rem;
+  flex: none;
+  font-weight: 600;
+  color: #1a2233;
+}
+
+.splits__bar-cell {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.splits__bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+  min-width: 3px;
+}
+
+.splits__name {
+  position: relative;
+  padding-left: 0.4rem;
+  color: #ffffff;
+  font-size: 0.72rem;
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.45);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.splits__steps {
+  width: 2.5rem;
+  text-align: right;
+  color: #5a6270;
+  flex: none;
+}
+
+/* The board is a tab view now, not an overlay on the scene. */
+.board {
+  position: relative;
+  inset: auto;
+  flex: 1;
+  min-height: 0;
 }

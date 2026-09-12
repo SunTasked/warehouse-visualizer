@@ -66,6 +66,8 @@ export interface CapturedRun {
   handling: StopHandling[];
   /** Wall-clock time it was executed, for ordering and display. */
   at: number;
+  /** Whether this run fed the heatmaps. A run played with capture disarmed still belongs to the session (it is navigable, and it happened) — it just wasn't measured. */
+  captured: boolean;
 }
 
 export interface ActiveRun {
@@ -81,13 +83,16 @@ export interface ActiveRun {
   currentLegIndex: number;
   /** Animated mode only — freezes the vehicle in place without losing progress. */
   isPaused: boolean;
+  /** Index into sessionRuns, so the run-navigation buttons know where they are. -1 while a run is still being set up. */
+  sessionIndex: number;
 }
 
 interface SimulationContextValue {
   pickingLists: PickingList[];
   activeRun: ActiveRun | null;
-  playbackMode: PlaybackMode;
-  setPlaybackMode: (mode: PlaybackMode) => void;
+  /** Whether the forklift drives the route or it simply appears complete. A presentation choice on the play widget, not a property of the run: the route, the events and every metric are identical either way. */
+  animate: boolean;
+  setAnimate: (value: boolean) => void;
   /** Meters/second, animated mode only. */
   speed: number;
   setSpeed: (value: number) => void;
@@ -114,8 +119,18 @@ interface SimulationContextValue {
   /** While armed, every list played adds to both heatmaps; while off, runs play and animate but measure nothing. */
   captureArmed: boolean;
   setCaptureArmed: (value: boolean) => void;
-  /** Every run that fed the current capture, newest last — the record of what produced the heatmaps. */
+  /** Every run played this session in play order, whether or not capture was armed — what the run-navigation buttons walk. */
+  sessionRuns: CapturedRun[];
+  /** The subset of sessionRuns that fed the heatmaps — the record of what produced the current capture. */
   capturedRuns: CapturedRun[];
+  /** Re-displays a run already played this session, read-only: its route is drawn, but nothing is re-applied or re-counted. */
+  showSessionRun: (index: number) => void;
+  nextRun: () => void;
+  previousRun: () => void;
+  canGoNextRun: boolean;
+  canGoPreviousRun: boolean;
+  /** Discards the whole session — runs, heatmaps and the active run. Used when entering edit mode (see App). */
+  clearSession: () => void;
   /** Which captured run is being re-displayed in the scene (read-only; it is not re-executed and does not re-count). */
   reviewedRunId: string | null;
   reviewRun: (id: string | null) => void;
@@ -333,7 +348,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   const editor = useEditor();
   const { reset: resetFocus } = useViewFocus();
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
-  const [playbackMode, setPlaybackMode] = useState<PlaybackMode>("animated");
+  const [animate, setAnimateState] = useState(true);
   const [speed, setSpeed] = useState(2); // m/s — a plausible forklift travel speed
   const [showPanel, setShowPanel] = useState(false);
   // Directed per-segment travel tallies for the path heatmap (Paths.tsx) —
@@ -346,13 +361,15 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   // the path tallies can't, since several slots share one corridor.
   const [slotUsage, setSlotUsage] = useState<Record<string, number>>({});
   const [captureArmed, setCaptureArmed] = useState(false);
-  const [capturedRuns, setCapturedRuns] = useState<CapturedRun[]>([]);
+  const [sessionRuns, setSessionRuns] = useState<CapturedRun[]>([]);
   const [reviewedRunId, setReviewedRunId] = useState<string | null>(null);
   const [queuedLists, setQueuedLists] = useState<PickingList[]>([]);
   const [hoveredStep, setHoveredStep] = useState<HoveredStep | null>(null);
   const progressRef = useRef(0);
   const fastForwardSpeedRef = useRef<number | null>(null);
   const queueRef = useRef<PickingList[]>([]);
+  /** Next index into sessionRuns — see recordRun for why this can't be read off the state. */
+  const sessionCountRef = useRef(0);
 
   // queueRef stays the source of truth (it's mutated synchronously mid-run,
   // where a state value would be a render behind); this mirrors it into state
@@ -386,28 +403,40 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
    * callers) — watching stock change as the forklift reaches each slot is
    * the point of the animation.
    *
-   * A no-op unless capture is armed: playing a list to demo it shouldn't
-   * silently contaminate a measurement.
+   * Every run joins the session either way — it happened, and the run
+   * navigation walks it. Only an armed capture also feeds the heatmaps:
+   * playing a list to demo it shouldn't silently contaminate a measurement.
+   *
+   * Returns the session index the run landed at, so the active run can point
+   * back at its own record.
    */
-  const captureRun = useCallback(
-    (list: PickingList, stops: PickingStop[], legs: Leg[], events: StopEvent[]) => {
-      if (!captureArmed) return;
-
+  const recordRun = useCallback(
+    (list: PickingList, stops: PickingStop[], legs: Leg[], events: StopEvent[]): number => {
       const profiles = legs.map((leg) => legProfile(leg.points));
       const handling = resolveHandling(stops, events, editor.warehouse);
-      setCapturedRuns((current) => [
-        ...current,
-        {
-          id: `${list.id}-${Date.now()}-${current.length}`,
-          list,
-          stops,
-          events,
-          legs,
-          profiles,
-          handling,
-          at: Date.now(),
-        },
-      ]);
+      // A ref, not current.length inside the updater: that updater runs
+      // during the next render, so anything it assigns is still unset by the
+      // time this function returns the index to its caller.
+      const index = sessionCountRef.current;
+      sessionCountRef.current += 1;
+      setSessionRuns((current) => {
+        return [
+          ...current,
+          {
+            id: `${list.id}-${Date.now()}-${current.length}`,
+            list,
+            stops,
+            events,
+            legs,
+            profiles,
+            handling,
+            at: Date.now(),
+            captured: captureArmed,
+          },
+        ];
+      });
+
+      if (!captureArmed) return index;
 
       setEdgeUsage((current) => {
         const next = { ...current };
@@ -428,6 +457,8 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
         }
         return next;
       });
+
+      return index;
     },
     [captureArmed, editor.warehouse],
   );
@@ -455,12 +486,12 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     const legs = buildLegs(stops, editor.warehouse, graph);
 
     // The whole run's measurement lands here, before a wheel has turned —
-    // see captureRun's doc comment.
-    captureRun(list, stops, legs, events);
+    // see recordRun's doc comment.
+    const sessionIndex = recordRun(list, stops, legs, events);
 
-    if (playbackMode === "static") {
+    if (!animate) {
       for (const event of events) applyEvent(event);
-      setActiveRun({ list, mode: "static", stops, events, legs, currentLegIndex: legs.length, isPaused: false });
+      setActiveRun({ list, mode: "static", stops, events, legs, currentLegIndex: legs.length, isPaused: false, sessionIndex });
       // Static runs finish synchronously — pause briefly before the next
       // queued list so each one is actually visible, rather than only the
       // last one ever appearing on screen.
@@ -482,8 +513,8 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       else setActiveRun(null);
       return;
     }
-    setActiveRun({ list, mode: "animated", stops, events, legs, currentLegIndex: 0, isPaused: false });
-  }, [applyEvent, captureRun, editor.warehouse, graph, playbackMode, resetFocus, syncQueuedLists]);
+    setActiveRun({ list, mode: "animated", stops, events, legs, currentLegIndex: 0, isPaused: false, sessionIndex });
+  }, [animate, applyEvent, recordRun, editor.warehouse, graph, resetFocus, syncQueuedLists]);
 
   playNextRef.current = playNext;
 
@@ -576,30 +607,48 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
 
   const previousStep = useCallback(() => goToStep((activeRun?.currentLegIndex ?? 0) - 1), [activeRun, goToStep]);
 
+  /** Only the runs that actually fed the heatmaps — the record behind the current capture. */
+  const capturedRuns = useMemo(() => sessionRuns.filter((run) => run.captured), [sessionRuns]);
+
   /** Wipes both captured heatmaps and the record of what produced them. Inventory is left exactly as it is, so a capture can be discarded and restarted without disturbing stock. */
   const clearCapture = useCallback(() => {
     setEdgeUsage({});
     setSlotUsage({});
-    setCapturedRuns([]);
+    setSessionRuns([]);
+    sessionCountRef.current = 0;
     setReviewedRunId(null);
   }, []);
 
-  /** Re-displays a recorded run's route in the scene without re-executing it — reviewing what fed the heatmap must not change the heatmap. Pass null to stop reviewing. */
-  const reviewRun = useCallback(
-    (id: string | null) => {
-      if (id === null) {
-        setReviewedRunId(null);
-        return;
-      }
-      const recorded = capturedRuns.find((entry) => entry.id === id);
+  /** Everything the session holds: runs, heatmaps, whatever is on screen. Entering edit mode does this — the routes were computed against a layout that's about to change, so keeping them would mean scoring runs that could no longer happen. */
+  const clearSession = useCallback(() => {
+    queueRef.current = [];
+    fastForwardSpeedRef.current = null;
+    progressRef.current = 0;
+    setSessionRuns([]);
+    sessionCountRef.current = 0;
+    setEdgeUsage({});
+    setSlotUsage({});
+    setQueuedLists([]);
+    setActiveRun(null);
+    setReviewedRunId(null);
+    setCaptureArmed(false);
+  }, []);
+
+  /**
+   * Re-displays a run already played this session without re-executing it —
+   * reviewing what happened must not change what happened. Drawn as a
+   * finished static run: the whole route visible, nothing animating, no
+   * events applied and nothing counted.
+   */
+  const showSessionRun = useCallback(
+    (index: number) => {
+      const recorded = sessionRuns[index];
       if (!recorded) return;
       queueRef.current = [];
       fastForwardSpeedRef.current = null;
       progressRef.current = 0;
       setQueuedLists([]);
-      setReviewedRunId(id);
-      // Shown as a finished static run: the full route drawn, nothing
-      // animating, no events applied.
+      setReviewedRunId(recorded.id);
       setActiveRun({
         list: recorded.list,
         mode: "static",
@@ -608,9 +657,66 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
         legs: recorded.legs,
         currentLegIndex: recorded.legs.length,
         isPaused: false,
+        sessionIndex: index,
       });
     },
-    [capturedRuns],
+    [sessionRuns],
+  );
+
+  const reviewRun = useCallback(
+    (id: string | null) => {
+      if (id === null) {
+        setReviewedRunId(null);
+        return;
+      }
+      const index = sessionRuns.findIndex((entry) => entry.id === id);
+      if (index >= 0) showSessionRun(index);
+    },
+    [sessionRuns, showSessionRun],
+  );
+
+  // Run navigation walks the whole session in play order, then spills into
+  // the queue: going forward past the last played run starts the next one
+  // waiting, so ⏭ reads as "the run after this one" whether that run has
+  // happened yet or not.
+  const currentRunIndex = activeRun?.sessionIndex ?? -1;
+  const canGoPreviousRun = currentRunIndex > 0;
+  const canGoNextRun = currentRunIndex >= 0 && (currentRunIndex < sessionRuns.length - 1 || queueRef.current.length > 0);
+
+  const previousRun = useCallback(() => {
+    if (currentRunIndex > 0) showSessionRun(currentRunIndex - 1);
+  }, [currentRunIndex, showSessionRun]);
+
+  const nextRun = useCallback(() => {
+    if (currentRunIndex >= 0 && currentRunIndex < sessionRuns.length - 1) {
+      showSessionRun(currentRunIndex + 1);
+      return;
+    }
+    if (queueRef.current.length > 0) playNextRef.current();
+  }, [currentRunIndex, sessionRuns.length, showSessionRun]);
+
+  /**
+   * Animate is a presentation choice, so flipping it never recomputes a
+   * route. Turning it off mid-run finishes the run where it stands —
+   * applying the stock changes it hadn't reached yet, because the run did
+   * happen. Turning it back on re-drives the same route from the start as
+   * pure playback: the events already applied, so nothing lands twice.
+   */
+  const setAnimate = useCallback(
+    (value: boolean) => {
+      setAnimateState(value);
+      const run = activeRun;
+      if (!run) return;
+
+      if (!value) {
+        if (run.currentLegIndex < run.legs.length) goToStep(run.legs.length);
+        return;
+      }
+      progressRef.current = 0;
+      fastForwardSpeedRef.current = null;
+      setActiveRun({ ...run, mode: "animated", currentLegIndex: 0, isPaused: false });
+    },
+    [activeRun, goToStep],
   );
 
   /**
@@ -636,8 +742,8 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     () => ({
       pickingLists: exampleLists,
       activeRun,
-      playbackMode,
-      setPlaybackMode,
+      animate,
+      setAnimate,
       speed,
       setSpeed,
       playList,
@@ -656,7 +762,14 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       slotUsage,
       captureArmed,
       setCaptureArmed,
+      sessionRuns,
       capturedRuns,
+      showSessionRun,
+      nextRun,
+      previousRun,
+      canGoNextRun,
+      canGoPreviousRun,
+      clearSession,
       reviewedRunId,
       reviewRun,
       clearCapture,
@@ -666,7 +779,8 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     }),
     [
       activeRun,
-      playbackMode,
+      animate,
+      setAnimate,
       speed,
       playList,
       playQueue,
@@ -680,7 +794,14 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       edgeUsage,
       slotUsage,
       captureArmed,
+      sessionRuns,
       capturedRuns,
+      showSessionRun,
+      nextRun,
+      previousRun,
+      canGoNextRun,
+      canGoPreviousRun,
+      clearSession,
       reviewedRunId,
       reviewRun,
       clearCapture,

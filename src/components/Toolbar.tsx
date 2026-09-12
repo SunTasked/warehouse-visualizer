@@ -18,21 +18,46 @@ export function Toolbar() {
     showHistory,
     setShowHistory,
   } = useEditor();
-  const { showPanel, setShowPanel } = useSimulation();
-  const { showBoard, setShowBoard } = useAnalytics();
+  const simulation = useSimulation();
+  const analytics = useAnalytics();
 
+  /**
+   * Entering edit mode discards the session: every recorded route was
+   * computed against the layout that is about to change, so keeping the
+   * runs would mean scoring journeys that can no longer happen. The cost is
+   * spelled out here rather than in a generic "are you sure" — losing a
+   * baseline you were about to compare against is worth a specific warning.
+   */
   const toggleMode = () => {
     const next = mode === "view" ? "edit" : "view";
+    if (next === "edit") {
+      const runs = simulation.sessionRuns.length;
+      const snapshots = analytics.snapshots.length;
+      if (runs > 0 || snapshots > 0) {
+        const lost = [
+          runs > 0 ? `${runs} recorded run${runs === 1 ? "" : "s"} and both heatmaps` : null,
+          snapshots > 0 ? `${snapshots} saved snapshot${snapshots === 1 ? "" : "s"}` : null,
+        ]
+          .filter(Boolean)
+          .join(", plus ");
+        const ok = window.confirm(
+          `Editing the layout discards the current session.
+
+You will lose ${lost}.
+
+The routes were measured against this layout, so they can't be compared against the edited one. Continue?`,
+        );
+        if (!ok) return;
+      }
+      simulation.clearSession();
+      analytics.clearAll();
+    }
     setMode(next);
     if (next === "view") setAddSlotMode(false);
   };
 
   return (
     <div className="toolbar">
-      <button className={mode === "edit" ? "toolbar__btn toolbar__btn--active" : "toolbar__btn"} onClick={toggleMode}>
-        {mode === "edit" ? "Editing" : "View only"}
-      </button>
-
       {mode === "edit" && (
         <>
           <button
@@ -60,24 +85,6 @@ export function Toolbar() {
         </>
       )}
 
-      {mode === "view" && (
-        <>
-          <button
-            className={showPanel ? "toolbar__btn toolbar__btn--active" : "toolbar__btn"}
-            onClick={() => setShowPanel(!showPanel)}
-          >
-            Picking Lists
-          </button>
-          <button
-            className={showBoard ? "toolbar__btn toolbar__btn--active" : "toolbar__btn"}
-            onClick={() => setShowBoard(!showBoard)}
-            title="Time and throughput metrics for the current capture"
-          >
-            Performance
-          </button>
-        </>
-      )}
-
       <div className="toolbar__spacer" />
 
       {dirty && <span className="toolbar__dirty">● unsaved changes</span>}
@@ -86,6 +93,13 @@ export function Toolbar() {
       </button>
       <button className="toolbar__btn" onClick={() => void save()}>
         Save
+      </button>
+      <button
+        className={mode === "edit" ? "toolbar__btn toolbar__btn--active" : "toolbar__btn"}
+        onClick={toggleMode}
+        title={mode === "edit" ? "Finish editing and go back to the warehouse view" : "Edit the layout (discards the current session)"}
+      >
+        {mode === "edit" ? "Done" : "Edit"}
       </button>
     </div>
   );

@@ -255,22 +255,32 @@ const paths = [
   // y=6 (clear south of B, whose south edge is y=8), then west to x=10 (the
   // gap between CL01/DS01), then straight down through that gap to the
   // south door.
+  //
+  // The (14,6) vertex carries no turn: it exists so the delivery spur can
+  // tee off *here*, where it actually meets this corridor. Without it the
+  // spur had to start back at (10,6) and retrace east along ground this
+  // path already covers — two paths describing one strip of floor, and a
+  // forced U-turn for anything approaching DS01 from the east, which had to
+  // overshoot to x=10 and come back.
   {
     id: "Path-Service",
     points: [
       { x: 24, y: 13 },
       { x: 24, y: 6 },
+      { x: 14, y: 6 },
       { x: 10, y: 6 },
       { x: 10, y: 0 },
     ],
     buildingIds: [MAIN_BUILDING_ID],
   },
   // Short spurs from the service branch to each box's north edge (y=5) —
-  // "connected to a path" by touching, not by running through it.
+  // "connected to a path" by touching, not by running through it. Each
+  // starts at its own tee point on the service branch and covers only
+  // ground that branch doesn't.
   { id: "Path-Lift-Spur", points: [{ x: 10, y: 6 }, { x: 6, y: 6 }, { x: 6, y: 5 }], buildingIds: [MAIN_BUILDING_ID] },
   {
     id: "Path-Delivery-Spur",
-    points: [{ x: 10, y: 6 }, { x: 14, y: 6 }, { x: 14, y: 5 }],
+    points: [{ x: 14, y: 6 }, { x: 14, y: 5 }],
     buildingIds: [MAIN_BUILDING_ID],
   },
   // Cross-building connector: the main building's south door straight down

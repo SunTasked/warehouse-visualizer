@@ -2,6 +2,9 @@ import { useState } from "react";
 import type { PickingList, PickingStop } from "../types/simulation";
 import { useEditor } from "../state/EditorContext";
 import { useSimulation, type ActiveRun, type StopEvent } from "../state/SimulationContext";
+import { useAnalytics } from "../state/AnalyticsContext";
+import { formatDuration } from "../lib/metrics";
+import { handlingBreakdown, handlingTime, legTravelTime } from "../lib/timeModel";
 
 /**
  * What a given stop actually does, as a verb for the operations list — the
@@ -41,9 +44,82 @@ function ModeBadge({ list }: { list: PickingList }) {
   );
 }
 
+/**
+ * What a step costs under the current time model, itemised — the same
+ * components the performance board totals up, shown for one step so a slow
+ * row explains itself (a deep, high pallet at the end of a long leg reads
+ * very differently from a short hop to a floor-level one).
+ *
+ * Falls back to nothing when the run wasn't recorded (capture disarmed), as
+ * there's no resolved tier/depth to price.
+ */
+function StepMetrics({ run, stopIndex, anchor }: { run: ActiveRun; stopIndex: number; anchor: DOMRect | null }) {
+  const simulation = useSimulation();
+  const { settings } = useAnalytics();
+
+  const recorded = simulation.sessionRuns[run.sessionIndex];
+  if (!recorded) return null;
+
+  const profile = stopIndex > 0 ? recorded.profiles[stopIndex - 1] : null;
+  const handling = recorded.handling[stopIndex];
+  if (!handling) return null;
+
+  const travel = profile ? legTravelTime(profile, settings) : 0;
+  const work = handlingTime(handling, settings);
+  const parts = handlingBreakdown(handling, settings);
+  const distance = profile ? profile.segmentLengths.reduce((a, b) => a + b, 0) : 0;
+
+  let cumulative = 0;
+  for (let i = 0; i <= stopIndex; i++) {
+    if (i > 0 && recorded.profiles[i - 1]) cumulative += legTravelTime(recorded.profiles[i - 1], settings);
+    if (recorded.handling[i]) cumulative += handlingTime(recorded.handling[i], settings);
+  }
+
+  return (
+    // Positioned from the hovered row's own rect: the console clips its
+    // content, so the tooltip has to sit outside that box entirely.
+    <div
+      className="step-tip"
+      style={anchor ? { top: anchor.top, left: anchor.right + 8 } : undefined}
+    >
+      <div className="step-tip__row">
+        <span>Travel</span>
+        <span>{formatDuration(travel)}</span>
+      </div>
+      {profile && (
+        <div className="step-tip__sub">
+          {distance.toFixed(1)} m · {profile.turns} turn{profile.turns === 1 ? "" : "s"}
+        </div>
+      )}
+      <div className="step-tip__row">
+        <span>Handling</span>
+        <span>{formatDuration(work)}</span>
+      </div>
+      {parts.base > 0 && (
+        <div className="step-tip__sub">
+          base {formatDuration(parts.base)}
+          {parts.tier > 0 ? ` · tier +${formatDuration(parts.tier)}` : ""}
+          {parts.depth > 0 ? ` · depth +${formatDuration(parts.depth)}` : ""}
+        </div>
+      )}
+      {handling.kind === "deliver" && <div className="step-tip__sub">{handling.pallets} pallet unload</div>}
+      {handling.kind === "load" && <div className="step-tip__sub">{handling.pallets} pallet load</div>}
+      <div className="step-tip__row step-tip__row--total">
+        <span>Step</span>
+        <span>{formatDuration(travel + work)}</span>
+      </div>
+      <div className="step-tip__row">
+        <span>Tour so far</span>
+        <span>{formatDuration(cumulative)}</span>
+      </div>
+    </div>
+  );
+}
+
 /** One run expanded into its ordered operations, each row wired to blink its target (and the leg reaching it) on hover, and to move the forklift there on click. */
 function RunSteps({ run }: { run: ActiveRun }) {
   const simulation = useSimulation();
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
 
   return (
     <ol className="ops__steps">
@@ -53,12 +129,15 @@ function RunSteps({ run }: { run: ActiveRun }) {
         // before it is done, that one is where it is now.
         const state = i < run.currentLegIndex ? "done" : i === run.currentLegIndex ? "current" : "todo";
         return (
-          <li key={i}>
+          <li key={i} className="ops__step-item">
             <button
               className={`ops__step ops__step--${state}`}
               // Leg i-1 is the one that arrives at stop i; the very first
               // stop has nothing leading to it.
-              onMouseEnter={() => simulation.setHoveredStep({ stop, legIndex: i > 0 ? i - 1 : null })}
+              onMouseEnter={(e) => {
+                simulation.setHoveredStep({ stop, legIndex: i > 0 ? i - 1 : null });
+                setAnchor(e.currentTarget.getBoundingClientRect());
+              }}
               onMouseLeave={() => simulation.setHoveredStep(null)}
               onClick={() => simulation.goToStep(i)}
               title="Jump the forklift to this step"
@@ -67,6 +146,7 @@ function RunSteps({ run }: { run: ActiveRun }) {
               <span className="ops__step-verb">{stepVerb(run.events[i], i, run.stops.length)}</span>
               <span className="ops__step-target">{stop.id}</span>
             </button>
+            <StepMetrics run={run} stopIndex={i} anchor={anchor} />
           </li>
         );
       })}
@@ -112,8 +192,11 @@ export function RunConsole() {
   const { mode } = useEditor();
   const simulation = useSimulation();
   const [tab, setTab] = useState<"operations" | "history">("operations");
+  // Collapsed by default: the transport row is what you need constantly, the
+  // operations and record lists only when you go looking.
+  const [collapsed, setCollapsed] = useState(true);
 
-  if (mode !== "view" || !simulation.showPanel) return null;
+  if (mode !== "view") return null;
 
   const run = simulation.activeRun;
   // Static runs finish synchronously the instant they're started — there's
@@ -142,19 +225,28 @@ export function RunConsole() {
           {simulation.captureArmed ? "Capturing" : "Capture"}
         </button>
 
-        <span className="run-console__measured">
+        {!collapsed && <span className="run-console__measured">
           {measuredSegments} segment{measuredSegments === 1 ? "" : "s"} · {measuredSlots} slot
           {measuredSlots === 1 ? "" : "s"}
-        </span>
+        </span>}
 
+        {/* Single bars step between stops, double bars between runs. */}
         <div className="run-console__transport">
+          <button
+            className="picking-panel__transport-btn"
+            disabled={!simulation.canGoPreviousRun}
+            onClick={simulation.previousRun}
+            title="Previous run"
+          >
+            ⏮
+          </button>
           <button
             className="picking-panel__transport-btn"
             disabled={!run || run.currentLegIndex === 0}
             onClick={simulation.previousStep}
             title="Previous stop"
           >
-            ⏮
+            ◀|
           </button>
           <button
             className="picking-panel__transport-btn"
@@ -172,14 +264,48 @@ export function RunConsole() {
             onClick={simulation.nextStep}
             title="Next stop (fast-forwards the current leg)"
           >
+            |▶
+          </button>
+          <button
+            className="picking-panel__transport-btn"
+            disabled={!simulation.canGoNextRun}
+            onClick={simulation.nextRun}
+            title="Next run"
+          >
             ⏭
           </button>
           <button className="picking-panel__transport-btn" disabled={!run} onClick={simulation.stop} title="Stop">
             ⏹
           </button>
+          <button
+            className={simulation.animate ? "run-console__opt run-console__opt--on" : "run-console__opt"}
+            onClick={() => simulation.setAnimate(!simulation.animate)}
+            title="Drive the route instead of showing it complete. Never changes the route or its metrics."
+          >
+            Animate
+          </button>
+          {simulation.animate && (
+            <input
+              className="run-console__speed"
+              type="number"
+              min={0.5}
+              max={10}
+              step={0.5}
+              value={simulation.speed}
+              onChange={(e) => simulation.setSpeed(Math.max(0.5, Number(e.target.value) || 0.5))}
+              title="Travel speed for the animation only (m/s)"
+            />
+          )}
+          <button
+            className="run-console__expand"
+            onClick={() => setCollapsed((c) => !c)}
+            title={collapsed ? "Show operations and record" : "Hide details"}
+          >
+            {collapsed ? "▾" : "▴"}
+          </button>
         </div>
 
-        <div className="run-console__status">
+        {!collapsed && <div className="run-console__status">
           {run ? (
             <>
               <strong>{run.list.label}</strong>{" "}
@@ -196,9 +322,11 @@ export function RunConsole() {
           ) : (
             <span>Nothing running</span>
           )}
-        </div>
+        </div>}
       </div>
 
+      {!collapsed && (
+        <>
       <div className="run-console__tabs">
         <button
           className={tab === "operations" ? "run-console__tab run-console__tab--active" : "run-console__tab"}
@@ -283,6 +411,8 @@ export function RunConsole() {
             </div>
           ))}
       </div>
+        </>
+      )}
     </div>
   );
 }

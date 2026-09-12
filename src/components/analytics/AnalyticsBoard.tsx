@@ -4,7 +4,7 @@ import { useSimulation } from "../../state/SimulationContext";
 import { useAnalytics } from "../../state/AnalyticsContext";
 import { formatDuration, scoreCapture, type ScorableRun } from "../../lib/metrics";
 import { TIME_MODEL_FIELDS } from "../../lib/timeModel";
-import { BarChart, BreakdownBar, Histogram } from "./Charts";
+import { DecileChart, Splits, TimePie, type SplitSort } from "./Charts";
 
 const GROUPS = ["Travel", "Pick / put", "Depot", "Tour"] as const;
 
@@ -36,6 +36,7 @@ export function AnalyticsBoard() {
   const simulation = useSimulation();
   const analytics = useAnalytics();
   const [snapshotName, setSnapshotName] = useState("");
+  const [splitSort, setSplitSort] = useState<SplitSort>("index");
 
   // Recorded runs reduced to their scorable form — this is what both the
   // live board and every snapshot are scored from, so they stay comparable.
@@ -60,7 +61,7 @@ export function AnalyticsBoard() {
     [analytics.snapshots, analytics.settings],
   );
 
-  if (!analytics.showBoard) return null;
+  if (analytics.tab !== "performances") return null;
 
   const hasData = currentRuns.length > 0;
   const allTimeToSlot = metrics.runs.flatMap((run) => run.timeToSlot);
@@ -79,13 +80,13 @@ export function AnalyticsBoard() {
   return (
     <div className="board">
       <div className="board__header">
-        <h2>Performance</h2>
+        <h2>Performances</h2>
         <span className="board__subtitle">
           {hasData
             ? `${currentRuns.length} recorded run${currentRuns.length === 1 ? "" : "s"} · ${metrics.totalPicks} picks · ${metrics.totalPuts} puts`
             : "Nothing recorded yet"}
         </span>
-        <button className="board__close" onClick={() => analytics.setShowBoard(false)}>
+        <button className="board__close" onClick={() => analytics.setTab("overview")} title="Back to the warehouse">
           ×
         </button>
       </div>
@@ -121,26 +122,31 @@ export function AnalyticsBoard() {
 
             <section className="board__section">
               <h3>Where the time goes</h3>
-              <BreakdownBar breakdown={metrics.breakdown as unknown as Record<string, number>} />
+              <TimePie breakdown={metrics.breakdown as unknown as Record<string, number>} />
             </section>
 
             <section className="board__section">
-              <h3>Time to slot — distribution</h3>
+              <h3>Time to slot — by decile</h3>
               <p className="board__note">
-                Each bar counts slot visits; mean {formatDuration(metrics.meanTimeToSlot)}, median{" "}
-                {formatDuration(metrics.medianTimeToSlot)}.
+                P70 is the time 70% of slot visits came in under. Mean {formatDuration(metrics.meanTimeToSlot)},
+                median {formatDuration(metrics.medianTimeToSlot)}.
               </p>
-              <Histogram values={allTimeToSlot} />
+              <DecileChart values={allTimeToSlot} />
             </section>
 
             <section className="board__section">
               <h3>Per run</h3>
-              <BarChart
-                data={metrics.runs.map((run) => ({
+              <Splits
+                rows={metrics.runs.map((run, i) => ({
+                  index: i,
                   label: run.label,
-                  value: run.picks + run.puts > 0 ? run.totalTime / (run.picks + run.puts) : run.totalTime,
-                  alt: run.mode === "storing",
+                  mode: run.mode,
+                  perPallet: run.picks + run.puts > 0 ? run.totalTime / (run.picks + run.puts) : run.totalTime,
+                  totalTime: run.totalTime,
+                  steps: run.picks + run.puts,
                 }))}
+                sort={splitSort}
+                onSortChange={setSplitSort}
               />
               <p className="board__note">Time per pallet handled, so tours of different lengths compare fairly. Amber = storing.</p>
             </section>

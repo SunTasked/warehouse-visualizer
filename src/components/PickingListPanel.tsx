@@ -13,8 +13,9 @@ export function PickingListPanel() {
   const { mode } = useEditor();
   const simulation = useSimulation();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useState(false);
 
-  if (mode !== "view" || !simulation.showPanel) return null;
+  if (mode !== "view") return null;
 
   const toggleSelected = (id: string) => {
     setSelected((current) => {
@@ -31,54 +32,13 @@ export function PickingListPanel() {
 
   return (
     <div className="picking-panel">
-      <div className="picking-panel__header">
+      <button className="picking-panel__header" onClick={() => setCollapsed((c) => !c)}>
         <h2>Picking lists</h2>
-        <button className="picking-panel__close" onClick={() => simulation.setShowPanel(false)}>
-          ×
-        </button>
-      </div>
+        <span className="picking-panel__chevron">{collapsed ? "▸" : "▾"}</span>
+      </button>
 
-      <div className="picking-panel__mode">
-        <span>Playback</span>
-        <div className="picking-panel__toggle">
-          <button
-            className={
-              simulation.playbackMode === "animated"
-                ? "picking-panel__toggle-btn picking-panel__toggle-btn--active"
-                : "picking-panel__toggle-btn"
-            }
-            onClick={() => simulation.setPlaybackMode("animated")}
-          >
-            Animated
-          </button>
-          <button
-            className={
-              simulation.playbackMode === "static"
-                ? "picking-panel__toggle-btn picking-panel__toggle-btn--active"
-                : "picking-panel__toggle-btn"
-            }
-            onClick={() => simulation.setPlaybackMode("static")}
-          >
-            Static
-          </button>
-        </div>
-      </div>
-
-      {simulation.playbackMode === "animated" && (
-        <label className="picking-panel__speed">
-          Speed
-          <input
-            type="number"
-            min={0.5}
-            max={10}
-            step={0.5}
-            value={simulation.speed}
-            onChange={(e) => simulation.setSpeed(Math.max(0.5, Number(e.target.value) || 0.5))}
-          />
-          m/s
-        </label>
-      )}
-
+      {!collapsed && (
+        <>
       <ul className="picking-panel__list">
         {simulation.pickingLists.map((list) => (
           <li key={list.id} className="picking-panel__row">
@@ -132,6 +92,8 @@ export function PickingListPanel() {
           Reset warehouse
         </button>
       </div>
+        </>
+      )}
     </div>
   );
 }

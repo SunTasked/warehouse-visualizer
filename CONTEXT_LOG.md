@@ -4,6 +4,48 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-12 (cont'd) — app shell/navigation (§5.6, new), run console + board chart rework, one data fix
+
+- Broad session: app-shell restructure (new §5.6), amendments to §5.4 (run console/
+  forklift) and §5.5 (board charts), plus a path-data bug fix (§5.1). Full design in
+  specs.md's new §5.6, the amended §5.4/§5.5 subsections, and one new decision log entry
+  — not duplicated here.
+- **Data fix**: `Path-Service`/`Path-Delivery-Spur` in `scripts/generate-example-
+  warehouse.js` duplicated the same x=10..14/y=6 corridor stretch, forcing a U-turn into
+  DS01 and the stray cross-over stub the user reported. Fixed by teeing the spur at a
+  shared (14,6) vertex; regenerated `schema/warehouse.example.json`. Captured distance for
+  "Play all": 680m → 640m (§5.5's older example figures predate this).
+- **New app shell** (`AppHeader.tsx`, `Toolbar.tsx`, `App.tsx`, `AnalyticsContext.tsx`):
+  "Warehouse benchmarker" title + warehouse-name subtitle + info popover;
+  Overview/Performances tabs replace the board's full-screen overlay (`tab`/`setTab`
+  instead of `showBoard`; scene stays mounted-but-hidden under Performances); "Edit"/
+  "Done" replaces "View only"; Picking Lists panel's toggle button removed (always shown,
+  collapses in place).
+- **Edit mode now clears the session** (`Toolbar.toggleMode`, `SimulationContext.
+  clearSession`, `AnalyticsContext.clearAll`): runs, both heatmaps, and saved snapshots —
+  user's explicit choice over keeping snapshots. Confirm dialog names exact counts lost.
+- **Play widget reworked** (`RunConsole.tsx`, `SimulationContext.tsx`): scope-distinct
+  step (`◀|`/`|▶`) vs. run (`⏮`/`⏭`) transport icons; run nav now spans the whole session
+  then the queue (new `sessionRuns`, `capturedRuns` now derived); collapsed by default;
+  `animate` boolean replaces `playbackMode`; itemized step-hover tooltip (travel/handling
+  breakdown, step total, tour-so-far).
+- **Forklift** now labels its carried-pallet count above the cab (`depthTest={false}`).
+- **Board charts reworked** (`analytics/Charts.tsx`): "Where the time goes" is a
+  leader-line pie (overflow list <4%); "Time to slot" is a decile chart (P10-P100)
+  replacing the histogram; "Per run" is Strava-style sortable splits.
+- **Two real bugs found and fixed**: `recordRun`'s session index was read from inside a
+  `setSessionRuns` updater (stale — fixed with a synchronous ref); the step tooltip was
+  clipped by the run console's `overflow: hidden` (fixed with `position: fixed` off the
+  row's own rect + negative-margin centring instead of a transform).
+- Verified (per requester, not redone here): `tsc --noEmit` clean, Playwright zero
+  console errors — title/tabs/Edit-Done/picking-panel/confirm wording, collapsed console,
+  step tooltip text, pie/decile/split charts all checked.
+- specs.md updated: new §5.6, §5.1 gained the path-fix paragraph, §5.4 gained the play-
+  widget/forklift-label follow-up subsection, §5.5's Board UI paragraph + a new
+  chart-redesign subsection, §6 checklist item added, one new decision log entry. §9 not
+  changed — no new open question surfaced this session.
+- Next: unchanged — same open items as before (§9).
+
 ## 2026-09-12 (cont'd) — performance analytics board (§5.5, new)
 
 - New feature on top of §5.3/§5.4: normalized picking-list performance metrics, a

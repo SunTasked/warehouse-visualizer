@@ -431,6 +431,19 @@ example-warehouse.js` for the example data), and no enforced/automated check tha
 graph-readiness convention above actually holds (it's just followed by hand in the
 generator script today). See §9 open questions.
 
+**Duplicate-geometry data fix (Path-Service vs. Path-Delivery-Spur)**: `Path-Service` used
+to run (24,6)→(10,6) while `Path-Delivery-Spur` ran (10,6)→(14,6)→(14,5) — the x=10..14
+stretch at y=6 was described twice, by two overlapping paths. That duplication also forced
+a genuine U-turn (anything approaching DS01 from the east had to overshoot to x=10 and
+double back), and the short perpendicular cross-over the offset logic emits at a reversal
+vertex (§5.3's `offset.ts` reversal handling) was the stray stub reported. Fixed in
+`scripts/generate-example-warehouse.js` by adding a (14,6) vertex to `Path-Service`
+(carries no turn itself — it exists purely so the spur can tee where it actually meets the
+corridor) and shortening `Path-Delivery-Spur` to (14,6)→(14,5); no schema/format change was
+needed. Regenerated `schema/warehouse.example.json`. Effect: a full "Play all" capture's
+total distance dropped from 680m to 640m — §5.5's earlier example verification figures
+predate this fix; treat 640m as current.
+
 #### Editor
 
 The viewer has an edit mode (toggle in the toolbar) for authoring/adjusting this format
@@ -1002,6 +1015,48 @@ hovering an operations row highlights it and pulses the matching rack in 3D; Nex
 step 1 → step 2 via the 0.5s fast-forward, continuously; both legend scales render with
 correct pluralisation. `tsc --noEmit -p .` clean throughout.
 
+#### Play widget rework: scoped transport icons, whole-session run navigation, forklift load label
+
+Further follow-up on the run console (`src/components/RunConsole.tsx`,
+`src/state/SimulationContext.tsx`):
+
+- **Icons now distinguish scope**: `◀|`/`|▶` step between stops (as before); new `⏮`/`⏭`
+  move between whole runs instead.
+- **Run navigation spans the whole session, then spills into the queue**: new
+  `sessionRuns` (every run played this session, captured or not — `capturedRuns` is now
+  just a derived filter of it, rather than the primary list), `showSessionRun`,
+  `nextRun`/`previousRun`/`canGoNextRun`/`canGoPreviousRun`. `CapturedRun` gained a
+  `captured` flag; `ActiveRun` gained `sessionIndex`.
+- **Collapsible, collapsed by default**: only the transport row shows until expanded.
+- **`playbackMode` ("animated"/"static") replaced by an `animate` boolean** living on the
+  play widget itself rather than the run: turning it off mid-run fast-forwards to the
+  finish (applying whatever stock changes remain); turning it back on re-drives the same
+  route as pure playback, with events already applied so nothing lands twice. The route
+  and every scored metric (§5.5) are identical either way — no recompute.
+- **Step hover tooltip**: itemizes travel time (distance + turn count), handling split into
+  base/tier/depth, that step's total, and the running tour-so-far total, all priced under
+  the live time model (§5.5).
+- **Forklift load label**: the forklift now shows the number of pallets it's currently
+  carrying as a `depthTest={false}` label above the cab (the same always-on-top treatment
+  already used for stop numbers and slot ids, §5.1/§5.3), derived from the same
+  `heldPalletsAt` replay already used to stack pallets on the forks.
+
+**Bug fix**: `recordRun` read its session index from inside a `setSessionRuns` updater,
+which React only applies on the *next* render — so the index returned to the caller was
+always stale by one. Fixed with a synchronous `sessionCountRef` instead.
+
+**Bug fix**: the step hover tooltip was clipped by the run console's own
+`overflow: hidden`. Fixed by positioning it `fixed` off the hovered row's own bounding
+rect, and centring the console with a negative margin instead of
+`transform: translateX(-50%)` — a transformed ancestor becomes the containing block for
+`position: fixed` descendants, which would have re-trapped the tooltip right back inside
+the clipped console.
+
+Verified (per requester, not redone here): `tsc --noEmit` clean; Playwright zero console
+errors; console collapsed by default (8 transport controls); step tooltip renders "Travel
+39.0s / 27.0 m · 4 turns / Handling 26.0s / base 15.0s · tier +3.0s · depth +8.0s / Step
+1m 05s / Tour so far 1m 51s".
+
 ### 5.5 Performance analytics board (decided, v1)
 
 Prompted by wanting metrics on how long a picking list takes, normalized so tours of
@@ -1049,12 +1104,14 @@ total distance, and a `Breakdown` splitting all time into travel / turns / handl
 tier / depth / unload / load / overhead. Picks and puts both count as pallets handled (a
 storing tour is as real a use of the warehouse as a picking one).
 
-**Board UI** (`src/components/analytics/AnalyticsBoard.tsx` + `Charts.tsx`, new):
-full-screen overlay opened from a new "Performance" toolbar button (view mode only).
-Scores row, breakdown bar, time-to-slot histogram, per-run bar chart (time per pallet,
-amber = storing), comparison table, and an always-visible settings sidebar (shown even
+**Board UI** (`src/components/analytics/AnalyticsBoard.tsx` + `Charts.tsx`, new): shown
+under the app shell's Performances tab (§5.6) rather than its own full-screen overlay —
+see §5.6 for why (disabled without a session/in edit mode, scene kept mounted-but-hidden
+so switching tabs doesn't reframe the camera). Scores row, breakdown bar, a time-to-slot
+chart (now deciles — see "Chart redesign" below), a per-run chart (now Strava-style
+splits — see below), comparison table, and an always-visible settings sidebar (shown even
 with no data, so the model can be configured before recording). Charts are hand-rolled
-divs/SVG — three small chart shapes don't justify a dependency.
+divs/SVG — a handful of small chart shapes don't justify a dependency.
 
 **Comparison via snapshots** (`src/state/AnalyticsContext.tsx`, new): settings and named
 snapshots persist to `localStorage` (comparing configurations often means loading a
@@ -1073,6 +1130,64 @@ sidebar available.
 Worth noting as an observation the board immediately surfaced: the single-pick "Quick
 pick" tour is the *worst* per-pallet (2m39s), because tour overhead and the round trip
 amortize over just one pallet.
+
+#### Chart redesign: leader-line pie, decile chart, Strava-style splits
+
+Follow-up on `src/components/analytics/Charts.tsx`/`AnalyticsBoard.tsx`:
+
+- **"Where the time goes"** is now a pie with leader lines tethering each label to its own
+  slice, rather than a detached legend that required matching colors by eye; slices under
+  4% drop into an overflow list to avoid label collisions.
+- **Time to slot** is now a decile chart (P10-P100, P50 highlighted) instead of a
+  histogram — at these sample sizes, bin counts are mostly noise, whereas deciles are
+  stable and answer "how bad does it get" (P70 reads as "70% of slot visits came in under
+  this").
+- **Per run** is now Strava-style splits: one row per run, bar length ∝ time per pallet,
+  five rows visible then scrolls, sortable by run number / time / step count.
+
+Verified (per requester, not redone here): `tsc --noEmit` clean; Playwright zero console
+errors; pie renders 8 slices with leader lines; deciles render P10-P100; 5 split rows,
+sortable.
+
+### 5.6 App shell & navigation (decided, v1)
+
+A broader restructure of the app's top-level chrome, on top of the feature panels already
+described in §5.3-§5.5: new `src/components/AppHeader.tsx`, a reworked `Toolbar.tsx` and
+`App.tsx`, and `src/state/AnalyticsContext.tsx` gaining tab state.
+
+**Header**: the title is now "Warehouse benchmarker," with the loaded warehouse's own
+`name` as a subtitle, plus an info button whose popover lists buildings/slots/paths/doors/
+lift stations/delivery spaces/recorded runs — a quick sanity check of what's actually
+loaded.
+
+**Overview / Performances tabs** replace the analytics board's previous full-screen
+overlay (§5.5): `AnalyticsContext` gained `tab`/`setTab` in place of the old `showBoard`
+boolean. Performances is disabled until a session has been recorded, and disabled again
+while in edit mode (see below, since edit mode now clears the session anyway). The 3D
+scene stays mounted but `hidden` (not unmounted) while the Performances tab is showing, so
+switching back to Overview doesn't re-frame the camera.
+
+**Edit / Done** replaces "View only," moved to the right next to Load/Save.
+
+**Picking Lists panel always shown**: its own toggle button is gone — in view mode the
+panel is always present and simply collapses in place, rather than being opened/closed via
+a separate control.
+
+**Edit mode clears the session**: entering edit mode (`Toolbar.toggleMode`) now wipes
+everything scored so far — recorded runs, both heatmaps, *and* saved snapshots
+(`SimulationContext.clearSession`, `AnalyticsContext.clearAll`). This was an explicit user
+choice over the alternative of keeping snapshots: a saved snapshot is a baseline for
+exactly this warehouse's layout, and silently keeping a now-stale comparison around once
+the layout changes was judged worse than losing it outright. The `window.confirm` names
+the exact counts about to be lost (e.g. "You will lose 5 recorded runs and both heatmaps,
+plus 2 saved snapshots") rather than a generic prompt — losing a baseline you were about
+to compare against is worth stating precisely. Consequence: a before/after layout
+comparison can no longer span an edit.
+
+Verified (per requester, not redone here): `tsc --noEmit` clean; Playwright zero console
+errors; title/subtitle/tabs correct; Performances disabled without a session and
+re-disabled after an edit; picking panel present with no toggle button; info popover shows
+7 rows; edit-mode confirm names what is lost.
 
 ## 6. Core Features / Visualizations
 
@@ -1095,6 +1210,9 @@ amortize over just one pallet.
       with per-tier and per-depth handling costs) scores recorded picking-list runs;
       mean-time-per-pallet headline, time-to-slot percentiles, breakdown, and per-run
       charts, with a settings widget and named snapshot comparison (§5.5).
+- [x] **App shell & navigation** — header with warehouse-name subtitle and an info
+      popover, Overview/Performances tabs, Edit/Done toggle that clears the recorded
+      session, always-shown Picking Lists panel (§5.6).
 - [ ] **Simulation run** — given a warehouse model + scenario config, run the simulation and
       produce a trace.
 - [ ] **Path playback** — animate operator movement over simulated time (play/pause/scrub),
@@ -1210,6 +1328,34 @@ amortize over just one pallet.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-12 — Broad UI restructure plus one data fix, spanning §5.1 (path data), §5.4
+  (run console/forklift), §5.5 (board charts), and a new §5.6 (app shell/navigation).
+  Fixed a real duplicate-geometry bug in the example data: `Path-Service` and
+  `Path-Delivery-Spur` both described the same x=10..14/y=6 corridor stretch, forcing a
+  genuine U-turn into DS01 and the stray cross-over stub reported — fixed in
+  `scripts/generate-example-warehouse.js` by teeing the spur off a shared (14,6) vertex
+  instead (680m → 640m total captured distance; §5.5's earlier example figures predate
+  this fix). New §5.6: the app got a real shell — "Warehouse benchmarker" title +
+  warehouse-name subtitle + an info popover, Overview/Performances tabs replacing the
+  analytics board's full-screen overlay (Performances disabled without a session or in
+  edit mode, scene kept mounted-but-hidden so switching tabs doesn't reframe the camera),
+  Edit/Done in place of "View only," and an always-shown (no-toggle) Picking Lists panel.
+  Per explicit user choice, entering edit mode now clears the whole session — runs, both
+  heatmaps, *and* saved snapshots — with a confirm naming the exact counts lost, over the
+  alternative of preserving snapshots (means a before/after layout comparison can no
+  longer span an edit). §5.4 gained a reworked play widget (`RunConsole.tsx`):
+  scope-distinct step/run transport icons, run navigation spanning the whole session then
+  the queue (`sessionRuns`), collapsed by default, an `animate` toggle replacing
+  `playbackMode` (switching it mid-run fast-forwards or replays without double-applying
+  events), an itemized step-hover tooltip, and a forklift load-count label. §5.5's charts
+  were reworked: a leader-line pie (overflow list under 4%), a decile chart (P10-P100)
+  replacing the time-to-slot histogram, and Strava-style sortable per-run splits. Two real
+  bugs found and fixed during verification: `recordRun`'s session index was read from
+  inside a `setSessionRuns` updater (stale until next render — fixed with a synchronous
+  ref) and the step tooltip was clipped by the run console's own `overflow: hidden` (fixed
+  with `position: fixed` off the row's own rect, console centred via a negative margin
+  instead of a transform that would have re-trapped it). Verified via `tsc --noEmit`
+  (clean) and Playwright (zero console errors) — per requester, not redone here.
 - 2026-09-12 — Added a performance analytics board (§5.5), on top of §5.3/§5.4's picking-
   list simulation and capture record. New `src/lib/timeModel.ts` (9 parameters across
   travel/pick-put/depot/tour groups, a real trapezoidal/triangular acceleration profile

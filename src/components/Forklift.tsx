@@ -97,6 +97,9 @@ const SMOKE_PERIOD = 0.75; // seconds for one puff to rise and fade
 const SMOKE_COLOR = "#cbd5e1";
 const SMOKE_START_X = -0.62;
 
+/** Clear of the mast and of anything it could be carrying. */
+const LOAD_LABEL_HEIGHT = 1.6;
+
 // Hover highlight for the leg arriving at the operations row under the
 // cursor — wider than the lane it traces and sitting just above it, so it
 // reads as a halo around that ribbon rather than replacing it.
@@ -337,6 +340,25 @@ function Vehicle({ visible }: { visible: boolean }) {
     <group ref={groupRef}>
       <ForkliftModel carried={carried} />
       <Smoke movingRef={movingRef} />
+      {carried > 0 && (
+        // How many pallets it's actually hauling, readable without counting
+        // the boxes on the forks (which overlap badly from a low angle).
+        // depthTest off for the same reason the stop numbers have it off.
+        <Text
+          position={[0, LOAD_LABEL_HEIGHT, 0]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          fontSize={0.45}
+          color="#ffffff"
+          outlineWidth={0.04}
+          outlineColor="#1f2937"
+          anchorX="center"
+          anchorY="middle"
+          renderOrder={999}
+          material-depthTest={false}
+        >
+          {`${carried}`}
+        </Text>
+      )}
     </group>
   );
 }

@@ -21,6 +21,8 @@ import { LayerPanel } from "./components/LayerPanel";
 import { LayerProvider } from "./state/LayerContext";
 import { AnalyticsProvider } from "./state/AnalyticsContext";
 import { AnalyticsBoard } from "./components/analytics/AnalyticsBoard";
+import { AppHeader } from "./components/AppHeader";
+import { useAnalytics } from "./state/AnalyticsContext";
 import "./App.css";
 
 // First the warehouse configuration (layout) loads, then its content
@@ -33,19 +35,18 @@ const initialWarehouse = mergeWarehouse(
 
 function AppShell() {
   const { warehouse } = useEditor();
+  const { tab } = useAnalytics();
   const sceneRef = useRef<HTMLDivElement>(null);
 
+  // The scene stays mounted while the Performances tab is up, just hidden:
+  // remounting it would throw away the camera and re-frame the warehouse
+  // every time you glance at the numbers and come back.
   return (
     <div className="app">
-      <header className="app__header">
-        <h1>{warehouse.name}</h1>
-        <p>
-          {warehouse.walls.length} wall loop{warehouse.walls.length === 1 ? "" : "s"} ·{" "}
-          {warehouse.slots.length} slots
-        </p>
-      </header>
+      <AppHeader />
       <Toolbar />
-      <div className="app__scene" ref={sceneRef}>
+      <AnalyticsBoard />
+      <div className="app__scene" ref={sceneRef} hidden={tab === "performances"}>
         {/* Keyed on id so loading a different building remounts the scene
             (fresh camera framing); editing the current one does not. */}
         <WarehouseScene key={warehouse.id} />
@@ -58,7 +59,6 @@ function AppShell() {
         <PickingListPanel />
         <RunConsole />
         <LayerPanel />
-        <AnalyticsBoard />
         <UsageLegend />
       </div>
     </div>

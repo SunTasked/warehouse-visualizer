@@ -49,15 +49,18 @@ interface AnalyticsContextValue {
   snapshots: AnalyticsSnapshot[];
   saveSnapshot: (snapshot: Omit<AnalyticsSnapshot, "id" | "at">) => void;
   removeSnapshot: (id: string) => void;
-  showBoard: boolean;
-  setShowBoard: (value: boolean) => void;
+  /** Which top-level tab is showing (specs.md §5.6) — the board is a view of the app, not an overlay on the scene. */
+  tab: "overview" | "performances";
+  setTab: (value: "overview" | "performances") => void;
+  /** Drops snapshots along with everything else — entering edit mode invalidates them, since their runs were routed over a layout that is about to change. */
+  clearAll: () => void;
 }
 
 const AnalyticsContext = createContext<AnalyticsContextValue | null>(null);
 
 export function AnalyticsProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<StoredState>(load);
-  const [showBoard, setShowBoard] = useState(false);
+  const [tab, setTab] = useState<"overview" | "performances">("overview");
 
   // Settings and snapshots outlive a reload on purpose: comparing
   // configurations often means loading a different warehouse file, which
@@ -89,6 +92,11 @@ export function AnalyticsProvider({ children }: { children: ReactNode }) {
     setState((current) => ({ ...current, snapshots: current.snapshots.filter((s) => s.id !== id) }));
   }, []);
 
+  const clearAll = useCallback(() => {
+    setState((current) => ({ ...current, snapshots: [] }));
+    setTab("overview");
+  }, []);
+
   const value = useMemo<AnalyticsContextValue>(
     () => ({
       settings: state.settings,
@@ -97,10 +105,11 @@ export function AnalyticsProvider({ children }: { children: ReactNode }) {
       snapshots: state.snapshots,
       saveSnapshot,
       removeSnapshot,
-      showBoard,
-      setShowBoard,
+      tab,
+      setTab,
+      clearAll,
     }),
-    [state, setSetting, resetSettings, saveSnapshot, removeSnapshot, showBoard],
+    [state, setSetting, resetSettings, saveSnapshot, removeSnapshot, tab, clearAll],
   );
 
   return <AnalyticsContext.Provider value={value}>{children}</AnalyticsContext.Provider>;
