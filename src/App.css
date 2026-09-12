@@ -1041,3 +1041,383 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
+
+/* --- Analytics board (full-screen overlay) --- */
+
+.board {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: #f7f8fb;
+  font-size: 0.85rem;
+}
+
+.board__header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.75rem 1.25rem;
+  background: #ffffff;
+  border-bottom: 1px solid #d7dbe3;
+}
+
+.board__header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.board__subtitle {
+  color: #5a6270;
+  font-size: 0.8rem;
+  flex: 1;
+}
+
+.board__close {
+  border: none;
+  background: none;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #5a6270;
+}
+
+.board__empty {
+  padding: 3rem 1rem;
+  text-align: center;
+  color: #5a6270;
+}
+
+.board__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  overflow: hidden;
+}
+
+.board__main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.board__section {
+  background: #ffffff;
+  border: 1px solid #e2e6ee;
+  border-radius: 8px;
+  padding: 0.85rem 1rem 1rem;
+}
+
+.board__section h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+}
+
+.board__note {
+  margin: 0.4rem 0 0;
+  font-size: 0.75rem;
+  color: #5a6270;
+}
+
+.board__scores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+
+.score__value {
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: #1a2233;
+  font-variant-numeric: tabular-nums;
+}
+
+.score__label {
+  font-size: 0.72rem;
+  color: #5a6270;
+  margin-top: 0.1rem;
+}
+
+/* Settings sidebar */
+
+.board__settings {
+  width: 280px;
+  flex: none;
+  overflow-y: auto;
+  background: #ffffff;
+  border: 1px solid #e2e6ee;
+  border-radius: 8px;
+  padding: 0.85rem 1rem 1rem;
+}
+
+.board__settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.board__settings-head h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.board__reset {
+  border: none;
+  background: none;
+  color: #4d7cfe;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.settings-group {
+  margin-top: 0.85rem;
+}
+
+.settings-group__title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #9aa3b5;
+  border-bottom: 1px solid #eef1f6;
+  padding-bottom: 0.2rem;
+  margin-bottom: 0.4rem;
+}
+
+.settings-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.settings-field__label {
+  font-size: 0.78rem;
+  color: #2a3244;
+}
+
+.settings-field__input {
+  display: flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  flex: none;
+}
+
+.settings-field__input input {
+  width: 4rem;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid #c7ccd6;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  text-align: right;
+}
+
+.settings-field__unit {
+  font-size: 0.7rem;
+  color: #9aa3b5;
+  width: 2.4rem;
+}
+
+/* Charts */
+
+.chart__empty {
+  color: #9aa3b5;
+  font-size: 0.78rem;
+  padding: 1rem 0;
+}
+
+.chart__bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+
+.chart__bars--tight {
+  gap: 2px;
+}
+
+.chart__bar-col {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.chart__bar {
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  min-height: 2px;
+}
+
+.chart__bar-value {
+  font-size: 0.68rem;
+  color: #5a6270;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 0.2rem;
+}
+
+.chart__bar-label {
+  font-size: 0.68rem;
+  color: #5a6270;
+  margin-top: 0.3rem;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.chart__axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.68rem;
+  color: #9aa3b5;
+  margin-top: 0.25rem;
+}
+
+.breakdown__bar {
+  display: flex;
+  height: 22px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.breakdown__band {
+  height: 100%;
+}
+
+.breakdown__legend {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.2rem 1rem;
+}
+
+.breakdown__legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+}
+
+.breakdown__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.breakdown__name {
+  flex: 1;
+  color: #2a3244;
+}
+
+.breakdown__value {
+  color: #5a6270;
+  font-variant-numeric: tabular-nums;
+}
+
+.breakdown__pct {
+  color: #9aa3b5;
+  width: 2.4rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Comparison table */
+
+.board__snapshot-save {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.board__snapshot-save input {
+  flex: 1;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #c7ccd6;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.board__snapshot-save button {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid #c7ccd6;
+  border-radius: 4px;
+  background: #ffffff;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.board__snapshot-save button:hover {
+  background: #eef1f6;
+}
+
+.board__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.board__table th {
+  text-align: left;
+  font-weight: 600;
+  color: #5a6270;
+  font-size: 0.72rem;
+  border-bottom: 1px solid #e2e6ee;
+  padding: 0.3rem 0.5rem;
+}
+
+.board__table td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #f1f4f9;
+  font-variant-numeric: tabular-nums;
+}
+
+.board__row--current td {
+  background: #f4f7ff;
+}
+
+.board__muted {
+  color: #9aa3b5;
+  font-size: 0.72rem;
+}
+
+.board__remove {
+  border: none;
+  background: none;
+  color: #9aa3b5;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.board__remove:hover {
+  color: #b91c1c;
+}
+
+.delta {
+  font-size: 0.72rem;
+  color: #9aa3b5;
+}
+
+.delta--good {
+  color: #15803d;
+}
+
+.delta--bad {
+  color: #b91c1c;
+}

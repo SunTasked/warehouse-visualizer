@@ -19,6 +19,8 @@ import { RunConsole } from "./components/RunConsole";
 import { UsageLegend } from "./components/UsageLegend";
 import { LayerPanel } from "./components/LayerPanel";
 import { LayerProvider } from "./state/LayerContext";
+import { AnalyticsProvider } from "./state/AnalyticsContext";
+import { AnalyticsBoard } from "./components/analytics/AnalyticsBoard";
 import "./App.css";
 
 // First the warehouse configuration (layout) loads, then its content
@@ -56,6 +58,7 @@ function AppShell() {
         <PickingListPanel />
         <RunConsole />
         <LayerPanel />
+        <AnalyticsBoard />
         <UsageLegend />
       </div>
     </div>
@@ -68,7 +71,9 @@ export default function App() {
       <ViewFocusProvider>
         <SimulationProvider>
           <LayerProvider>
-            <AppShell />
+            <AnalyticsProvider>
+              <AppShell />
+            </AnalyticsProvider>
           </LayerProvider>
         </SimulationProvider>
       </ViewFocusProvider>

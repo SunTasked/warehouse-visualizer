@@ -1,5 +1,6 @@
 import { useEditor } from "../state/EditorContext";
 import { useSimulation } from "../state/SimulationContext";
+import { useAnalytics } from "../state/AnalyticsContext";
 
 export function Toolbar() {
   const {
@@ -18,6 +19,7 @@ export function Toolbar() {
     setShowHistory,
   } = useEditor();
   const { showPanel, setShowPanel } = useSimulation();
+  const { showBoard, setShowBoard } = useAnalytics();
 
   const toggleMode = () => {
     const next = mode === "view" ? "edit" : "view";
@@ -59,12 +61,21 @@ export function Toolbar() {
       )}
 
       {mode === "view" && (
-        <button
-          className={showPanel ? "toolbar__btn toolbar__btn--active" : "toolbar__btn"}
-          onClick={() => setShowPanel(!showPanel)}
-        >
-          Picking Lists
-        </button>
+        <>
+          <button
+            className={showPanel ? "toolbar__btn toolbar__btn--active" : "toolbar__btn"}
+            onClick={() => setShowPanel(!showPanel)}
+          >
+            Picking Lists
+          </button>
+          <button
+            className={showBoard ? "toolbar__btn toolbar__btn--active" : "toolbar__btn"}
+            onClick={() => setShowBoard(!showBoard)}
+            title="Time and throughput metrics for the current capture"
+          >
+            Performance
+          </button>
+        </>
       )}
 
       <div className="toolbar__spacer" />

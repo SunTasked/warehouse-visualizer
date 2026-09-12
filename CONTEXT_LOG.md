@@ -4,6 +4,29 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-12 (cont'd) — performance analytics board (§5.5, new)
+
+- New feature on top of §5.3/§5.4: normalized picking-list performance metrics, a
+  time-model settings widget, and cross-configuration comparison. Full design in
+  specs.md §5.5 and its decision log entry — not duplicated here.
+- New files: `src/lib/timeModel.ts` (9-parameter time model + `straightRunTime`'s
+  accel/decel profile), `src/lib/metrics.ts` (`scoreRun`/`scoreCapture`, headline = mean
+  time/pallet), `src/components/analytics/AnalyticsBoard.tsx` + `Charts.tsx`,
+  `src/state/AnalyticsContext.tsx` (localStorage settings + named snapshots).
+- Changed: `SimulationContext.tsx` — `CapturedRun` gained geometry-free `profiles`/
+  `handling` (new `legProfile()`/`resolveHandling()`) so scoring never touches routes/
+  live warehouse and re-scores instantly on any parameter change.
+- New "Performance" toolbar button (view mode only) opens the board.
+- Verified (per requester, not redone here): `tsc --noEmit` clean, Playwright zero
+  console errors; headline/percentile figures from a full "Play all" capture; a live
+  `baseHandling` change re-scored with no re-run; a saved snapshot compared against the
+  live capture with "=" deltas; empty state renders with settings sidebar available.
+- Noted in specs.md as a board-surfaced observation: "Quick pick" (single pick) scores
+  worst per-pallet — tour overhead + round trip amortized over one pallet.
+- specs.md updated: new §5.5, §6 checklist item added, new decision log entry. §9 not
+  changed — no new open question surfaced this session.
+- Next: unchanged — same open items as before (§9).
+
 ## 2026-09-12 — §5.4 refinement pass: routing bug fixes, layer split, run console, capture record
 
 - Refined last session's layer/heatmap work (specs.md §5.4 "Follow-up refinements" and its

@@ -13,6 +13,7 @@ import type { PickingList, PickingStop } from "../types/simulation";
 import { pickingLists as exampleLists } from "../data/pickingLists";
 import { buildPathGraph, routeBetween, type PathGraph, type RouteEdge } from "../lib/pathGraph";
 import { slotEntryPoint } from "../lib/geometry";
+import type { LegProfile, StopHandling } from "../lib/timeModel";
 import { useEditor } from "./EditorContext";
 import { useViewFocus } from "./ViewFocusContext";
 
@@ -52,13 +53,17 @@ export interface HoveredStep {
   legIndex: number | null;
 }
 
-/** One executed run kept in the capture's history — enough to re-display its route without re-running (or re-counting) it. */
+/** One executed run kept in the capture's history — enough to re-display its route without re-running (or re-counting) it, and to score it (§5.5). */
 export interface CapturedRun {
   id: string;
   list: PickingList;
   stops: PickingStop[];
   events: StopEvent[];
   legs: Leg[];
+  /** Geometry-free per-leg profile for the time model — see LegProfile. */
+  profiles: LegProfile[];
+  /** What each stop cost to work, resolved against the inventory as it stood when this run was recorded. */
+  handling: StopHandling[];
   /** Wall-clock time it was executed, for ordering and display. */
   at: number;
 }
@@ -176,6 +181,98 @@ function planEvents(stops: PickingStop[], mode: PickingList["mode"]): StopEvent[
 
 /** Capacity a storing run loads up to at a depot — matches the hard 3-pallet limit the lists are authored against (specs.md §5.3). */
 const FORKLIFT_CAPACITY = 3;
+
+/** A turn sharp enough to cost the forklift time — anything gentler is taken in stride. */
+const TURN_COS_THRESHOLD = Math.cos(Math.PI / 6); // 30°
+
+/** Reduces a leg's polyline to straight-run lengths and a turn count, the only geometry the time model needs (see LegProfile). */
+function legProfile(points: Point[]): LegProfile {
+  const segmentLengths: number[] = [];
+  const directions: Array<{ x: number; y: number }> = [];
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const dx = points[i + 1].x - points[i].x;
+    const dy = points[i + 1].y - points[i].y;
+    const length = Math.hypot(dx, dy);
+    if (length <= 1e-6) continue;
+    segmentLengths.push(length);
+    directions.push({ x: dx / length, y: dy / length });
+  }
+
+  let turns = 0;
+  for (let i = 1; i < directions.length; i++) {
+    const dot = directions[i - 1].x * directions[i].x + directions[i - 1].y * directions[i].y;
+    if (dot < TURN_COS_THRESHOLD) turns += 1;
+  }
+
+  return { segmentLengths, turns };
+}
+
+/**
+ * Works out what each stop of a run actually costs to handle, by replaying
+ * the run's picks and puts against a lightweight copy of the affected slots'
+ * pallet counts — mirroring EditorContext's own pickPalletAuto (front-most
+ * non-empty sub-slot, topmost pallet) and addPalletAuto (fewest pallets,
+ * ties toward the deepest).
+ *
+ * Resolved once at record time rather than read back from the live warehouse,
+ * because by the time anyone opens the analytics board the inventory has
+ * moved on — and a run's cost is a fact about the state it ran against.
+ */
+function resolveHandling(
+  stops: PickingStop[],
+  events: StopEvent[],
+  warehouse: Warehouse,
+): StopHandling[] {
+  const counts = new Map<string, number[]>();
+  const countsFor = (slotId: string): number[] => {
+    if (!counts.has(slotId)) {
+      const slot = warehouse.slots.find((s) => s.id === slotId);
+      counts.set(slotId, (slot?.subSlots ?? [{ pallets: [] }]).map((ss) => ss.pallets.length));
+    }
+    return counts.get(slotId)!;
+  };
+
+  let held = 0;
+
+  return events.map((event, index) => {
+    if (event.type === "pick") {
+      const tiers = countsFor(event.slotId);
+      const subSlotIndex = tiers.findIndex((count) => count > 0);
+      if (subSlotIndex === -1) return { kind: "none" };
+      const tierIndex = tiers[subSlotIndex] - 1;
+      tiers[subSlotIndex] -= 1;
+      held += 1;
+      return { kind: "pick", subSlotIndex, tierIndex };
+    }
+
+    if (event.type === "store") {
+      const tiers = countsFor(event.slotId);
+      let target = 0;
+      let fewest = Infinity;
+      tiers.forEach((count, i) => {
+        if (count <= fewest) {
+          fewest = count;
+          target = i; // later (deeper) indices win ties, as addPalletAuto does
+        }
+      });
+      const tierIndex = tiers[target];
+      tiers[target] += 1;
+      held = Math.max(0, held - 1);
+      return { kind: "store", subSlotIndex: target, tierIndex };
+    }
+
+    if (event.type === "deliver") {
+      const pallets = held;
+      held = 0;
+      return { kind: "deliver", pallets };
+    }
+
+    const pallets = loadAmountAt(stops, index);
+    held = pallets;
+    return { kind: "load", pallets };
+  });
+}
 
 /** How many pallets a `load` at `stopIndex` takes on: only as many as the run's next unbroken batch of slot stops will actually consume, capped at capacity, so the forklift is never drawn carrying more than it needs. */
 function loadAmountAt(stops: PickingStop[], stopIndex: number): number {
@@ -296,9 +393,20 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     (list: PickingList, stops: PickingStop[], legs: Leg[], events: StopEvent[]) => {
       if (!captureArmed) return;
 
+      const profiles = legs.map((leg) => legProfile(leg.points));
+      const handling = resolveHandling(stops, events, editor.warehouse);
       setCapturedRuns((current) => [
         ...current,
-        { id: `${list.id}-${Date.now()}-${current.length}`, list, stops, events, legs, at: Date.now() },
+        {
+          id: `${list.id}-${Date.now()}-${current.length}`,
+          list,
+          stops,
+          events,
+          legs,
+          profiles,
+          handling,
+          at: Date.now(),
+        },
       ]);
 
       setEdgeUsage((current) => {
@@ -321,7 +429,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
         return next;
       });
     },
-    [captureArmed],
+    [captureArmed, editor.warehouse],
   );
 
   // playNext calls itself (directly for static-mode's immediate completion

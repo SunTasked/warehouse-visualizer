@@ -1002,6 +1002,78 @@ hovering an operations row highlights it and pulses the matching rack in 3D; Nex
 step 1 → step 2 via the 0.5s fast-forward, continuously; both legend scales render with
 correct pluralisation. `tsc --noEmit -p .` clean throughout.
 
+### 5.5 Performance analytics board (decided, v1)
+
+Prompted by wanting metrics on how long a picking list takes, normalized so tours of
+different lengths/pick-counts compare fairly, a settings widget for the time-model
+parameters, and graphs/scores for comparing warehouse configurations. Design decisions
+were agreed with the user upfront.
+
+**Time model** (`src/lib/timeModel.ts`, new): nine parameters in four groups, all exposed
+in the board's settings widget via an exported `TIME_MODEL_FIELDS` descriptor list
+(label/unit/group/step/hint), with `DEFAULT_TIME_MODEL` defaults:
+- Travel: `speed` 2 m/s, `acceleration` 0.8 m/s², `turnPenalty` 2s per direction change.
+- Pick/put: `baseHandling` 15s, `perTier` 3s per tier above floor, `perDepth` 8s per
+  sub-slot of depth beyond the front.
+- Depot: `unloadPerPallet` 10s, `loadPerPallet` 8s.
+- Tour: `tourOverhead` 20s, charged once per list.
+
+The tier and depth components are the point of the exercise: they're what make two
+layouts with identical travel distances score differently, using pallet-tier and
+slot-depth data the model already has. Travel uses a real trapezoidal/triangular
+acceleration profile per *straight run* (`straightRunTime`): below twice the ramp
+distance the vehicle never reaches top speed, which is the regime most warehouse legs
+live in — a flat distance/speed model flatters short-hop layouts.
+
+**Geometry-free recorded runs**: `CapturedRun` (SimulationContext) gained `profiles:
+LegProfile[]` (`{segmentLengths, turns}` per leg, from a new `legProfile()` that also
+counts turns sharper than 30°) and `handling: StopHandling[]`. Scoring depends only on
+these, never on routes/coordinates/live warehouse — so changing any parameter re-scores
+an entire capture instantly with nothing re-run, and snapshots stay small enough to
+persist.
+
+**Resolved handling at record time** (`resolveHandling` in SimulationContext): replays a
+run's picks/puts against a lightweight copy of the affected slots' pallet counts,
+mirroring EditorContext's own `pickPalletAuto` (front-most non-empty sub-slot, topmost
+pallet) and `addPalletAuto` (fewest pallets, ties toward deepest), to resolve each stop
+to its sub-slot/tier (or pallet count for deliver/load). Done at record time deliberately
+— by the time anyone opens the board the inventory has moved on, and a run's cost is a
+fact about the state it ran against.
+
+**Metrics** (`src/lib/metrics.ts`, new): `scoreRun`/`scoreCapture` produce per-run and
+whole-capture figures. Headline is **mean time per pallet** (total capture time /
+pallets handled — normalizes away tour length and pick count, the user's core
+requirement). Alongside: mean/median/p90 **time to slot** (the arriving leg plus that
+slot's own handling — the user's own suggested metric), travel share, pallets/hour,
+total distance, and a `Breakdown` splitting all time into travel / turns / handling /
+tier / depth / unload / load / overhead. Picks and puts both count as pallets handled (a
+storing tour is as real a use of the warehouse as a picking one).
+
+**Board UI** (`src/components/analytics/AnalyticsBoard.tsx` + `Charts.tsx`, new):
+full-screen overlay opened from a new "Performance" toolbar button (view mode only).
+Scores row, breakdown bar, time-to-slot histogram, per-run bar chart (time per pallet,
+amber = storing), comparison table, and an always-visible settings sidebar (shown even
+with no data, so the model can be configured before recording). Charts are hand-rolled
+divs/SVG — three small chart shapes don't justify a dependency.
+
+**Comparison via snapshots** (`src/state/AnalyticsContext.tsx`, new): settings and named
+snapshots persist to `localStorage` (comparing configurations often means loading a
+different warehouse file, which remounts everything else). A snapshot stores the
+*scorable runs*, not the metrics — so snapshots are re-scored under the current settings
+alongside the live capture, otherwise a comparison would mix two time models and the
+deltas would be meaningless. Table shows per-row deltas colored good/bad.
+
+Verified (per requester, not redone here): `tsc --noEmit` clean; Playwright zero console
+errors. After Play all with capture armed: mean 1m43s/pallet, median 1m03s to slot, p90
+1m31s, 61% travel share, 34.8 pallets/hour, 680m. Doubling `baseHandling` 15→30 moved the
+headline 1m43s→1m58s live with no re-run. Snapshot save produced a second comparison row
+with "=" deltas against an identical capture. Empty state renders with the settings
+sidebar available.
+
+Worth noting as an observation the board immediately surfaced: the single-pick "Quick
+pick" tour is the *worst* per-pallet (2m39s), because tour overhead and the round trip
+amortize over just one pallet.
+
 ## 6. Core Features / Visualizations
 
 - [x] **3D warehouse view (physical layer only)** — walls + slots render in 3D (§5.1);
@@ -1019,6 +1091,10 @@ correct pluralisation. `tsc --noEmit -p .` clean throughout.
       click to smoothly zoom in (dimming the rest) through Slot → sub-slot → pallet;
       click away or Escape to back out (§5.1 "View mode: hover card + click-to-zoom
       drill-down").
+- [x] **Performance analytics board** — a normalized time model (travel/pick/depot/tour,
+      with per-tier and per-depth handling costs) scores recorded picking-list runs;
+      mean-time-per-pallet headline, time-to-slot percentiles, breakdown, and per-run
+      charts, with a settings widget and named snapshot comparison (§5.5).
 - [ ] **Simulation run** — given a warehouse model + scenario config, run the simulation and
       produce a trace.
 - [ ] **Path playback** — animate operator movement over simulated time (play/pause/scrub),
@@ -1134,6 +1210,25 @@ correct pluralisation. `tsc --noEmit -p .` clean throughout.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-12 — Added a performance analytics board (§5.5), on top of §5.3/§5.4's picking-
+  list simulation and capture record. New `src/lib/timeModel.ts` (9 parameters across
+  travel/pick-put/depot/tour groups, a real trapezoidal/triangular acceleration profile
+  per straight run rather than flat distance/speed) and `src/lib/metrics.ts`
+  (`scoreRun`/`scoreCapture`: mean time per pallet as the headline, plus time-to-slot
+  percentiles, travel share, pallets/hour, and a full time breakdown). Key call:
+  `CapturedRun` gained geometry-free `profiles`/`handling` fields so scoring never
+  touches routes/coordinates/live warehouse — a parameter change re-scores an entire
+  capture instantly with nothing re-run, and captures stay small enough to persist as
+  named snapshots (`src/state/AnalyticsContext.tsx`, localStorage) for cross-configuration
+  comparison. Handling is resolved once, at record time (`resolveHandling`, mirroring
+  `pickPalletAuto`/`addPalletAuto`), since a run's cost is a fact about the inventory
+  state it ran against, not whatever the warehouse looks like when the board is opened
+  later. New `src/components/analytics/AnalyticsBoard.tsx` + `Charts.tsx` (hand-rolled,
+  no chart library), opened via a new "Performance" toolbar button, view mode only.
+  Verified (per requester, not redone here): `tsc --noEmit` clean, Playwright zero
+  console errors, headline/percentile figures reproduced, a live parameter change
+  (`baseHandling` 15→30) re-scored without re-running, and a saved snapshot compared
+  correctly against the live capture with "=" deltas.
 - 2026-09-12 — Refinement pass on §5.4's layer system/heatmaps (see "Follow-up
   refinements" there for full detail; not duplicated here). Bug fixes: two real
   `pathGraph.ts` routing/tally bugs found via the heatmap under-reporting a used corridor
