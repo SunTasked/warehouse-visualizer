@@ -1088,6 +1088,61 @@ Verified (per requester, not redone here): `tsc --noEmit` clean; Playwright zero
 errors; console drags by exactly the intended delta with no jump; a button inside the bar
 still actuates without moving the panel; double-click restores the original position.
 
+#### Console relayout: corner docks, three-line bar, order list
+
+**No document scrollbars.** `html, body, #root` now carry `height: 100%; margin: 0;
+overflow: hidden`, and `.app` sizes at `100%` rather than `100vw/100vh`. The body's default
+8px margin plus viewport-unit sizing had pushed the shell 16px past the viewport in both
+axes, producing two permanent scrollbars over a layout that is meant to be fixed. Every
+scrollable region inside the app scrolls on its own.
+
+**Corner docks.** Panels that share a screen corner are no longer each positioned
+absolutely; they stack in one `.app__dock` column (`--tl`: breadcrumb then run console;
+`--br`: heatmap legend then layer panel) so neither has to know the other's height — the
+breadcrumb grows with the drill-down depth, and the legend appears only when a heatmap
+layer is on. The dock is `pointer-events: none` with its panels re-enabling them, so the
+column's empty space doesn't eat clicks meant for the scene. The run console's default
+resting place moved from top-center to top-left under the breadcrumb, and the layer panel
+from bottom-left to the bottom-right corner beneath the legend. `useDraggable` therefore
+also sets `position: absolute` once dragged — until then the panel sits in its dock's
+normal flow, where `left`/`top` would be ignored.
+
+**Three-line bar.** The bar is now three fixed lines whether the console is collapsed or
+not: capture + what it has measured, the six transport buttons, then the animate toggle,
+speed and current status. Collapsing hides only the order list, so no control ever moves.
+
+**Order list replaces the Operations/Record tabs.** The console's lower half is one flat
+list of the *orders* of the batch you last launched (`sessionRuns.slice(orderListStart)`
+plus anything still queued), each collapsed to a single row that expands into its
+operations. Expanding an order that isn't the one on screen also re-displays its route —
+unless a run is actually playing, in which case it only expands, because `showSessionRun`
+drops the queue and looking at the list must never cancel the batch it describes. Rows are
+a fixed 26px and the container caps at ten of them before scrolling; ArrowUp/ArrowDown walk
+the flattened rows (orders and expanded steps alike) by moving DOM focus, which scrolls
+them into view for free.
+
+`orderListStart` (SimulationContext) is what makes the list a *batch* rather than a
+session: starting a run or pressing Stop resets it to "from here on" — **but only while
+capture is disarmed**. With capture armed the list is the record of what has been measured,
+so it accumulates across batches and survives Stop. Stop still clears the scene of every
+route either way, which is the distinction the user drew: stopping ends what is *displayed*,
+not what has been *recorded*.
+
+**Picking list panel** (§5.3): "Play all" and "Stop" are gone — "all" is now a select-all
+checkbox above the rows (indeterminate when partial), and stopping belongs with the rest of
+the transport on the console. "Play selected" became "Run selected (n)".
+
+Verified: `tsc --noEmit` clean; Playwright zero console errors; no document scroll in
+either axis (`scrollWidth === clientWidth`, `scrollHeight === clientHeight`); console
+left-aligned directly under the breadcrumb; layer panel 16px from the bottom-right corner
+with the legend stacked above it, right edges flush; three bar lines with metadata and
+animate visible while collapsed; select-all ticks 5/5 and the button reads "Run selected
+(5)"; a 5-list batch lists 5 orders, all collapsed, expanding one yields its 9 steps;
+scroll box 260px over 364px of rows (exactly 10 visible); two ArrowDowns move from the
+first order into its steps and ArrowUp returns; Stop clears the list with capture off,
+keeps all 5 with capture armed and a second armed batch accumulates to 10; drag and
+double-click-reset still exact.
+
 ### 5.5 Performance analytics board (decided, v1)
 
 Prompted by wanting metrics on how long a picking list takes, normalized so tours of
@@ -1376,6 +1431,25 @@ on an outside click; Edit from the menu brings up the edit toolbar.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-12 — Console relayout and panel docking (§5.4, amended; §5.3's picking panel
+  trimmed). Killed the app's two permanent document scrollbars (`100vw/100vh` over a body
+  with its default 8px margin — now `height: 100%` on `html, body, #root` with
+  `overflow: hidden`). Panels sharing a corner now stack in one `.app__dock` column instead
+  of each anchoring itself: the run console's resting place moved to top-left under the
+  breadcrumb, and the layer panel to the bottom-right corner under the heatmap legend
+  (user's choice among three ways to share that corner). The console's bar became three
+  fixed lines (capture + metadata / transport / animate + settings + status) shown whether
+  collapsed or not, and its Operations/Record tabs were replaced by a single order list:
+  the orders of the last launched batch, each collapsed to one row that expands into its
+  operations, ten rows visible then scroll, ArrowUp/Down navigable. New `orderListStart`
+  state scopes that list to a batch — reset by a new run or by Stop, **except while capture
+  is armed**, when it accumulates as the capture's record and survives Stop; per the user's
+  explicit refinement, Stop always clears the *scene* of routes either way. Picking panel
+  lost "Play all" and "Stop" (now a select-all checkbox and the console's own transport)
+  and "Play selected" became "Run selected (n)". Verified via `tsc --noEmit` (clean) and
+  Playwright (zero console errors; no scroll in either axis; dock geometry, 3-line bar,
+  order-list batch/capture semantics, 10-row cap, arrow-key navigation and the existing
+  drag/reset all asserted).
 - 2026-09-12 — Two small UI amendments on top of the same day's broader restructure below:
   the run console (§5.4) is now draggable by its transport bar (double-click to reset),
   via a new `src/lib/useDraggable.ts`; and Load/Save/Edit moved out of the toolbar into an

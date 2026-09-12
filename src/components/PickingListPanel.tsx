@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useEditor } from "../state/EditorContext";
 import { useSimulation } from "../state/SimulationContext";
 
@@ -14,6 +14,16 @@ export function PickingListPanel() {
   const simulation = useSimulation();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [collapsed, setCollapsed] = useState(false);
+  const selectAllRef = useRef<HTMLInputElement>(null);
+
+  const all = simulation.pickingLists;
+  const allSelected = all.length > 0 && selected.size === all.length;
+  const someSelected = selected.size > 0 && !allSelected;
+
+  // "Some selected" has no HTML attribute — it only exists as a DOM property.
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected;
+  }, [someSelected]);
 
   if (mode !== "view") return null;
 
@@ -26,9 +36,11 @@ export function PickingListPanel() {
     });
   };
 
-  const selectedLists = simulation.pickingLists.filter((list) => selected.has(list.id));
-  const run = simulation.activeRun;
-  const isPlaying = run !== null && run.mode === "animated" && run.currentLegIndex < run.legs.length;
+  const toggleAll = () => {
+    setSelected(allSelected ? new Set() : new Set(all.map((list) => list.id)));
+  };
+
+  const selectedLists = all.filter((list) => selected.has(list.id));
 
   return (
     <div className="picking-panel">
@@ -39,8 +51,13 @@ export function PickingListPanel() {
 
       {!collapsed && (
         <>
+      <label className="picking-panel__select-all">
+        <input ref={selectAllRef} type="checkbox" checked={allSelected} onChange={toggleAll} />
+        <span>Select all</span>
+      </label>
+
       <ul className="picking-panel__list">
-        {simulation.pickingLists.map((list) => (
+        {all.map((list) => (
           <li key={list.id} className="picking-panel__row">
             <input
               type="checkbox"
@@ -71,18 +88,16 @@ export function PickingListPanel() {
       </ul>
 
       <div className="picking-panel__actions">
+        {/* Running is the only launch action now: "all" is just the select-all
+            checkbox, and stopping belongs with the rest of the transport on
+            the run console. */}
         <button
           className="picking-panel__btn"
           disabled={selectedLists.length === 0}
           onClick={() => simulation.playQueue(selectedLists)}
+          title="Run the ticked lists back to back"
         >
-          Play selected ({selectedLists.length})
-        </button>
-        <button className="picking-panel__btn" onClick={() => simulation.playQueue(simulation.pickingLists)}>
-          Play all
-        </button>
-        <button className="picking-panel__btn picking-panel__btn--stop" disabled={!isPlaying} onClick={simulation.stop}>
-          Stop
+          Run selected ({selectedLists.length})
         </button>
         <button
           className="picking-panel__btn picking-panel__btn--reset"

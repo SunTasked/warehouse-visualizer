@@ -1,9 +1,51 @@
+/* The app owns the whole viewport and never scrolls as a document: every
+   scrollable region inside it (panels, boards) scrolls on its own. Without
+   this the body's default 8px margin plus 100vw/100vh pushed the shell past
+   the viewport in both axes and produced two permanent scrollbars. */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
 .app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  width: 100vw;
+  height: 100%;
+  width: 100%;
   font-family: system-ui, sans-serif;
+}
+
+/* --- Corner docks --- */
+
+/* Floating panels that share a corner stack in one column instead of each
+   anchoring itself, so neither has to know the other's height. The dock
+   itself is click-through; only its panels take pointer events. */
+.app__dock {
+  position: absolute;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: flex-start;
+  pointer-events: none;
+}
+
+.app__dock > * {
+  pointer-events: auto;
+}
+
+.app__dock--tl {
+  top: 1rem;
+  left: 1rem;
+}
+
+.app__dock--br {
+  bottom: 1rem;
+  right: 1rem;
+  align-items: flex-end;
 }
 
 .app__header {
@@ -342,11 +384,8 @@
   font-style: italic;
 }
 
+/* Positioned by its dock (.app__dock--tl), with the run console below it. */
 .focus-breadcrumb {
-  position: absolute;
-  top: 1rem;
-  left: 1rem;
-  z-index: 15;
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
@@ -542,6 +581,19 @@
   flex-wrap: wrap;
 }
 
+/* Sits directly above the rows with its checkbox on the same column as
+   theirs, so it reads as the head of that column rather than a control of
+   its own. */
+.picking-panel__select-all {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.4rem;
+  font-size: 0.72rem;
+  color: #5a6270;
+  cursor: pointer;
+}
+
 .picking-panel__btn {
   flex: 1;
   border: 1px solid #d7dbe3;
@@ -599,10 +651,8 @@
   color: #92400e;
 }
 
+/* Positioned by its dock (.app__dock--br), above the layer panel. */
 .usage-legend {
-  position: absolute;
-  bottom: 1rem;
-  right: 1rem;
   width: 220px;
   display: flex;
   flex-direction: column;
@@ -639,12 +689,9 @@
   color: #5a6270;
 }
 
-/* --- Layer panel (bottom-left) --- */
+/* --- Layer panel (bottom-right corner, under the heatmap legend) --- */
 
 .layer-panel {
-  position: absolute;
-  bottom: 1rem;
-  left: 1rem;
   width: 210px;
   background: #ffffff;
   border: 1px solid #d7dbe3;
@@ -723,19 +770,11 @@
   background: transparent;
 }
 
-/* --- Run console (top-center) --- */
+/* --- Run console (docked top-left, under the breadcrumb) --- */
 
 .run-console {
-  position: absolute;
-  top: 1rem;
-  left: 50%;
-  /* Centred with a margin rather than a transform: a transformed ancestor
-     becomes the containing block for position:fixed descendants, which would
-     trap the step tooltip inside this panel's own clipped box. */
-  margin-left: -230px;
-  width: 460px;
-  max-width: calc(100% - 26rem);
-  max-height: calc(100% - 2rem);
+  width: 380px;
+  max-height: calc(100vh - 10rem);
   display: flex;
   flex-direction: column;
   background: #ffffff;
@@ -746,71 +785,65 @@
   overflow: hidden;
 }
 
+/* Three fixed lines, collapsed or not: capture + metadata, transport,
+   playback options. Each is always in the same place, so the buttons stay
+   where the hand expects them whatever the console is showing. */
 .run-console__bar {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.6rem;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.45rem 0.6rem;
   background: #f7f8fb;
   border-bottom: 1px solid #eef1f6;
-  flex-wrap: wrap;
+}
+
+.run-console__line {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 
 .run-console__measured {
   font-size: 0.7rem;
   color: #5a6270;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .run-console__transport {
   display: flex;
   gap: 0.25rem;
-  margin-left: auto;
+  width: 100%;
 }
 
 .run-console__transport .picking-panel__transport-btn {
-  flex: none;
+  flex: 1;
   min-width: 2rem;
 }
 
 .run-console__status {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
+  text-align: right;
   font-size: 0.72rem;
   color: #5a6270;
-  border-top: 1px solid #eef1f6;
-  padding-top: 0.35rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .run-console__status strong {
   color: #1f2937;
 }
 
-.run-console__tabs {
-  display: flex;
-  gap: 0.25rem;
-  padding: 0.4rem 0.6rem 0;
-  border-bottom: 1px solid #eef1f6;
-}
-
-.run-console__tab {
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 0.75rem;
-  color: #5a6270;
-  cursor: pointer;
-  padding: 0.3rem 0.5rem;
-  border-bottom: 2px solid transparent;
-}
-
-.run-console__tab--active {
-  color: #1f2937;
-  font-weight: 600;
-  border-bottom-color: #4d7cfe;
-}
-
 .run-console__body {
-  padding: 0.5rem 0.6rem 0.6rem;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0.4rem 0.6rem 0.5rem;
 }
 
 .run-console__empty {
@@ -819,68 +852,161 @@
   padding: 0.4rem 0.2rem;
 }
 
-/* --- Capture record --- */
+/* --- Order list (the console's lower half) --- */
 
-.record__head {
+.orders__head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 0.4rem;
   font-size: 0.72rem;
   color: #5a6270;
-  margin-bottom: 0.3rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid #eef1f6;
+  margin-bottom: 0.2rem;
 }
 
-.record__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+.orders__head-title {
+  flex: 1;
+  font-weight: 600;
+  color: #1f2937;
 }
 
-.record__row {
+.orders__capturing {
+  color: #b91c1c;
+}
+
+/* Ten rows tall, then scroll — rows are a fixed height so "ten" is a
+   promise the layout can actually keep whatever the labels contain. */
+.orders__scroll {
+  --order-row: 26px;
+  max-height: calc(var(--order-row) * 10);
+  overflow-y: auto;
+  outline: none;
+}
+
+.orders__row,
+.orders__step {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.4rem;
   width: 100%;
+  height: var(--order-row, 26px);
   border: none;
   background: none;
   font: inherit;
   font-size: 0.75rem;
   text-align: left;
-  padding: 0.25rem 0.35rem;
+  padding: 0 0.35rem;
   border-radius: 5px;
   border-left: 3px solid transparent;
   cursor: pointer;
   color: #374151;
 }
 
-.record__row:hover {
+.orders__row:hover,
+.orders__step:hover {
   background: #f2f5fa;
 }
 
-.record__row--active {
+.orders__row:focus-visible,
+.orders__step:focus-visible {
+  outline: 2px solid #4d7cfe;
+  outline-offset: -2px;
+}
+
+.orders__row--active {
   background: #eef4ff;
   border-left-color: #4d7cfe;
   font-weight: 600;
 }
 
-.record__index {
+.orders__row--queued {
+  color: #9aa3b5;
+}
+
+.orders__caret {
+  width: 0.8rem;
+  flex: none;
+  color: #9aa3b5;
+  font-size: 0.6rem;
+}
+
+.orders__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orders__state {
+  color: #9aa3b5;
+  font-size: 0.7rem;
+  flex: none;
+}
+
+.orders__state--running {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.orders__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #dc2626;
+  flex: none;
+}
+
+.orders__empty {
+  color: #9aa3b5;
+  font-size: 0.75rem;
+  padding: 0.4rem 0.2rem;
+}
+
+/* Steps are indented under their order rather than boxed, so the whole
+   thing stays one flat scrollable column for arrow-key navigation. */
+.orders__step {
+  padding-left: 1.5rem;
+}
+
+.orders__step--done {
+  color: #9aa3b5;
+}
+
+.orders__step--current {
+  background: #eef4ff;
+  border-left-color: #4d7cfe;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.orders__step--queued {
+  color: #9aa3b5;
+}
+
+.orders__step-index {
   width: 1.2rem;
   color: #9aa3b5;
   font-variant-numeric: tabular-nums;
   flex: none;
 }
 
-.record__name {
+.orders__step-verb {
   flex: 1;
 }
 
-.record__time {
-  color: #9aa3b5;
+.orders__step-target {
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
-  font-size: 0.7rem;
+}
+
+.orders__step-item {
+  position: relative;
+}
+
+.orders__step-item:hover .step-tip {
+  display: block;
 }
 
 /* --- Capture controls --- */
@@ -943,106 +1069,6 @@
   color: #a7aebb;
   cursor: default;
   text-decoration: none;
-}
-
-/* --- Operations list --- */
-
-.ops {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  border-top: 1px solid #eef1f6;
-  padding-top: 0.6rem;
-}
-
-.ops__header {
-  font-weight: 600;
-  color: #1f2937;
-  font-size: 0.8rem;
-}
-
-.ops__list--queued {
-  opacity: 0.7;
-}
-
-.ops__list-head {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  margin-bottom: 0.25rem;
-}
-
-.ops__list-name {
-  font-weight: 600;
-  font-size: 0.78rem;
-  color: #1f2937;
-}
-
-.ops__list-state {
-  margin-left: auto;
-  font-size: 0.7rem;
-  color: #5a6270;
-}
-
-.ops__steps {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.ops__step {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  width: 100%;
-  border: none;
-  background: none;
-  font: inherit;
-  font-size: 0.75rem;
-  text-align: left;
-  padding: 0.22rem 0.35rem;
-  border-radius: 5px;
-  border-left: 3px solid transparent;
-  cursor: pointer;
-  color: #374151;
-}
-
-.ops__step:hover {
-  background: #fef9c3;
-}
-
-.ops__step--done {
-  color: #9aa3b5;
-}
-
-.ops__step--current {
-  background: #eef4ff;
-  border-left-color: #4d7cfe;
-  font-weight: 600;
-  color: #1f2937;
-}
-
-.ops__step--queued {
-  cursor: default;
-}
-
-.ops__step-index {
-  width: 1.2rem;
-  color: #9aa3b5;
-  font-variant-numeric: tabular-nums;
-  flex: none;
-}
-
-.ops__step-verb {
-  flex: 1;
-}
-
-.ops__step-target {
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
 }
 
 /* --- Analytics board (full-screen overlay) --- */
@@ -1561,10 +1587,6 @@
 
 /* --- Step metrics tooltip --- */
 
-.ops__step-item {
-  position: relative;
-}
-
 .step-tip {
   display: none;
   position: fixed;
@@ -1577,10 +1599,6 @@
   font-size: 0.72rem;
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.3);
   pointer-events: none;
-}
-
-.ops__step-item:hover .step-tip {
-  display: block;
 }
 
 .step-tip__row {

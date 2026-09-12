@@ -55,11 +55,17 @@ function AppShell() {
         <SelectionOverlay containerRef={sceneRef} />
         <HoverCard />
         <FacilityTooltip />
-        <FocusBreadcrumb />
         <PickingListPanel />
-        <RunConsole />
-        <LayerPanel />
-        <UsageLegend />
+        {/* Corner docks: panels that share a corner stack in one column so
+            neither has to be positioned around the other's height. */}
+        <div className="app__dock app__dock--tl">
+          <FocusBreadcrumb />
+          <RunConsole />
+        </div>
+        <div className="app__dock app__dock--br">
+          <UsageLegend />
+          <LayerPanel />
+        </div>
       </div>
     </div>
   );

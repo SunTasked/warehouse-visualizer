@@ -121,6 +121,13 @@ interface SimulationContextValue {
   setCaptureArmed: (value: boolean) => void;
   /** Every run played this session in play order, whether or not capture was armed — what the run-navigation buttons walk. */
   sessionRuns: CapturedRun[];
+  /**
+   * First index into `sessionRuns` the console's order list shows (§5.4).
+   * Starting a new batch or stopping resets it to "from here on", so the list
+   * is just what you last launched — *unless* capture is armed, in which case
+   * it stays put and the list accumulates as the record of the capture.
+   */
+  orderListStart: number;
   /** The subset of sessionRuns that fed the heatmaps — the record of what produced the current capture. */
   capturedRuns: CapturedRun[];
   /** Re-displays a run already played this session, read-only: its route is drawn, but nothing is re-applied or re-counted. */
@@ -362,6 +369,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   const [slotUsage, setSlotUsage] = useState<Record<string, number>>({});
   const [captureArmed, setCaptureArmed] = useState(false);
   const [sessionRuns, setSessionRuns] = useState<CapturedRun[]>([]);
+  const [orderListStart, setOrderListStart] = useState(0);
   const [reviewedRunId, setReviewedRunId] = useState<string | null>(null);
   const [queuedLists, setQueuedLists] = useState<PickingList[]>([]);
   const [hoveredStep, setHoveredStep] = useState<HoveredStep | null>(null);
@@ -518,29 +526,47 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
 
   playNextRef.current = playNext;
 
+  /**
+   * Marks where the console's order list starts. A fresh batch (or a stop)
+   * normally replaces whatever was listed — but while capture is armed the
+   * list *is* the capture's record, so it keeps everything and simply grows.
+   */
+  const beginOrderList = useCallback(() => {
+    if (!captureArmed) setOrderListStart(sessionCountRef.current);
+  }, [captureArmed]);
+
   const playList = useCallback(
     (list: PickingList) => {
+      beginOrderList();
       queueRef.current = [list];
       playNext();
     },
-    [playNext],
+    [beginOrderList, playNext],
   );
 
   const playQueue = useCallback(
     (lists: PickingList[]) => {
+      beginOrderList();
       queueRef.current = [...lists];
       playNext();
     },
-    [playNext],
+    [beginOrderList, playNext],
   );
 
+  /**
+   * Clears the scene of any route — the active run, the queue behind it and
+   * whatever was being reviewed. The order list follows the same armed/not
+   * rule as starting a batch: stopping mid-capture must not throw away the
+   * record of what has been measured so far.
+   */
   const stop = useCallback(() => {
     queueRef.current = [];
     fastForwardSpeedRef.current = null;
     setActiveRun(null);
     setQueuedLists([]);
     setReviewedRunId(null);
-  }, []);
+    beginOrderList();
+  }, [beginOrderList]);
 
   const togglePause = useCallback(() => {
     setActiveRun((run) => (run ? { ...run, isPaused: !run.isPaused } : run));
@@ -616,6 +642,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     setSlotUsage({});
     setSessionRuns([]);
     sessionCountRef.current = 0;
+    setOrderListStart(0);
     setReviewedRunId(null);
   }, []);
 
@@ -626,6 +653,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     progressRef.current = 0;
     setSessionRuns([]);
     sessionCountRef.current = 0;
+    setOrderListStart(0);
     setEdgeUsage({});
     setSlotUsage({});
     setQueuedLists([]);
@@ -763,6 +791,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       captureArmed,
       setCaptureArmed,
       sessionRuns,
+      orderListStart,
       capturedRuns,
       showSessionRun,
       nextRun,
@@ -795,6 +824,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       slotUsage,
       captureArmed,
       sessionRuns,
+      orderListStart,
       capturedRuns,
       showSessionRun,
       nextRun,

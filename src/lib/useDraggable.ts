@@ -110,7 +110,12 @@ export function useDraggable(ref: React.RefObject<HTMLElement>) {
 
   const reset = useCallback(() => setPosition(null), []);
 
-  const style = position ? { left: position.left, top: position.top, right: "auto", margin: 0 } : undefined;
+  // `position: absolute` only once dragged: until then the panel sits in its
+  // dock's normal flow (stacked under whatever shares that corner), and
+  // left/top would be ignored anyway.
+  const style: React.CSSProperties | undefined = position
+    ? { position: "absolute", left: position.left, top: position.top, right: "auto", bottom: "auto", margin: 0 }
+    : undefined;
 
   return { onPointerDown, style, dragging, reset };
 }

@@ -4,6 +4,36 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-12 (cont'd) — console relayout: corner docks, 3-line bar, order list, no scrollbars
+
+- Full design in specs.md's amended §5.4 ("Console relayout: corner docks, three-line bar,
+  order list") plus one new decision log entry — not duplicated here.
+- Removed the app's two permanent document scrollbars: `html, body, #root` get
+  `height: 100%; margin: 0; overflow: hidden`, `.app` sizes at `100%` instead of
+  `100vw/100vh`.
+- New `.app__dock` corner columns in `App.tsx`/`App.css`: breadcrumb + run console top-left,
+  heatmap legend + layer panel bottom-right (layer panel moved from bottom-left). Panels
+  dropped their own `position: absolute`; `useDraggable` now supplies `position: absolute`
+  itself once a drag starts.
+- `RunConsole.tsx` rewritten: bar is three fixed lines (capture + metadata / transport /
+  animate + speed + status) shown collapsed or not; Operations/Record tabs replaced by one
+  order list — orders of the last batch, collapsed rows expanding into their steps, 10 rows
+  then scroll, ArrowUp/Down moving DOM focus through the flattened rows.
+- `SimulationContext.tsx`: new `orderListStart` + `beginOrderList()`. A new run or Stop
+  resets the list, *except* while capture is armed (then it accumulates and survives Stop);
+  Stop still clears the scene's routes regardless — the user's explicit refinement of the
+  question asked.
+- `PickingListPanel.tsx`: "Play all"/"Stop" removed, select-all checkbox added
+  (indeterminate when partial), "Play selected" → "Run selected (n)".
+- Verified: `tsc --noEmit` clean; Playwright zero console errors; no document scroll in
+  either axis; dock geometry exact (console flush under breadcrumb, layers 16px from the
+  bottom-right corner with the legend above, right edges flush); 3 bar lines; select-all
+  5/5; 5-order batch all collapsed, one expands to 9 steps; 260px box over 364px of rows
+  (10 visible); arrow keys walk into and out of steps; Stop clears with capture off, keeps
+  5 with capture armed, second armed batch accumulates to 10; drag + double-click reset
+  still exact.
+- Next: unchanged — same open items as before (§9).
+
 ## 2026-09-12 (cont'd) — draggable run console, Load/Save/Edit moved into Overview menu
 
 - Small session on top of the same day's broader restructure. Full design in specs.md's
