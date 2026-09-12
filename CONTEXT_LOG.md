@@ -4,6 +4,37 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-13 (cont'd) — import real plant layouts from the CML Excel floor plan
+
+- Full design in specs.md's new §5.7 ("Importing a real plant from the CML workbook") plus
+  one decision log entry — the format reverse-engineering is documented there, not here.
+- New `scripts/import_plan_xlsx.py` (needs `openpyxl`, installed this session). Converts one
+  building of `data/CML_warehouse.xlsx` sheet `PLAN_Sortie` into a warehouse config +
+  (empty) content file. Regenerated `schema/warehouse.batiment-13a.json` from the source,
+  replacing the earlier hand-approximated version, and added
+  `schema/warehouse.content.batiment-13a.json`.
+- The key discovery: the workbook is self-describing. Each box holds `=VLOOKUP(<its own
+  label cell>, Analyse!…)` when it is the aisle-facing position, or `=<another box>` when it
+  is a deeper position of the same location — so codes, depth and facing are read directly.
+  Location codes live *inside* the aisles (odd names one side, even the other).
+- `data/` and `__pycache__/` added to `.gitignore`: the workbook carries real picking history
+  including operator initials (Feuil2/Feuil3, 101k rows). Only the imported layout is
+  committed — codes and geometry only.
+- Four bugs found and fixed while deriving the corridors, all caught by a geometry checker
+  rather than by eye: the vertical trunk was picked as the widest empty column band, which
+  is the clear floor along the west wall, so every aisle got dragged through the K/L/N
+  blocks; aisles were extended to far corridors without checking the cells in between; the
+  dock corridor landed on the last rack row because the axis was clipped to racked rows
+  instead of the building's interior; and aisle lines that also carry racking elsewhere were
+  shrunk below one position deep, producing 41 three-centimetre rack overlaps.
+- Verified: 453 locations / 910 positions / 2,730 pallet places, 97.9 × 55.0 m, 12 corridors;
+  zero unresolved boxes; corridor graph fully connected under the app's exact-coincident-point
+  rule; zero footprint overlaps, zero slots outside the envelope, zero corridors through a
+  slot; renders in the app with zero console errors (checked by temporarily pointing App.tsx
+  at the file, then reverting).
+- Next: `src/data/pickingLists.ts` still names the example warehouse's slots, so an imported
+  plant has no runnable lists — offered to the requester, not yet done.
+
 ## 2026-09-13 — animate as a checkbox, off by default, de-animating the queue
 
 - Small follow-up to the previous session's console relayout. Design in specs.md §5.4

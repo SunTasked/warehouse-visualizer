@@ -1307,6 +1307,83 @@ Verified (per requester, not redone here): `tsc --noEmit` clean; Playwright zero
 errors; Toolbar absent in view mode; menu opens with the three expected items and closes
 on an outside click; Edit from the menu brings up the edit toolbar.
 
+### 5.7 Importing a real plant from the CML workbook (decided, v1)
+
+The plant's real layout exists only as an Excel floor plan (`data/CML_warehouse.xlsx`,
+sheet `PLAN_Sortie`, one block per building down column A: 13A, 12B, 08C, 07D, 06F, 10H,
+14J, 15K, 16G). `scripts/import_plan_xlsx.py` converts one building into a config file —
+a script rather than a one-off hand-built JSON, so a re-export can simply be re-imported:
+
+```
+python scripts/import_plan_xlsx.py --building "BATIMENT 13A"
+```
+
+**The workbook itself is deliberately not committed** (`.gitignore`): it carries real
+picking history, including operator initials, in its `Feuil2`/`Feuil3` sheets. Only the
+imported layouts under `schema/` are — those hold nothing but location codes and geometry.
+
+#### How the spreadsheet encodes a warehouse
+
+The plan is drawn with cells, but it is *self-describing* — no geometric guesswork is
+needed, which is what makes the import trustworthy rather than approximate:
+
+- **Location codes are written inside the aisles, not on the racks.** For aisle A, the
+  `AA01, AA03, …` line names the rack above it and the `AA02, AA04, …` line the rack
+  below. So odd codes always face south and even codes north — verified across every
+  two-sided aisle in 13A, no exceptions. The single letter drawn beside each line (A, B,
+  C…) is the aisle; the rack code is that letter prefixed (`AA` = aisle A).
+- **Every drawn box carries a formula naming itself.** `=VLOOKUP(<its own label cell>,
+  Analyse!…)` marks the *front* position — the one touching the aisle — and `=<another
+  box>` means "same location, one position further back". Following those references
+  yields each location's exact cells, and their count *is* the rack's depth. A location is
+  one addressable lane: N positions deep, 3 levels high (drive-in racking, per the plant
+  owner). This is what settles depth definitively: `Z5` looks up `AA01` and `Z4` is merely
+  `=Z5`, so rows 4–5 are one two-deep lane, not two locations.
+- **Bold borders mark back-to-back facings** — but the file is inconsistent about it (the
+  D/E block uses a thin line for exactly the same thing), so they are *not* used. The
+  formulas settle every case on their own.
+- **Black-filled boxes** are drawn but carry no formula and no code: blocked positions
+  (pillars). 14 of them in 13A; they become holes in the racking.
+- **38 boxes carry a broken `=VLOOKUP(,…)`** (the reference was deleted at some point).
+  Their code is recovered from the adjacent label cell.
+
+#### Turning it into a layout
+
+One Excel location → one `Slot`; its depth cells → that slot's sub-slots; the 3 levels →
+pallet tiers (capacity, not content — the workbook holds no stock, so the content file
+comes out empty).
+
+The drawing is schematic, not to scale — a one-deep lane is often drawn two cells tall
+while a three-deep lane gets three. Cell *extents* are therefore never used as distances.
+Instead each column gets a fixed pitch (1.2 m, one lane wide) and each row a pitch by role
+(1.2 m for a rack row, an aisle's share of 3.5 m — 5 m for a main cross-aisle drawn four
+rows tall), and each slot is anchored at the aisle-facing edge of its front box. Relative
+position, the thing the plan actually encodes, is preserved exactly. A row that carries an
+aisle's labels *and* racking elsewhere along its length keeps at least one position of
+depth, or that rack would overflow its band into the one behind it.
+
+Corridors come from the same label rows: aisle A's centreline is the line its `AA..`
+labels are written on, spanning the columns they cover. Those are joined by a vertical
+trunk placed in the plan's own circulation route — **the widest fully empty column band
+with racking on both sides** (in 13A, columns 23–25). Taking merely the widest empty band
+instead picks the clear floor along a wall, and every aisle then gets dragged straight
+through the blocks in between. An aisle is extended to meet a trunk or service corridor
+only when its own rows are genuinely clear all the way there.
+
+The lift station and delivery space are **not** in the spreadsheet; they are placed on the
+clear floor south of the last rack so runs have somewhere to start and deliver to.
+
+#### Result for BATIMENT 13A
+
+453 locations / 910 lane positions / 2,730 pallet places, in a 97.9 × 55.0 m envelope,
+with 12 corridors. Verified: every box resolves (zero unresolved, zero ambiguous fronts);
+the corridor graph is fully connected under the app's own exact-coincident-point rule; no
+slot footprint overlaps another; none pokes outside the envelope; no corridor centreline
+runs through a slot; the layout renders in the app with zero console errors.
+
+Known gap: `src/data/pickingLists.ts` still names the example warehouse's slots, so the
+stock lists don't apply to an imported plant.
+
 ## 6. Core Features / Visualizations
 
 - [x] **3D warehouse view (physical layer only)** — walls + slots render in 3D (§5.1);
@@ -1446,6 +1523,20 @@ on an outside click; Edit from the menu brings up the edit toolbar.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-13 — Real plant layouts can now be imported from the customer's Excel floor plan
+  (new §5.7, `scripts/import_plan_xlsx.py`), replacing the hand-approximated
+  `schema/warehouse.batiment-13a.json` with one derived from the source. The workbook
+  turned out to be self-describing — each drawn box carries `=VLOOKUP(<its own label
+  cell>)` if it is the aisle-facing position or `=<another box>` if it is a deeper position
+  of the same location — so depth, codes and facing are *read*, not inferred from geometry.
+  Codes are written inside the aisles (odd one side, even the other), which is what
+  identifies each rack's facing. Deliberately ignored the plan's bold "back-to-back"
+  borders: the file is inconsistent about them and the formulas settle every case anyway.
+  Scale is assumed, not derived (the drawing is schematic): 1.2 m per lane and per depth
+  position, 3.5 m aisles, 5 m for the main cross-aisle, 3 levels — all per the plant
+  owner's answers. 13A comes out at 453 locations / 910 positions / 2,730 pallet places in
+  97.9 × 55.0 m. The source workbook is gitignored: it carries real picking history with
+  operator initials, while the imported layouts carry only codes and geometry.
 - 2026-09-13 — Animate became a labelled checkbox instead of a toggle button, and is now
   **off by default** (§5.4): it reports a state rather than firing an action, and showing a
   route complete is the quicker read. Unticking mid-batch now also de-animates the runs
