@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { PickingList, PickingStop } from "../types/simulation";
 import { useEditor } from "../state/EditorContext";
 import { useSimulation, type ActiveRun, type StopEvent } from "../state/SimulationContext";
 import { useAnalytics } from "../state/AnalyticsContext";
 import { formatDuration } from "../lib/metrics";
 import { handlingBreakdown, handlingTime, legTravelTime } from "../lib/timeModel";
+import { useDraggable } from "../lib/useDraggable";
 
 /**
  * What a given stop actually does, as a verb for the operations list — the
@@ -195,6 +196,8 @@ export function RunConsole() {
   // Collapsed by default: the transport row is what you need constantly, the
   // operations and record lists only when you go looking.
   const [collapsed, setCollapsed] = useState(true);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const drag = useDraggable(panelRef);
 
   if (mode !== "view") return null;
 
@@ -208,8 +211,19 @@ export function RunConsole() {
   const history = simulation.capturedRuns;
 
   return (
-    <div className="run-console">
-      <div className="run-console__bar">
+    <div
+      className={drag.dragging ? "run-console run-console--dragging" : "run-console"}
+      ref={panelRef}
+      style={drag.style}
+    >
+      {/* The bar doubles as the drag handle — its own controls opt out, see
+          useDraggable. Double-click puts the panel back where it started. */}
+      <div
+        className="run-console__bar"
+        onPointerDown={drag.onPointerDown}
+        onDoubleClick={drag.reset}
+        title="Drag to move · double-click to reset"
+      >
         {/* Capture is deliberately explicit: a run played to demo or debug
             shouldn't silently contaminate a measurement. */}
         <button

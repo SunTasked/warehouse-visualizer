@@ -4,6 +4,28 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-12 (cont'd) — draggable run console, Load/Save/Edit moved into Overview menu
+
+- Small session on top of the same day's broader restructure. Full design in specs.md's
+  amended §5.4 ("Draggable run console") and §5.6 ("Load / Save / Edit moved into an
+  Overview menu"), plus one new decision log entry — not duplicated here.
+- New `src/lib/useDraggable.ts`: the run console's transport bar is now also its drag
+  handle (double-click resets position); ignores pointerdowns on
+  `button, input, select, a, label` so transport controls still work; position clamped so
+  the handle stays reachable.
+- Two bugs found and fixed: viewport-vs-parent coordinate mismatch made the panel jump by
+  the header's height on grab; `preventDefault()` on pointerdown was suppressing
+  `dblclick` (removed; text selection handled via `user-select: none` instead).
+- `AppHeader.tsx`/`Toolbar.tsx`: Overview nav item now doubles as an app menu (Load…,
+  Save, Edit layout…/Done editing), with unsaved-changes dot/note; `Toolbar.tsx` shrank to
+  edit-mode tooling only, renders `null` in view mode.
+- Verified (per requester, not redone here): `tsc --noEmit` clean, Playwright zero console
+  errors — drag delta exact, in-bar button still actuates, double-click resets position,
+  Toolbar absent in view mode, menu opens/closes correctly, Edit from menu works.
+- specs.md updated: §5.4 and §5.6 amended in place, one new decision log entry. §9 not
+  touched — no new open question.
+- Next: unchanged — same open items as before (§9).
+
 ## 2026-09-12 (cont'd) — app shell/navigation (§5.6, new), run console + board chart rework, one data fix
 
 - Broad session: app-shell restructure (new §5.6), amendments to §5.4 (run console/

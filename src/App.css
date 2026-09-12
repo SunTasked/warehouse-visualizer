@@ -1774,3 +1774,93 @@
   flex: 1;
   min-height: 0;
 }
+
+/* --- Overview menu (file + edit actions) --- */
+
+.app__menu {
+  position: relative;
+}
+
+.app__tab-caret {
+  margin-left: 0.3rem;
+  font-size: 0.6rem;
+  color: #9aa3b5;
+}
+
+.app__tab-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c0392b;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+}
+
+.app__menu-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 50;
+  min-width: 170px;
+  margin-top: 0.2rem;
+  background: #ffffff;
+  border: 1px solid #d7dbe3;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.18);
+  padding: 0.25rem;
+}
+
+.app__menu-note {
+  font-size: 0.72rem;
+  color: #c0392b;
+  padding: 0.25rem 0.5rem 0.35rem;
+}
+
+.app__menu-item {
+  display: block;
+  width: 100%;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-radius: 5px;
+  cursor: pointer;
+  color: #2a3244;
+}
+
+.app__menu-item:hover {
+  background: #eef1f6;
+}
+
+.app__menu-sep {
+  height: 1px;
+  background: #eef1f6;
+  margin: 0.25rem 0.3rem;
+}
+
+/* --- Draggable run console --- */
+
+.run-console__bar {
+  cursor: move;
+  user-select: none;
+}
+
+.run-console__bar button,
+.run-console__bar input {
+  cursor: pointer;
+}
+
+.run-console__bar input {
+  cursor: text;
+}
+
+.run-console--dragging {
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.25);
+}
+
+.run-console--dragging .run-console__bar {
+  cursor: grabbing;
+}

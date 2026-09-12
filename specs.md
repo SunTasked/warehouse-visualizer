@@ -1057,6 +1057,37 @@ errors; console collapsed by default (8 transport controls); step tooltip render
 39.0s / 27.0 m · 4 turns / Handling 26.0s / base 15.0s · tier +3.0s · depth +8.0s / Step
 1m 05s / Tour so far 1m 51s".
 
+#### Draggable run console
+
+New `src/lib/useDraggable.ts` plus supporting CSS in `RunConsole.tsx`: the transport bar
+now doubles as a drag handle, and double-clicking it returns the panel to its resting
+place. Controls inside the bar opt out of dragging — the hook ignores any pointerdown that
+lands on `button, input, select, a, label` — so the transport buttons still actuate
+normally instead of starting a drag. Position stays `null` until the first drag, so the
+panel keeps its original CSS-defined resting place until deliberately moved, and is then
+clamped so it can never end up somewhere its own handle is unreachable.
+Pointermove/pointerup listeners are attached to `window`, not the element, since the
+pointer routinely outruns a small panel mid-drag.
+
+Two bugs found and fixed during verification, both non-obvious enough to record:
+- **Coordinate space mismatch.** The panel is `position: absolute` inside `.app__scene`,
+  so its `left`/`top` resolve against that containing block, while pointer events report
+  *viewport* coordinates. Mixing the two made the panel jump by the header's height
+  (~94px) on every grab — and because it moved between the two clicks, `dblclick` never
+  fired at all. Fixed by converting through the offset parent's own rect and keeping all
+  stored positions in parent space.
+- **No `preventDefault()` on pointerdown.** Suppressing the default there also suppresses
+  the browser's compatibility mouse events, which meant `dblclick` never fired either.
+  Text selection during a drag is handled instead by `user-select: none` on the handle.
+
+Positions use `left`/`top` rather than a transform, for the same reason already noted
+above: a transformed ancestor becomes the containing block for `position: fixed`
+descendants, which would re-trap the step tooltip inside the panel's own clipped box.
+
+Verified (per requester, not redone here): `tsc --noEmit` clean; Playwright zero console
+errors; console drags by exactly the intended delta with no jump; a button inside the bar
+still actuates without moving the panel; double-click restores the original position.
+
 ### 5.5 Performance analytics board (decided, v1)
 
 Prompted by wanting metrics on how long a picking list takes, normalized so tours of
@@ -1188,6 +1219,23 @@ Verified (per requester, not redone here): `tsc --noEmit` clean; Playwright zero
 errors; title/subtitle/tabs correct; Performances disabled without a session and
 re-disabled after an edit; picking panel present with no toggle button; info popover shows
 7 rows; edit-mode confirm names what is lost.
+
+#### Load / Save / Edit moved into an Overview menu
+
+`AppHeader.tsx`/`Toolbar.tsx` reworked: the Overview nav item now doubles as the app's
+menu-bar item — clicking it both selects the tab and opens a menu containing Load…, Save,
+and Edit layout… / Done editing, the way a menu-bar item behaves rather than a plain tab.
+It carries a caret, plus a small red dot when there are unsaved changes (the menu itself
+also shows an "unsaved changes" note); clicking outside closes it. The edit-mode toggle —
+including the confirm dialog that names exactly what the session loses (§5.6 above) —
+moved from `Toolbar` into `AppHeader` along with the menu.
+
+Consequently `Toolbar.tsx` shrank to edit-mode tooling only (Add Slot, Undo, Redo, History,
+hint) and now renders `null` in view mode rather than an empty strip.
+
+Verified (per requester, not redone here): `tsc --noEmit` clean; Playwright zero console
+errors; Toolbar absent in view mode; menu opens with the three expected items and closes
+on an outside click; Edit from the menu brings up the edit toolbar.
 
 ## 6. Core Features / Visualizations
 
@@ -1328,6 +1376,18 @@ re-disabled after an edit; picking panel present with no toggle button; info pop
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-12 — Two small UI amendments on top of the same day's broader restructure below:
+  the run console (§5.4) is now draggable by its transport bar (double-click to reset),
+  via a new `src/lib/useDraggable.ts`; and Load/Save/Edit moved out of the toolbar into an
+  Overview menu (§5.6) that the nav item itself doubles as, shrinking `Toolbar.tsx` to
+  edit-mode tooling only (renders `null` in view mode). Two bugs found and fixed while
+  building the drag behavior: mixing viewport-space pointer coordinates with the panel's
+  parent-relative `left`/`top` made it jump by the header's height on grab (fixed by
+  converting through the offset parent's rect); and calling `preventDefault()` on
+  pointerdown suppressed the compatibility `dblclick` event needed for the reset gesture
+  (fixed by leaving it alone and using `user-select: none` instead for text-selection
+  suppression). Verified via `tsc --noEmit` (clean) and Playwright (zero console errors) —
+  per requester, not redone here.
 - 2026-09-12 — Broad UI restructure plus one data fix, spanning §5.1 (path data), §5.4
   (run console/forklift), §5.5 (board charts), and a new §5.6 (app shell/navigation).
   Fixed a real duplicate-geometry bug in the example data: `Path-Service` and
