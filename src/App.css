@@ -1549,22 +1549,21 @@ body,
 
 /* --- Run console additions --- */
 
-.run-console__opt {
-  border: 1px solid #d7dbe3;
-  background: #ffffff;
-  border-radius: 6px;
-  padding: 0.25rem 0.5rem;
-  font: inherit;
-  font-size: 0.72rem;
+/* A checkbox rather than a toggle button: animation is a state the console
+   reports at a glance, not an action you fire. */
+.run-console__animate {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: #374151;
   cursor: pointer;
-  color: #5a6270;
+  user-select: none;
+  flex: none;
 }
 
-.run-console__opt--on {
-  border-color: #4d7cfe;
-  background: #eef4ff;
-  color: #1d4ed8;
-  font-weight: 600;
+.run-console__animate input {
+  margin: 0;
 }
 
 .run-console__speed {

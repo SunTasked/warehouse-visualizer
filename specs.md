@@ -1108,8 +1108,17 @@ also sets `position: absolute` once dragged — until then the panel sits in its
 normal flow, where `left`/`top` would be ignored.
 
 **Three-line bar.** The bar is now three fixed lines whether the console is collapsed or
-not: capture + what it has measured, the six transport buttons, then the animate toggle,
+not: capture + what it has measured, the six transport buttons, then the animate checkbox,
 speed and current status. Collapsing hides only the order list, so no control ever moves.
+
+**Animate is a checkbox, off by default.** It reports a state rather than firing an action,
+so it reads as one; and showing a route complete is the quicker read, with animation
+something you turn on to watch a particular run. Unticking mid-run still finishes the
+current run where it stands (applying the stock changes it hadn't reached yet), and
+everything still queued behind it now plays out complete too. That last part needs
+`animateRef`: `setAnimate(false)` finishes the run *synchronously*, which starts the next
+queued list before React has re-rendered, so `playNext` reading the state value would have
+seen the old `true` and animated the rest of the batch anyway.
 
 **Order list replaces the Operations/Record tabs.** The console's lower half is one flat
 list of the *orders* of the batch you last launched (`sessionRuns.slice(orderListStart)`
@@ -1132,8 +1141,14 @@ not what has been *recorded*.
 checkbox above the rows (indeterminate when partial), and stopping belongs with the rest of
 the transport on the console. "Play selected" became "Run selected (n)".
 
-Verified: `tsc --noEmit` clean; Playwright zero console errors; no document scroll in
-either axis (`scrollWidth === clientWidth`, `scrollHeight === clientHeight`); console
+Verified (animate checkbox): `tsc --noEmit` clean; Playwright zero console errors; renders
+as an `input[type=checkbox]`, unticked on load, no `.run-console__opt` button left; a run
+played at the default finishes instantly; clicking the label toggles it without dragging
+the panel; unticking 2.5s into an animated 5-list batch left all 5 orders "done" 4.4s later
+with the pause button disabled — i.e. the remaining four played complete, not animated.
+
+Verified (relayout): `tsc --noEmit` clean; Playwright zero console errors; no document
+scroll in either axis (`scrollWidth === clientWidth`, `scrollHeight === clientHeight`); console
 left-aligned directly under the breadcrumb; layer panel 16px from the bottom-right corner
 with the legend stacked above it, right edges flush; three bar lines with metadata and
 animate visible while collapsed; select-all ticks 5/5 and the button reads "Run selected
@@ -1431,6 +1446,14 @@ on an outside click; Edit from the menu brings up the edit toolbar.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-13 — Animate became a labelled checkbox instead of a toggle button, and is now
+  **off by default** (§5.4): it reports a state rather than firing an action, and showing a
+  route complete is the quicker read. Unticking mid-batch now also de-animates the runs
+  still queued behind the current one — which required mirroring the flag into `animateRef`,
+  since turning it off finishes the current run synchronously and starts the next queued
+  list before React re-renders. Verified via `tsc --noEmit` (clean) and Playwright (zero
+  console errors; unticking 2.5s into an animated 5-list batch left all five orders "done"
+  4.4s later with the pause control disabled).
 - 2026-09-12 — Console relayout and panel docking (§5.4, amended; §5.3's picking panel
   trimmed). Killed the app's two permanent document scrollbars (`100vw/100vh` over a body
   with its default 8px margin — now `height: 100%` on `html, body, #root` with

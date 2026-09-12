@@ -355,7 +355,17 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   const editor = useEditor();
   const { reset: resetFocus } = useViewFocus();
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
-  const [animate, setAnimateState] = useState(true);
+  // Off by default: showing a route complete is the quicker read, and the
+  // metrics are identical either way — animation is something you turn on to
+  // watch a particular run, not the normal way to play a batch.
+  const [animate, setAnimateState] = useState(false);
+  /**
+   * Mirrors `animate` for playNext to read. Unticking mid-run finishes the
+   * current run *synchronously*, which starts the next queued list before
+   * React has re-rendered — so the state value would still be the old one and
+   * the rest of the batch would animate after all.
+   */
+  const animateRef = useRef(animate);
   const [speed, setSpeed] = useState(2); // m/s — a plausible forklift travel speed
   const [showPanel, setShowPanel] = useState(false);
   // Directed per-segment travel tallies for the path heatmap (Paths.tsx) —
@@ -497,7 +507,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     // see recordRun's doc comment.
     const sessionIndex = recordRun(list, stops, legs, events);
 
-    if (!animate) {
+    if (!animateRef.current) {
       for (const event of events) applyEvent(event);
       setActiveRun({ list, mode: "static", stops, events, legs, currentLegIndex: legs.length, isPaused: false, sessionIndex });
       // Static runs finish synchronously — pause briefly before the next
@@ -522,7 +532,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       return;
     }
     setActiveRun({ list, mode: "animated", stops, events, legs, currentLegIndex: 0, isPaused: false, sessionIndex });
-  }, [animate, applyEvent, recordRun, editor.warehouse, graph, resetFocus, syncQueuedLists]);
+  }, [applyEvent, recordRun, editor.warehouse, graph, resetFocus, syncQueuedLists]);
 
   playNextRef.current = playNext;
 
@@ -727,11 +737,14 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
    * Animate is a presentation choice, so flipping it never recomputes a
    * route. Turning it off mid-run finishes the run where it stands —
    * applying the stock changes it hadn't reached yet, because the run did
-   * happen. Turning it back on re-drives the same route from the start as
-   * pure playback: the events already applied, so nothing lands twice.
+   * happen — and everything still queued behind it plays out complete too
+   * (hence animateRef, which the queue reads before React re-renders).
+   * Turning it back on re-drives the same route from the start as pure
+   * playback: the events already applied, so nothing lands twice.
    */
   const setAnimate = useCallback(
     (value: boolean) => {
+      animateRef.current = value;
       setAnimateState(value);
       const run = activeRun;
       if (!run) return;

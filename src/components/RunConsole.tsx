@@ -411,13 +411,17 @@ export function RunConsole() {
 
         {/* Line 3 — playback options, and what is on screen right now. */}
         <div className="run-console__line">
-          <button
-            className={simulation.animate ? "run-console__opt run-console__opt--on" : "run-console__opt"}
-            onClick={() => simulation.setAnimate(!simulation.animate)}
+          <label
+            className="run-console__animate"
             title="Drive the route instead of showing it complete. Never changes the route or its metrics."
           >
-            Animate
-          </button>
+            <input
+              type="checkbox"
+              checked={simulation.animate}
+              onChange={(e) => simulation.setAnimate(e.target.checked)}
+            />
+            <span>Animate</span>
+          </label>
           {simulation.animate && (
             <input
               className="run-console__speed"

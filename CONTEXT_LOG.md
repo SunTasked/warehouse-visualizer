@@ -4,6 +4,23 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-13 — animate as a checkbox, off by default, de-animating the queue
+
+- Small follow-up to the previous session's console relayout. Design in specs.md §5.4
+  ("Animate is a checkbox, off by default") plus one decision log entry.
+- `RunConsole.tsx`: the Animate toggle button became a `<label>` + `input[type=checkbox]`
+  (`.run-console__animate`, replacing `.run-console__opt`). `useDraggable` already ignores
+  pointerdowns on `label`/`input`, so clicking it doesn't start a drag.
+- `SimulationContext.tsx`: `animate` now defaults to `false`, and a new `animateRef` mirrors
+  it for `playNext` to read. Needed because `setAnimate(false)` finishes the current run
+  synchronously, which starts the next queued list before React re-renders — the state value
+  would still have been `true` and the rest of the batch would have animated.
+- Verified: `tsc --noEmit` clean; Playwright zero console errors; checkbox unticked on load,
+  speed field appears only when ticked, label click toggles without moving the panel;
+  unticking 2.5s into an animated 5-list batch left all 5 orders "done" 4.4s later with the
+  pause control disabled.
+- Next: unchanged — same open items as before (§9).
+
 ## 2026-09-12 (cont'd) — console relayout: corner docks, 3-line bar, order list, no scrollbars
 
 - Full design in specs.md's amended §5.4 ("Console relayout: corner docks, three-line bar,
