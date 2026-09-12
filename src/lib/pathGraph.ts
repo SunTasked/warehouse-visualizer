@@ -70,6 +70,8 @@ interface Connection {
   point: Point;
   /** Edges to overlay on a *copy* of the graph's adjacency for this one query — the shared graph itself is never mutated. */
   extraEdges: Array<[string, { to: string; distance: number }]>;
+  /** For a synthetic node only: the real edge it was inserted into and how far along it (0..1 from `a` to `b`), so usage tallies can still credit that corridor and two connectors on one corridor can reach each other directly (see routeBetween). */
+  splitEdge?: { a: string; b: string; t: number };
 }
 
 // How close a projection has to be to an edge's own endpoint to just reuse
@@ -131,6 +133,7 @@ function connectPoint(graph: PathGraph, point: Point): Connection {
       [best.a, { to: tempId, distance: distA }],
       [best.b, { to: tempId, distance: distB }],
     ],
+    splitEdge: { a: best.a, b: best.b, t: best.t },
   };
 }
 
@@ -214,18 +217,94 @@ export function routeBetween(graph: PathGraph, from: Point, to: Point): Route {
     adjacency.set(nodeId, [...(adjacency.get(nodeId) ?? []), edge]);
   }
 
+  // Two connectors that split the *same* corridor have to be able to reach
+  // each other along it. Each only links to that corridor's two real ends,
+  // so without this the route between two slots on one aisle (A01 then A04,
+  // say) detours all the way out to an aisle end and back instead of simply
+  // driving down the aisle.
+  const sameEdge =
+    fromConn.splitEdge &&
+    toConn.splitEdge &&
+    fromConn.splitEdge.a === toConn.splitEdge.a &&
+    fromConn.splitEdge.b === toConn.splitEdge.b;
+  if (sameEdge && fromConn.nodeId !== toConn.nodeId) {
+    const span = distance(fromConn.point, toConn.point);
+    adjacency.set(fromConn.nodeId, [
+      ...(adjacency.get(fromConn.nodeId) ?? []),
+      { to: toConn.nodeId, distance: span },
+    ]);
+    adjacency.set(toConn.nodeId, [
+      ...(adjacency.get(toConn.nodeId) ?? []),
+      { to: fromConn.nodeId, distance: span },
+    ]);
+  }
+
   const pointOf = (id: string): Point => {
     if (id === fromConn.nodeId) return fromConn.point;
     if (id === toConn.nodeId) return toConn.point;
     return graph.nodes.get(id)!;
   };
 
+  const splitEdgeOf = (id: string): { a: string; b: string; t: number } | undefined => {
+    if (id === fromConn.nodeId) return fromConn.splitEdge;
+    if (id === toConn.nodeId) return toConn.splitEdge;
+    return undefined;
+  };
+
+  /**
+   * The directed real corridor a single hop rides.
+   *
+   * A hop between two real nodes is that edge outright. A hop that touches a
+   * *synthetic* connector — the temporary node inserted where a slot's entry
+   * or a facility projects onto the middle of a corridor — still physically
+   * travels along the corridor that connector split, just not all of it, so
+   * it credits that corridor in whichever direction it was traveled.
+   * Dropping those hops (as this did originally, by requiring both endpoints
+   * to be real nodes) silently lost most of a route: a slot mid-aisle
+   * connects through a synthetic node, so the entire stretch between it and
+   * the aisle's end went uncounted, and the heatmap showed activity at a
+   * slot with no traffic on the corridor that served it.
+   */
+  const resolveEdge = (a: string, b: string): RouteEdge | null => {
+    const aReal = graph.nodes.has(a);
+    const bReal = graph.nodes.has(b);
+    if (aReal && bReal) return { a, b };
+
+    if (aReal && !bReal) {
+      const split = splitEdgeOf(b);
+      if (!split) return null;
+      // Heading off a real node into the corridor: the node we left tells us
+      // which way along it we're going.
+      if (a === split.a) return { a: split.a, b: split.b };
+      if (a === split.b) return { a: split.b, b: split.a };
+      return null;
+    }
+    if (!aReal && bReal) {
+      const split = splitEdgeOf(a);
+      if (!split) return null;
+      // Arriving at a real node from inside the corridor: the node we're
+      // reaching is the direction of travel.
+      if (b === split.b) return { a: split.a, b: split.b };
+      if (b === split.a) return { a: split.b, b: split.a };
+      return null;
+    }
+    // Both synthetic: the direct hop between two connectors that split the
+    // same corridor (see the adjacency they get above). Their positions
+    // along it say which way this leg runs.
+    const fromSplit = splitEdgeOf(a);
+    const toSplit = splitEdgeOf(b);
+    if (!fromSplit || !toSplit) return null;
+    if (fromSplit.a !== toSplit.a || fromSplit.b !== toSplit.b) return null;
+    return toSplit.t >= fromSplit.t
+      ? { a: fromSplit.a, b: fromSplit.b }
+      : { a: fromSplit.b, b: fromSplit.a };
+  };
+
   const edgesAlong = (ids: string[]): RouteEdge[] => {
     const edges: RouteEdge[] = [];
     for (let i = 0; i < ids.length - 1; i++) {
-      const a = ids[i];
-      const b = ids[i + 1];
-      if (graph.nodes.has(a) && graph.nodes.has(b)) edges.push({ a, b });
+      const edge = resolveEdge(ids[i], ids[i + 1]);
+      if (edge) edges.push(edge);
     }
     return edges;
   };

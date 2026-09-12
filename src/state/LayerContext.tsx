@@ -13,7 +13,8 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
  */
 export const LAYER_IDS = [
   "structure",
-  "storage",
+  "slots",
+  "pallets",
   "facilities",
   "paths",
   "route",
@@ -25,7 +26,11 @@ export type LayerId = (typeof LAYER_IDS)[number];
 
 export const LAYER_LABELS: Record<LayerId, { label: string; hint: string }> = {
   structure: { label: "Structure", hint: "Walls and doors" },
-  storage: { label: "Storage", hint: "Slots, racks and pallets" },
+  slots: { label: "Slots", hint: "Slot footprints, entry markers and ids" },
+  // Racks live here rather than with slots: turning stock off is how you get
+  // a clear floor to read the slot heatmap on, and empty rack frames left
+  // standing would defeat that.
+  pallets: { label: "Pallets", hint: "Racks and the pallets stored in them" },
   facilities: { label: "Facilities", hint: "Lift station, delivery spaces" },
   paths: { label: "Paths", hint: "The corridor network" },
   route: { label: "Route", hint: "Active picking run and forklift" },
@@ -38,7 +43,8 @@ export const LAYER_LABELS: Record<LayerId, { label: string; hint: string }> = {
 // and (before any capture) would render as nothing anyway.
 const DEFAULT_VISIBILITY: Record<LayerId, boolean> = {
   structure: true,
-  storage: true,
+  slots: true,
+  pallets: true,
   facilities: true,
   paths: true,
   route: true,

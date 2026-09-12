@@ -38,13 +38,30 @@ export type StopEvent =
   | { type: "load" };
 
 /**
- * The stop the operations list is currently hovered over (PickingListPanel) —
- * the scene blinks its slot/facility so the row and the 3D element read as
- * the same thing. Stored as the resolved stop rather than a
- * (list, index) pair so it works for a queued list's declared stops too, not
- * only the run whose route has already been computed.
+ * The step the operations list is currently hovered over (PickingListPanel).
+ * The scene blinks both the stop's own slot/facility and the route leg that
+ * arrives there, so a row, a place and a path all read as the same thing.
+ *
+ * The stop is stored resolved (rather than as a list+index pair) so a queued
+ * list's declared stops blink too — those have no computed route yet, which
+ * is exactly when `legIndex` is null.
  */
-export type HoveredStep = PickingStop;
+export interface HoveredStep {
+  stop: PickingStop;
+  /** Index into the active run's `legs` of the leg arriving at this stop — leg i runs stop i -> stop i+1, so arriving at stop k is leg k-1. Null for the first stop (nothing leads to it) and for not-yet-routed queued lists. */
+  legIndex: number | null;
+}
+
+/** One executed run kept in the capture's history — enough to re-display its route without re-running (or re-counting) it. */
+export interface CapturedRun {
+  id: string;
+  list: PickingList;
+  stops: PickingStop[];
+  events: StopEvent[];
+  legs: Leg[];
+  /** Wall-clock time it was executed, for ordering and display. */
+  at: number;
+}
 
 export interface ActiveRun {
   list: PickingList;
@@ -92,7 +109,12 @@ interface SimulationContextValue {
   /** While armed, every list played adds to both heatmaps; while off, runs play and animate but measure nothing. */
   captureArmed: boolean;
   setCaptureArmed: (value: boolean) => void;
-  /** Wipes both heatmaps, leaving inventory alone. */
+  /** Every run that fed the current capture, newest last — the record of what produced the heatmaps. */
+  capturedRuns: CapturedRun[];
+  /** Which captured run is being re-displayed in the scene (read-only; it is not re-executed and does not re-count). */
+  reviewedRunId: string | null;
+  reviewRun: (id: string | null) => void;
+  /** Wipes both heatmaps and the run history, leaving inventory alone. */
   clearCapture: () => void;
   /** Reverts every simulated pallet mutation via the editor's own undo history, leaving the captured heatmaps alone — so stock can be restored mid-capture without losing the measurement. */
   resetWarehouse: () => void;
@@ -152,6 +174,35 @@ function planEvents(stops: PickingStop[], mode: PickingList["mode"]): StopEvent[
   return events;
 }
 
+/** Capacity a storing run loads up to at a depot — matches the hard 3-pallet limit the lists are authored against (specs.md §5.3). */
+const FORKLIFT_CAPACITY = 3;
+
+/** How many pallets a `load` at `stopIndex` takes on: only as many as the run's next unbroken batch of slot stops will actually consume, capped at capacity, so the forklift is never drawn carrying more than it needs. */
+function loadAmountAt(stops: PickingStop[], stopIndex: number): number {
+  let needed = 0;
+  for (let i = stopIndex + 1; i < stops.length && stops[i].kind === "slot"; i++) needed++;
+  return Math.min(FORKLIFT_CAPACITY, needed);
+}
+
+/**
+ * What the forklift is carrying once it has finished everything up to and
+ * including `stopIndex` — i.e. what it hauls along the leg leaving that stop.
+ * Replayed from the run's own events rather than tracked as mutable state, so
+ * it stays correct however the run was navigated (played, stepped, or
+ * scrubbed back and forth).
+ */
+export function heldPalletsAt(run: ActiveRun, stopIndex: number): number {
+  let held = 0;
+  for (let i = 0; i <= stopIndex && i < run.events.length; i++) {
+    const event = run.events[i];
+    if (event.type === "pick") held += 1;
+    else if (event.type === "store") held = Math.max(0, held - 1);
+    else if (event.type === "deliver") held = 0;
+    else if (event.type === "load") held = loadAmountAt(run.stops, i);
+  }
+  return held;
+}
+
 function stopPoint(stop: PickingStop, warehouse: Warehouse): Point | null {
   if (stop.kind === "slot") {
     const slot = warehouse.slots.find((s) => s.id === stop.id);
@@ -198,6 +249,8 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   // the path tallies can't, since several slots share one corridor.
   const [slotUsage, setSlotUsage] = useState<Record<string, number>>({});
   const [captureArmed, setCaptureArmed] = useState(false);
+  const [capturedRuns, setCapturedRuns] = useState<CapturedRun[]>([]);
+  const [reviewedRunId, setReviewedRunId] = useState<string | null>(null);
   const [queuedLists, setQueuedLists] = useState<PickingList[]>([]);
   const [hoveredStep, setHoveredStep] = useState<HoveredStep | null>(null);
   const progressRef = useRef(0);
@@ -240,8 +293,13 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
    * silently contaminate a measurement.
    */
   const captureRun = useCallback(
-    (legs: Leg[], events: StopEvent[]) => {
+    (list: PickingList, stops: PickingStop[], legs: Leg[], events: StopEvent[]) => {
       if (!captureArmed) return;
+
+      setCapturedRuns((current) => [
+        ...current,
+        { id: `${list.id}-${Date.now()}-${current.length}`, list, stops, events, legs, at: Date.now() },
+      ]);
 
       setEdgeUsage((current) => {
         const next = { ...current };
@@ -277,6 +335,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   const playNext = useCallback(() => {
     const list = queueRef.current.shift();
     syncQueuedLists();
+    setReviewedRunId(null); // a live run supersedes whatever was being reviewed
     if (!list) {
       setActiveRun(null);
       return;
@@ -289,7 +348,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
 
     // The whole run's measurement lands here, before a wheel has turned —
     // see captureRun's doc comment.
-    captureRun(legs, events);
+    captureRun(list, stops, legs, events);
 
     if (playbackMode === "static") {
       for (const event of events) applyEvent(event);
@@ -341,6 +400,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     fastForwardSpeedRef.current = null;
     setActiveRun(null);
     setQueuedLists([]);
+    setReviewedRunId(null);
   }, []);
 
   const togglePause = useCallback(() => {
@@ -408,11 +468,42 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
 
   const previousStep = useCallback(() => goToStep((activeRun?.currentLegIndex ?? 0) - 1), [activeRun, goToStep]);
 
-  /** Wipes both captured heatmaps. Inventory is left exactly as it is, so a capture can be discarded and restarted without disturbing stock. */
+  /** Wipes both captured heatmaps and the record of what produced them. Inventory is left exactly as it is, so a capture can be discarded and restarted without disturbing stock. */
   const clearCapture = useCallback(() => {
     setEdgeUsage({});
     setSlotUsage({});
+    setCapturedRuns([]);
+    setReviewedRunId(null);
   }, []);
+
+  /** Re-displays a recorded run's route in the scene without re-executing it — reviewing what fed the heatmap must not change the heatmap. Pass null to stop reviewing. */
+  const reviewRun = useCallback(
+    (id: string | null) => {
+      if (id === null) {
+        setReviewedRunId(null);
+        return;
+      }
+      const recorded = capturedRuns.find((entry) => entry.id === id);
+      if (!recorded) return;
+      queueRef.current = [];
+      fastForwardSpeedRef.current = null;
+      progressRef.current = 0;
+      setQueuedLists([]);
+      setReviewedRunId(id);
+      // Shown as a finished static run: the full route drawn, nothing
+      // animating, no events applied.
+      setActiveRun({
+        list: recorded.list,
+        mode: "static",
+        stops: recorded.stops,
+        events: recorded.events,
+        legs: recorded.legs,
+        currentLegIndex: recorded.legs.length,
+        isPaused: false,
+      });
+    },
+    [capturedRuns],
+  );
 
   /**
    * Discards every simulation-driven pallet mutation by jumping the editor's
@@ -457,6 +548,9 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       slotUsage,
       captureArmed,
       setCaptureArmed,
+      capturedRuns,
+      reviewedRunId,
+      reviewRun,
       clearCapture,
       resetWarehouse,
       hoveredStep,
@@ -478,6 +572,9 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       edgeUsage,
       slotUsage,
       captureArmed,
+      capturedRuns,
+      reviewedRunId,
+      reviewRun,
       clearCapture,
       resetWarehouse,
       hoveredStep,

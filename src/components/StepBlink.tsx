@@ -39,7 +39,7 @@ export function StepBlink() {
   const materialRef = useRef<THREE.MeshStandardMaterial>(null);
 
   const target = useMemo<BlinkTarget | null>(() => {
-    const stop = simulation.hoveredStep;
+    const stop = simulation.hoveredStep?.stop;
     if (!stop) return null;
 
     if (stop.kind === "slot") {

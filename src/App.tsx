@@ -15,6 +15,7 @@ import { HoverCard } from "./components/HoverCard";
 import { FacilityTooltip } from "./components/FacilityTooltip";
 import { FocusBreadcrumb } from "./components/FocusBreadcrumb";
 import { PickingListPanel } from "./components/PickingListPanel";
+import { RunConsole } from "./components/RunConsole";
 import { UsageLegend } from "./components/UsageLegend";
 import { LayerPanel } from "./components/LayerPanel";
 import { LayerProvider } from "./state/LayerContext";
@@ -53,6 +54,7 @@ function AppShell() {
         <FacilityTooltip />
         <FocusBreadcrumb />
         <PickingListPanel />
+        <RunConsole />
         <LayerPanel />
         <UsageLegend />
       </div>

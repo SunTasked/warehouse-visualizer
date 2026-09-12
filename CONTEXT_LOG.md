@@ -4,6 +4,35 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-12 — §5.4 refinement pass: routing bug fixes, layer split, run console, capture record
+
+- Refined last session's layer/heatmap work (specs.md §5.4 "Follow-up refinements" and its
+  decision log entry — not duplicated here).
+- Bug fixes (found via the heatmap under-reporting a used corridor): two real
+  `pathGraph.ts` routing/tally bugs (partial-corridor hops through a connector node were
+  dropped; two stops on one corridor couldn't route directly along it) — fixed via new
+  `Connection.splitEdge`/`resolveEdge` (example data: 24 → 32 measured segments); heatmap
+  lanes now render above the plain corridor (`Paths.tsx`'s `LANE_ELEVATION`); clicking a
+  step while paused now repositions the forklift (was a no-op).
+- New behavior: `storage` layer split into `slots` and `pallets` (racks live with
+  pallets, deliberately); forklift redesigned low-poly, now visibly carries held pallets
+  (`heldPalletsAt` replays run events); run console moved to new top-center
+  `RunConsole.tsx` (capture/readout/transport/operations), `PickingListPanel.tsx` reduced
+  to the catalogue; new capture record (`capturedRuns`) with review-without-recounting
+  (`reviewRun`); operations-row hover now also pulses the arriving route leg.
+- Example-data rename: plant "Batiment 13A" → "Test plant", buildings → "Main warehouse" /
+  "Annex" (`scripts/generate-example-warehouse.js`, regenerated
+  `schema/warehouse.example.json`); unrelated to the separate real reference warehouse of
+  the same old name discussed elsewhere in specs.md.
+- Verified via Playwright + `tsc --noEmit` (per requester, not redone here): renamed
+  labels, corrected heatmap coverage, 8-layer panel, run console tabs, review without
+  recounting, Reset vs. Clear, paused step-click reposition, combined hover blink.
+- specs.md updated: §5.4 amended in place (new "Follow-up refinements" subsection),
+  breadcrumb example string updated to match the rename, new decision log entry. §9
+  reviewed — no changes needed, all still accurate (open question 19 on no persisted
+  layer preference still stands as-is).
+- Next: unchanged — same open items as before (§9).
+
 ## 2026-09-11 (cont'd) — layer system, path/slot heatmaps, operations list (§5.4)
 
 - Large feature set on top of §5.3, prompted by "the paths are hard to read and a lot of

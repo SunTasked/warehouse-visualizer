@@ -1,10 +1,10 @@
 {
   "id": "bat-13a",
-  "name": "Batiment 13A",
+  "name": "Test plant",
   "units": "m",
   "walls": [
     {
-      "id": "Batiment 13A",
+      "id": "Main warehouse",
       "closed": true,
       "points": [
         {
@@ -26,7 +26,7 @@
       ]
     },
     {
-      "id": "Entrepot Annexe",
+      "id": "Annex",
       "closed": true,
       "points": [
         {
@@ -54,14 +54,14 @@
       "x": 10,
       "y": 0,
       "rotationDeg": 0,
-      "buildingId": "Batiment 13A"
+      "buildingId": "Main warehouse"
     },
     {
       "id": "Door-Annex-North",
       "x": 10,
       "y": -3,
       "rotationDeg": 0,
-      "buildingId": "Entrepot Annexe"
+      "buildingId": "Annex"
     }
   ],
   "paths": [
@@ -94,7 +94,7 @@
         }
       ],
       "buildingIds": [
-        "Batiment 13A"
+        "Main warehouse"
       ]
     },
     {
@@ -118,7 +118,7 @@
         }
       ],
       "buildingIds": [
-        "Batiment 13A"
+        "Main warehouse"
       ]
     },
     {
@@ -138,7 +138,7 @@
         }
       ],
       "buildingIds": [
-        "Batiment 13A"
+        "Main warehouse"
       ]
     },
     {
@@ -158,7 +158,7 @@
         }
       ],
       "buildingIds": [
-        "Batiment 13A"
+        "Main warehouse"
       ]
     },
     {
@@ -174,12 +174,12 @@
         }
       ],
       "buildingIds": [
-        "Batiment 13A",
-        "Entrepot Annexe"
+        "Main warehouse",
+        "Annex"
       ],
       "endpointBuildingIds": [
-        "Batiment 13A",
-        "Entrepot Annexe"
+        "Main warehouse",
+        "Annex"
       ]
     },
     {
@@ -195,7 +195,7 @@
         }
       ],
       "buildingIds": [
-        "Entrepot Annexe"
+        "Annex"
       ]
     },
     {
@@ -215,7 +215,7 @@
         }
       ],
       "buildingIds": [
-        "Entrepot Annexe"
+        "Annex"
       ]
     }
   ],
@@ -225,7 +225,7 @@
       "x": 6,
       "y": 4,
       "rotationDeg": 0,
-      "buildingId": "Batiment 13A"
+      "buildingId": "Main warehouse"
     }
   ],
   "deliverySpaces": [
@@ -234,7 +234,7 @@
       "x": 14,
       "y": 4,
       "rotationDeg": 0,
-      "buildingId": "Batiment 13A"
+      "buildingId": "Main warehouse"
     }
   ],
   "slotDefaults": {

@@ -8,6 +8,7 @@ import { useViewFocus } from "../state/ViewFocusContext";
 import { fromSceneXZ, slotFootprint } from "../lib/geometry";
 import { isSlotVisible, isSlotSpaceVisible } from "../lib/visibility";
 import { findBuildingForSlot } from "../lib/buildings";
+import { useLayers } from "../state/LayerContext";
 import { Rack } from "./Rack";
 
 export const SLOT_HEIGHT = 0.06;
@@ -92,6 +93,9 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
     orbitRef,
   } = useEditor();
   const { focus, hover, setHover, focusSlot, focusSlotSpace } = useViewFocus();
+  // Racks and their pallets are their own layer — hiding them is what clears
+  // the floor so the slot heatmap can be read on the slot pads themselves.
+  const showPallets = useLayers().isVisible("pallets");
   const buildingId = useMemo(() => findBuildingForSlot(slot, warehouse.walls), [slot, warehouse.walls]);
   // Each sub-slot is a full slotDefaults footprint (not a fraction of one) —
   // a depth-3 slot occupies 3x the standard 4x2 space, not the same 4x2
@@ -227,7 +231,8 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
         Array.from({ length: depth - 1 }).map((_, i) => (
           <DepthDivider key={i} z={(i + 1) * cellDepth - cellDepth / 2} width={defaults.width} />
         ))}
-      {slot.subSlots?.map((subSlot, i) => {
+      {showPallets &&
+        slot.subSlots?.map((subSlot, i) => {
         if (subSlot.pallets.length === 0) return null;
         if (mode === "view" && !isSlotSpaceVisible(focus, slot.id, i)) return null;
         // onClick, not onPointerDown — see SlotMesh's handleClick comment.

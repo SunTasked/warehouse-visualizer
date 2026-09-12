@@ -34,6 +34,11 @@ const ARROW_LENGTH = 0.7;
 const LANE_WIDTH = 0.45;
 const LANE_OFFSET = 0.32;
 const LANE_JOINT_RADIUS = LANE_WIDTH / 2;
+// Heatmap lanes sit above the corridor layer rather than in its plane. A
+// measured segment replaces its own corridor, but neighbouring paths still
+// cross it (and a crossing path's own box would otherwise z-fight with, or
+// simply cover, the coloring) — so the measurement always wins on top.
+const LANE_ELEVATION = 0.055;
 // A lane whose own direction was never traveled (only the *other* direction
 // of that same segment was) — muted gray, not on the green-red scale at
 // all, so "never taken this way" reads as visually distinct from "taken the
@@ -184,12 +189,16 @@ function UsageLane({
   const labelled = showLabel && count > 0 && segment.length >= MIN_LABEL_SEGMENT_LENGTH;
   return (
     <>
-      <mesh position={segment.position} rotation={[0, segment.rotationY, 0]} raycast={() => null}>
+      <mesh
+        position={[segment.position[0], LANE_ELEVATION, segment.position[2]]}
+        rotation={[0, segment.rotationY, 0]}
+        raycast={() => null}
+      >
         <boxGeometry args={[segment.length, PATH_HEIGHT, LANE_WIDTH]} />
         <meshStandardMaterial color={color} />
       </mesh>
       {[laneA, laneB].map((p, i) => (
-        <mesh key={i} position={[p.x, PATH_HEIGHT / 2, -p.y]} raycast={() => null}>
+        <mesh key={i} position={[p.x, LANE_ELEVATION, -p.y]} raycast={() => null}>
           <cylinderGeometry args={[LANE_JOINT_RADIUS, LANE_JOINT_RADIUS, PATH_HEIGHT, 16]} />
           <meshStandardMaterial color={color} />
         </mesh>

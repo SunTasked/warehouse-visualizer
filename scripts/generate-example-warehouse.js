@@ -11,7 +11,7 @@
 //   M01-M04: depth 2, up to 3 pallet tiers/sub-slot, facing west.
 //            (N and M face each other across a 2m aisle, oriented
 //            perpendicular to A/B — "vertical" racks.)
-//   C01-C03: a small second building ("Entrepot Annexe"), depth 2, facing
+//   C01-C03: a small second building ("Annex"), depth 2, facing
 //            north, 3m south of the main building's south wall, with its own
 //            wall loop and a door facing the main building's own south door.
 //
@@ -209,8 +209,8 @@ const allContents = [
 ];
 
 // --- Doors, paths, the carriage lift station & the delivery space. ---
-const MAIN_BUILDING_ID = "Batiment 13A";
-const ANNEX_BUILDING_ID = "Entrepot Annexe";
+const MAIN_BUILDING_ID = "Main warehouse";
+const ANNEX_BUILDING_ID = "Annex";
 
 const doors = [
   { id: "Door-South", x: 10, y: 0, rotationDeg: 0, buildingId: MAIN_BUILDING_ID },
@@ -296,7 +296,7 @@ const paths = [
 
 const config = {
   id: "bat-13a",
-  name: "Batiment 13A",
+  name: "Test plant",
   units: "m",
   walls: [
     {

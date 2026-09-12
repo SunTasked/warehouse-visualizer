@@ -138,7 +138,9 @@ export function WarehouseScene() {
           <DeliverySpaces spaces={warehouse.deliverySpaces} />
         </>
       )}
-      {layers.isVisible("storage") && <Slots slots={warehouse.slots} defaults={warehouse.slotDefaults} />}
+      {/* Slots gates the pads/markers/ids here; the racks and pallets inside
+          them are their own layer, checked within Slots itself. */}
+      {layers.isVisible("slots") && <Slots slots={warehouse.slots} defaults={warehouse.slotDefaults} />}
       <SlotHeatmap />
       <Forklift />
       <StepBlink />

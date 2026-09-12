@@ -254,7 +254,7 @@ once, and edit mode always shows real content regardless of focus (so it's still
 authoritative for inspecting/changing actual counts).
 
 A **left-side breadcrumb widget** (`src/components/FocusBreadcrumb.tsx`) always shows
-the current path (e.g. "Warehouse: Batiment 13A / Slot: A02") — every crumb except the
+the current path (e.g. "Warehouse: Main warehouse / Slot: A02") — every crumb except the
 current (deepest) one is clickable and jumps *straight* to that level, not just one
 step at a time.
 
@@ -812,21 +812,31 @@ lanes (§5.3), and an active run's route overlay — all drawn over each other. 
 is a large, view-mode-wide pass to fix that, not just a §5.3 tweak.
 
 **Layer system** (`src/state/LayerContext.tsx`, `src/components/LayerPanel.tsx`, gating in
-`src/components/WarehouseScene.tsx`): seven independently-toggleable layers, split by
+`src/components/WarehouseScene.tsx`): eight independently-toggleable layers, split by
 *subject* — what the data is — rather than by render style: `structure` (walls, doors),
-`storage` (slots/racks/pallets), `facilities` (lift station, delivery spaces), `paths`
-(corridor network), `route` (active run + forklift), `pathHeatmap`, `slotHeatmap`. Plus a
-`labelCounts` display *option*, not a layer, that draws numeric counts alongside whichever
-heatmaps are on — deliberately not its own layer: the user's own original proposal was
-"heatmap colors" and "heatmap values" as two separate layers, but numbers with no
-coloring isn't a view anyone actually wants, so it's a modifier instead. Panel is docked
-bottom-left, always visible in view mode, collapsible. Gating lives centrally in
-`WarehouseScene.tsx` for most components (so the layer model reads as one list in one
-place), with two deliberate exceptions that read layer state themselves: `Paths.tsx`
-(needs to know which of its own two layers — `paths`/`pathHeatmap` — is on to choose its
-render mode, see below) and `Forklift.tsx` (keeps its animation driver mounted while
-visually hidden when `route` is off — unmounting it, like the existing edit-mode gate
-already does, would silently freeze an in-progress queue instead of just hiding it).
+`slots` (pads, entry markers, ids), `pallets` (racks *and* the pallets they hold),
+`facilities` (lift station, delivery spaces), `paths` (corridor network), `route` (active
+run + forklift), `pathHeatmap`, `slotHeatmap`. Plus a `labelCounts` display *option*, not a
+layer, that draws numeric counts alongside whichever heatmaps are on — deliberately not
+its own layer: the user's own original proposal was "heatmap colors" and "heatmap values"
+as two separate layers, but numbers with no coloring isn't a view anyone actually wants, so
+it's a modifier instead. Panel is docked bottom-left, always visible in view mode,
+collapsible. Gating lives centrally in `WarehouseScene.tsx` for most components (so the
+layer model reads as one list in one place), with three deliberate exceptions that read
+layer state themselves: `Paths.tsx` (needs to know which of its own two layers —
+`paths`/`pathHeatmap` — is on to choose its render mode, see below), `Forklift.tsx` (keeps
+its animation driver mounted while visually hidden when `route` is off — unmounting it,
+like the existing edit-mode gate already does, would silently freeze an in-progress queue
+instead of just hiding it), and `Slots.tsx` (reads `pallets` itself to gate its own rack
+subtree — see "Layer split: slots vs. pallets" below).
+
+**Layer split: slots vs. pallets** (originally one `storage` layer): racks deliberately go
+with pallets, not slots, even though a rack frame is arguably part of a slot's physical
+structure — clearing stock off the racks is how you get a readable floor for the *slot*
+heatmap (picks/stores per slot), and leaving empty rack frames standing while pallets
+disappear would defeat that. `Slots.tsx` reads the `pallets` layer directly (one of the
+three exceptions above) to decide whether to mount its rack subtree, while the pad/entry
+marker/id label stay gated on `slots` centrally as before.
 
 **The core clutter fix** (`Paths.tsx`): a path segment now renders EITHER as the plain
 black corridor OR as its two directional heatmap lanes — never both, closing the
@@ -845,13 +855,22 @@ zero recorded activity draw nothing — absence is the signal; painting every un
 would bury the few that matter.
 
 **Capture arming** (`SimulationContext.tsx`): both heatmaps only accumulate while capture
-is explicitly armed (a record toggle in the picking panel, with a pulsing dot and a live
-"N segments · M slots" readout) — playing a list to demo or debug it must not silently
-contaminate a measurement. New `clearCapture()` wipes `edgeUsage` and `slotUsage`.
-Critically, `resetWarehouse()` no longer clears either heatmap — it restores pallet
-inventory only. Deliberately decoupled with the user: restocking between runs is normal
-*during* a capture, and coupling the two would discard the measurement every time someone
-topped the warehouse back up.
+is explicitly armed (a record toggle, with a pulsing dot and a live "N segments · M slots"
+readout, now living in the run console — see below) — playing a list to demo or debug it
+must not silently contaminate a measurement. `clearCapture()` wipes `edgeUsage`,
+`slotUsage`, and (new, see "Capture record" below) `capturedRuns` together. Critically,
+`resetWarehouse()` no longer clears either heatmap — it restores pallet inventory only.
+Deliberately decoupled with the user: restocking between runs is normal *during* a
+capture, and coupling the two would discard the measurement every time someone topped the
+warehouse back up.
+
+**Capture record** (`SimulationContext.tsx`, new): while armed, `captureRun` also appends
+a `CapturedRun` (list, stops, events, legs, timestamp) to `capturedRuns`, surfaced
+newest-first in the run console's "Record" tab (below). Clicking a captured row calls
+`reviewRun(id)`, which re-displays that run's route as a finished static run **without
+re-executing or re-counting it** — reviewing what fed a heatmap must not itself change the
+heatmap. `reviewedRunId` tracks which run is being reviewed; starting a new live run or
+stopping playback clears it.
 
 **Measurement timing changed**: a run's whole measurement is now committed once, upfront,
 the instant its route is computed (new `captureRun(legs, events)`), instead of accumulating
@@ -865,16 +884,101 @@ stepping back and forth over the same legs can no longer inflate it. Pallet inve
 stays the deliberate opposite case, still applied on arrival at each stop — watching stock
 change as the forklift works is the point of the animation.
 
-**Operations list** (`PickingListPanel.tsx`): replaced the old step slider with a
+**Operations list** (originally in `PickingListPanel.tsx`, now in the run console — see
+"Run console moved to top-center" below): replaced the old step slider with a
 list-by-list, step-by-step breakdown. The active run is expanded into its ordered
 operations (verb + target, e.g. "Pick A04") with done/current/todo states; queued lists
 are previewed below from their declared stops. Hovering any row blinks that stop's slot or
 facility in the 3D scene (new `src/components/StepBlink.tsx` — a pulsing translucent
 column, drawn as its own overlay rather than by tinting `Slots.tsx` so it works for slots
 and facilities alike, regardless of which layers are on). Clicking a row jumps the
-forklift to that step. `hoveredStep` is stored as the resolved `PickingStop` rather than a
-(list, index) pair specifically so it also works for queued lists whose routes haven't
-been computed yet.
+forklift to that step. `hoveredStep` was originally the resolved `PickingStop`; it's now
+`{stop, legIndex}` (see "Hover blink extended to the route" below) — still not a (list,
+index) pair, so it still works for queued lists whose routes haven't been computed yet.
+
+#### Follow-up refinements: routing bug fixes, layer split, run console, capture record
+
+A further round of work on top of the above, mixing genuine bug fixes (found via the
+heatmap itself surfacing wrong data) with new behavior — kept distinct below.
+
+**Bug fixes:**
+
+- **Two real routing/tally bugs in `src/lib/pathGraph.ts`**, both surfaced by the user
+  reporting a slot ("A02") being picked but no path showing as used on the heatmap:
+  - *Partially-ridden corridors weren't counted at all.* `routeBetween`'s `edgesAlong`
+    only credited a hop when **both** endpoints were real graph nodes — but a slot whose
+    entry projects onto the *middle* of a corridor connects through a synthetic connector
+    node (`~conn~...`), so every hop touching it was silently dropped, losing the whole
+    stretch between a mid-aisle slot and the aisle's end. Fixed by giving `Connection` a
+    `splitEdge: {a, b, t}` (the real edge it was inserted into, and how far along) and
+    adding a `resolveEdge` step that maps any hop touching a connector back onto the real
+    corridor it rides, in the direction traveled. Crediting the whole corridor for a
+    partial traversal is deliberate — the tally answers "was this corridor used," not "how
+    many metres of it."
+  - *Two stops on the same corridor couldn't travel directly along it.* Each connector
+    only linked to its corridor's two real ends, so a route between two slots on one
+    aisle detoured all the way out to an aisle end and back. Fixed by adding a direct
+    adjacency between two connectors that split the same edge (distance = the gap between
+    their projected points); `resolveEdge` resolves that hop's direction from the two `t`
+    values. Effect on the example data: measured segments for "Play all" went 24 → 32.
+- **Heatmap lanes now sit above the corridor layer** (`Paths.tsx`, new `LANE_ELEVATION`):
+  a measured segment already replaced its own corridor (the original clutter fix above),
+  but a *crossing* path still visually covered the coloring where the two overlapped. The
+  measurement now always renders on top.
+- **Clicking a step while paused didn't move the forklift**: `Vehicle`'s `useFrame` early-
+  returned on `isPaused` *before* positioning, so the truck sat wherever it was last drawn
+  instead of jumping to the clicked step. Positioning now happens every frame regardless
+  of pause; only progress advancement is gated. Found during verification of the
+  fast-forward stepping feature.
+
+**New behavior:**
+
+- **Layer split** — see "Layer split: slots vs. pallets" above.
+- **Forklift redesigned low-poly** (`Forklift.tsx`): yellow body + cab block, metal mast,
+  two forks, four wheels (8-segment cylinders), built from plain boxes/cylinders — at the
+  zoom levels this runs at, only the silhouette survives, and the twin is about layout and
+  flow, not vehicle modelling. Pallets it's carrying now ride stacked on the forks, derived
+  by a new exported `heldPalletsAt(run, stopIndex)` in `SimulationContext.tsx` that
+  *replays* the run's own events (pick +1, store −1, deliver → 0, load →
+  `loadAmountAt`, capped at 3) rather than tracking separate mutable state, so it stays
+  correct however the run was navigated (stepped, scrubbed, or played). Cartoon exhaust
+  puffs behind the rear wheels (user-requested), shown only while actually driving.
+- **Run console moved to top-center** (new `src/components/RunConsole.tsx`;
+  `PickingListPanel.tsx` reduced to the list catalogue): capture arming, the measured
+  readout, transport controls, the operations list, and the new capture record all now
+  live in one top-center panel — "one place to watch, one place to choose." The side
+  panel keeps the list catalogue, playback mode, speed, play/stop, and Reset warehouse.
+- **Capture record** — see "Capture record" above.
+- **Hover blink extended to the route** (`HoveredStep` is now `{stop, legIndex}`; new
+  `HoveredLegBlink` in `Forklift.tsx`): hovering an operations row still pulses the target
+  slot/facility (`StepBlink.tsx`) and now also pulses the route leg arriving there, as a
+  wider halo tracing the same offset lane the route draws, just above it. Renders
+  regardless of the `route` layer's on/off state — a transient hover affordance, not part
+  of the layer model. `legIndex` is `null` for the first stop and for queued lists whose
+  routes aren't computed yet.
+
+Verified via Playwright, zero console errors: `tsc --noEmit` clean throughout; names show
+as "Test plant" / "Main warehouse" / "Annex" after the rename (below); the A/B aisle
+serving A02 is now colored on the heatmap (24 → 32 segments); the layer panel shows 8
+layers with slots/pallets split; the run console renders top-center with
+Operations/Record tabs; the record lists 5 runs after "Play all" and replaying one works
+without changing the heatmap counts; capture disarmed still measures 0/0 while armed
+measures for real; Reset warehouse leaves counts intact while Clear zeroes them; Next
+still fast-forwards step 1 → 2 continuously; the forklift renders as the low-poly model,
+carries pallets on its forks, and now repositions correctly when a step is clicked while
+paused; hovering an operations row pulses both the slot/facility column and the route leg
+reaching it. Dead CSS left over from moving the capture block out of the side panel was
+removed.
+
+**Example-data renames** (`scripts/generate-example-warehouse.js`, regenerated
+`schema/warehouse.example.json`): the example plant's own name "Batiment 13A" → "Test
+plant" (not to be confused with the *real* reference warehouse of the same name discussed
+elsewhere in this spec, which is unrelated and unchanged); its two building ids "Batiment
+13A" → "Main warehouse" and "Entrepot Annexe" → "Annex". A building id doubles as its
+display name, and every slot/path/door reference flows from the generator's own
+`MAIN_BUILDING_ID`/`ANNEX_BUILDING_ID` constants, so regenerating kept everything
+consistent with no separate find/replace needed. The breadcrumb example earlier in this
+document (§5.1) has been updated to match.
 
 **Fast-forward stepping** (`SimulationContext.nextStep`, `Forklift.tsx`): the transport
 bar's Next no longer teleports. It sets the speed that covers whatever remains of the
@@ -1030,6 +1134,35 @@ correct pluralisation. `tsc --noEmit -p .` clean throughout.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-12 — Refinement pass on §5.4's layer system/heatmaps (see "Follow-up
+  refinements" there for full detail; not duplicated here). Bug fixes: two real
+  `pathGraph.ts` routing/tally bugs found via the heatmap under-reporting a used corridor
+  (partial-corridor hops through a synthetic connector node were dropped entirely; two
+  stops on the same corridor couldn't route directly along it, detouring via the aisle
+  ends) — both fixed via a new `Connection.splitEdge` + `resolveEdge` step (example data:
+  24 → 32 measured segments for "Play all"); heatmap lanes now render above the plain
+  corridor (`Paths.tsx`'s `LANE_ELEVATION`), since a crossing path could still visually
+  cover a measured segment's coloring; clicking a step while paused now actually
+  repositions the forklift (`Vehicle`'s `useFrame` was early-returning on `isPaused`
+  before positioning). New behavior: the single `storage` layer split into `slots` (pads/
+  markers/ids) and `pallets` (racks *and* the pallets in them) — racks go with pallets
+  deliberately, since clearing stock is how you get a readable floor for the slot heatmap;
+  the forklift got a redesigned low-poly model (yellow body, mast, forks, wheels) that
+  now visibly carries held pallets, derived by replaying a run's own events
+  (`heldPalletsAt`) rather than tracked mutable state; the run console (capture arming,
+  measured readout, transport, operations list) moved into one new top-center
+  `RunConsole.tsx`, with `PickingListPanel.tsx` reduced to the list catalogue; a new
+  capture record (`capturedRuns`) lists past armed runs newest-first and lets one be
+  re-displayed via `reviewRun()` without re-executing/re-counting it; the operations-row
+  hover blink now also pulses the route leg arriving at the hovered stop, not just the
+  slot/facility. Also renamed the example data (`scripts/generate-example-warehouse.js` +
+  regenerated `schema/warehouse.example.json`): plant "Batiment 13A" → "Test plant",
+  building ids "Batiment 13A" → "Main warehouse" and "Entrepot Annexe" → "Annex" (unrelated
+  to the separate *real* reference warehouse discussed elsewhere in this spec, which keeps
+  its own name). Verified via Playwright end to end (renamed labels, corrected heatmap
+  coverage, 8-layer panel, run console with Operations/Record tabs, review-without-
+  recounting, Reset vs. Clear, paused step-click reposition, combined hover blink);
+  `tsc --noEmit` clean.
 - 2026-09-11 — Added a layer system, path/slot usage heatmaps, and an operations-list UI
   (§5.4), on top of §5.3's picking-list simulation — prompted by feedback that the view
   had become cluttered, root-caused to a single corridor carrying up to four overlapping

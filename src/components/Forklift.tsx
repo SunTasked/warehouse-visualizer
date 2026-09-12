@@ -1,10 +1,10 @@
 import { Text } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, type MutableRefObject } from "react";
 import * as THREE from "three";
 import type { Point } from "../types/warehouse";
 import { useEditor } from "../state/EditorContext";
-import { useSimulation, type Leg } from "../state/SimulationContext";
+import { useSimulation, heldPalletsAt, type Leg } from "../state/SimulationContext";
 import { useLayers } from "../state/LayerContext";
 import { offsetPolyline } from "../lib/offset";
 import { segmentsForPath, type PathSegment } from "./Paths";
@@ -52,10 +52,58 @@ const MARKER_COLOR = "#1d4ed8";
 // rather than floating awkwardly through it from most camera angles.
 const MARKER_LABEL_HEIGHT = 2.2;
 
-const FORKLIFT_LENGTH = 1.4; // along travel direction (local X)
-const FORKLIFT_WIDTH = 1.0; // across (local Z)
-const FORKLIFT_HEIGHT = 0.9;
-const FORKLIFT_COLOR = "#f59e0b";
+// Deliberately blocky: a handful of boxes and cylinders, no bevels or
+// detail meshes. At the zoom levels this is read from, silhouette is all
+// that survives anyway, and the twin is about layout and flow rather than
+// vehicle modelling. Local axes: +X is forward (travel direction), +Y up,
+// Z across.
+const BODY_COLOR = "#facc15"; // yellow — distinct from the amber "partial pallet" fill
+const METAL_COLOR = "#94a3b8";
+const WHEEL_COLOR = "#1f2937";
+
+const BODY_LENGTH = 0.85;
+const BODY_HEIGHT = 0.5;
+const BODY_WIDTH = 0.8;
+const BODY_CENTER_X = -0.2;
+const BODY_CENTER_Y = 0.46;
+
+const CAB_HEIGHT = 0.42;
+
+const MAST_X = 0.32;
+const MAST_HEIGHT = 1.05;
+const MAST_THICKNESS = 0.09;
+const MAST_WIDTH = 0.62;
+
+const FORK_LENGTH = 0.62;
+const FORK_THICKNESS = 0.05;
+const FORK_WIDTH = 0.13;
+const FORK_Y = 0.12;
+const FORK_SPACING = 0.2; // half-distance between the two forks
+const FORK_TIP_X = MAST_X + FORK_LENGTH / 2 + MAST_THICKNESS / 2;
+
+const WHEEL_RADIUS = 0.17;
+const WHEEL_THICKNESS = 0.12;
+const WHEEL_X = 0.3;
+const WHEEL_Z = 0.37;
+
+// Carried pallets ride the forks, stacked upward in the order picked.
+const CARRIED_PALLET_COLOR = "#dc2626";
+const CARRIED_PALLET_SIZE: [number, number, number] = [0.5, 0.18, 0.5];
+const CARRIED_PALLET_GAP = 0.04;
+
+// Exhaust puffs behind the rear wheels — only while actually driving.
+const SMOKE_COUNT = 3;
+const SMOKE_PERIOD = 0.75; // seconds for one puff to rise and fade
+const SMOKE_COLOR = "#cbd5e1";
+const SMOKE_START_X = -0.62;
+
+// Hover highlight for the leg arriving at the operations row under the
+// cursor — wider than the lane it traces and sitting just above it, so it
+// reads as a halo around that ribbon rather than replacing it.
+const BLINK_COLOR = "#facc15";
+const BLINK_WIDTH = ROUTE_WIDTH * 2.4;
+const BLINK_ELEVATION = ROUTE_HEIGHT + 0.02;
+const BLINK_PERIOD = 0.9; // seconds per pulse — matches StepBlink's column
 
 function ArrowMarker({ position, angleRad }: { position: Point; angleRad: number }) {
   return (
@@ -119,6 +167,63 @@ function LegLane({ points }: { points: Point[] }) {
   );
 }
 
+/**
+ * Pulses the leg that arrives at whichever operations row is hovered — the
+ * path counterpart to StepBlink's column over the place itself, so a row
+ * answers both "where" and "how it got there". Rides the same offset lane
+ * the route draws (so it highlights the actual drawn ribbon), sits just
+ * above it, and renders regardless of the Route layer: it's a transient
+ * hover affordance, not part of the layer model.
+ */
+function HoveredLegBlink() {
+  const simulation = useSimulation();
+  const materialRefs = useRef<(THREE.MeshStandardMaterial | null)[]>([]);
+  const run = simulation.activeRun;
+  const legIndex = simulation.hoveredStep?.legIndex ?? null;
+
+  const segments = useMemo(() => {
+    if (!run || legIndex === null || legIndex < 0 || legIndex >= run.legs.length) return null;
+    const offset = offsetPolyline(run.legs[legIndex].points, LANE_OFFSET, MITER_LIMIT);
+    return segmentsForPath(offset, ROUTE_HEIGHT);
+  }, [run, legIndex]);
+
+  useFrame(({ clock }) => {
+    const phase = (Math.sin((clock.elapsedTime / BLINK_PERIOD) * Math.PI * 2) + 1) / 2;
+    const opacity = 0.3 + phase * 0.7;
+    // Every segment of the leg carries its own material instance, so they
+    // all have to be written for the leg to pulse as one ribbon.
+    for (const material of materialRefs.current) {
+      if (material) material.opacity = opacity;
+    }
+  });
+
+  if (!segments) return null;
+
+  return (
+    <group>
+      {segments.map((segment, i) => (
+        <mesh
+          key={i}
+          position={[segment.position[0], BLINK_ELEVATION, segment.position[2]]}
+          rotation={[0, segment.rotationY, 0]}
+          raycast={() => null}
+        >
+          <boxGeometry args={[segment.length, ROUTE_HEIGHT, BLINK_WIDTH]} />
+          <meshStandardMaterial
+            ref={(el) => {
+              materialRefs.current[i] = el;
+            }}
+            color={BLINK_COLOR}
+            transparent
+            opacity={0.8}
+            depthWrite={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
 // Numbered so the visit order is legible even in static mode, where nothing
 // actually moves. depthTest disabled so a number is never hidden behind a
 // tall pallet stack or another lane — "above everything else."
@@ -177,6 +282,10 @@ function pointAtDistance(points: Point[], distance: number): { point: Point; ang
 function Vehicle({ visible }: { visible: boolean }) {
   const simulation = useSimulation();
   const groupRef = useRef<THREE.Group>(null);
+  // Whether the truck actually advanced this frame — drives the exhaust
+  // puffs. A ref, not state: it changes every frame and nothing but the
+  // smoke's own useFrame needs to read it.
+  const movingRef = useRef(false);
   const run = simulation.activeRun;
   // Recomputed only when the run itself changes (every leg transition
   // produces a new activeRun object already, via setActiveRun), not every
@@ -189,17 +298,31 @@ function Vehicle({ visible }: { visible: boolean }) {
 
   useFrame((_, delta) => {
     const run = simulation.activeRun;
-    if (!run || run.mode !== "animated" || run.isPaused || run.currentLegIndex >= run.legs.length) return;
-    const leg: Leg = run.legs[run.currentLegIndex];
-    // A Next-step fast-forward overrides the run's own speed until the leg
-    // it was fired on completes (see SimulationContext.nextStep) — goToStep
-    // clears the ref on arrival, so the following leg is back to normal.
-    const speed = simulation.fastForwardSpeedRef.current ?? simulation.speed;
-    simulation.progressRef.current += speed * delta;
-    if (simulation.progressRef.current >= leg.length) {
-      simulation.goToStep(run.currentLegIndex + 1);
-      return; // next frame picks up the new leg (or stops) fresh
+    if (!run || run.mode !== "animated" || run.currentLegIndex >= run.legs.length) {
+      movingRef.current = false;
+      return;
     }
+    const leg: Leg = run.legs[run.currentLegIndex];
+
+    if (run.isPaused) {
+      movingRef.current = false;
+    } else {
+      movingRef.current = true;
+      // A Next-step fast-forward overrides the run's own speed until the leg
+      // it was fired on completes (see SimulationContext.nextStep) — goToStep
+      // clears the ref on arrival, so the following leg is back to normal.
+      const speed = simulation.fastForwardSpeedRef.current ?? simulation.speed;
+      simulation.progressRef.current += speed * delta;
+      if (simulation.progressRef.current >= leg.length) {
+        simulation.goToStep(run.currentLegIndex + 1);
+        return; // next frame picks up the new leg (or stops) fresh
+      }
+    }
+
+    // Positioning happens even while paused: jumping to a step (from the
+    // operations list or the transport bar) only changes which leg and how
+    // far along it we are, and the vehicle has to follow that immediately —
+    // otherwise it sits wherever it was last drawn until playback resumes.
     if (!offsetLegPoints) return;
     const { point, angleRad } = pointAtDistance(offsetLegPoints, simulation.progressRef.current);
     groupRef.current?.position.set(point.x, 0, -point.y);
@@ -208,21 +331,123 @@ function Vehicle({ visible }: { visible: boolean }) {
 
   if (!visible || !run || run.mode !== "animated" || run.currentLegIndex >= run.legs.length) return null;
 
+  const carried = heldPalletsAt(run, run.currentLegIndex);
+
   return (
     <group ref={groupRef}>
-      <mesh position={[0, FORKLIFT_HEIGHT / 2, 0]} raycast={() => null}>
-        <boxGeometry args={[FORKLIFT_LENGTH, FORKLIFT_HEIGHT, FORKLIFT_WIDTH]} />
-        <meshStandardMaterial color={FORKLIFT_COLOR} />
+      <ForkliftModel carried={carried} />
+      <Smoke movingRef={movingRef} />
+    </group>
+  );
+}
+
+/** The vehicle itself — see the constants above for the deliberately blocky construction. */
+function ForkliftModel({ carried }: { carried: number }) {
+  return (
+    <group>
+      {/* Counterweight body + the cab block stacked on its rear half. */}
+      <mesh position={[BODY_CENTER_X, BODY_CENTER_Y, 0]} raycast={() => null}>
+        <boxGeometry args={[BODY_LENGTH, BODY_HEIGHT, BODY_WIDTH]} />
+        <meshStandardMaterial color={BODY_COLOR} />
       </mesh>
-      {/* Forward-facing indicator — same two-step rotation trick as Paths.tsx's directional arrow (rotate to point along local +X, then rely on the group's own heading). */}
       <mesh
-        position={[FORKLIFT_LENGTH / 2 + 0.15, FORKLIFT_HEIGHT / 2, 0]}
-        rotation={[0, 0, -Math.PI / 2]}
+        position={[BODY_CENTER_X - 0.12, BODY_CENTER_Y + BODY_HEIGHT / 2 + CAB_HEIGHT / 2, 0]}
         raycast={() => null}
       >
-        <coneGeometry args={[0.22, 0.45, 8]} />
-        <meshStandardMaterial color="#1f2937" />
+        <boxGeometry args={[BODY_LENGTH * 0.55, CAB_HEIGHT, BODY_WIDTH * 0.8]} />
+        <meshStandardMaterial color={BODY_COLOR} />
       </mesh>
+
+      {/* Mast: the upright the forks hang off. */}
+      <mesh position={[MAST_X, MAST_HEIGHT / 2, 0]} raycast={() => null}>
+        <boxGeometry args={[MAST_THICKNESS, MAST_HEIGHT, MAST_WIDTH]} />
+        <meshStandardMaterial color={METAL_COLOR} metalness={0.6} roughness={0.4} />
+      </mesh>
+
+      {/* The two forks. */}
+      {[-FORK_SPACING, FORK_SPACING].map((z) => (
+        <mesh key={z} position={[FORK_TIP_X, FORK_Y, z]} raycast={() => null}>
+          <boxGeometry args={[FORK_LENGTH, FORK_THICKNESS, FORK_WIDTH]} />
+          <meshStandardMaterial color={METAL_COLOR} metalness={0.6} roughness={0.4} />
+        </mesh>
+      ))}
+
+      {/* Four wheels — cylinders laid on their side (their own axis is Y, so
+          a quarter turn about X points it across the vehicle). */}
+      {[
+        [WHEEL_X, WHEEL_Z],
+        [WHEEL_X, -WHEEL_Z],
+        [-WHEEL_X, WHEEL_Z],
+        [-WHEEL_X, -WHEEL_Z],
+      ].map(([x, z]) => (
+        <mesh key={`${x},${z}`} position={[x, WHEEL_RADIUS, z]} rotation={[Math.PI / 2, 0, 0]} raycast={() => null}>
+          <cylinderGeometry args={[WHEEL_RADIUS, WHEEL_RADIUS, WHEEL_THICKNESS, 8]} />
+          <meshStandardMaterial color={WHEEL_COLOR} />
+        </mesh>
+      ))}
+
+      {/* Whatever it's currently hauling, stacked on the forks. */}
+      {Array.from({ length: carried }, (_, i) => (
+        <mesh
+          key={i}
+          position={[
+            FORK_TIP_X,
+            FORK_Y + FORK_THICKNESS / 2 + CARRIED_PALLET_SIZE[1] / 2 + i * (CARRIED_PALLET_SIZE[1] + CARRIED_PALLET_GAP),
+            0,
+          ]}
+          raycast={() => null}
+        >
+          <boxGeometry args={CARRIED_PALLET_SIZE} />
+          <meshStandardMaterial color={CARRIED_PALLET_COLOR} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/**
+ * Cartoon exhaust behind the rear wheels. Each puff runs the same rise-and-
+ * fade cycle on its own offset phase, and the whole thing is hidden the
+ * moment the forklift stops — so it reads as a motion cue rather than
+ * decoration, and a truck paused at a slot isn't left idling smoke.
+ */
+function Smoke({ movingRef }: { movingRef: MutableRefObject<boolean> }) {
+  const groupRef = useRef<THREE.Group>(null);
+  const puffRefs = useRef<(THREE.Mesh | null)[]>([]);
+
+  useFrame(({ clock }) => {
+    const group = groupRef.current;
+    if (!group) return;
+    group.visible = movingRef.current;
+    if (!group.visible) return;
+
+    puffRefs.current.forEach((puff, i) => {
+      if (!puff) return;
+      const phase = ((clock.elapsedTime + (i * SMOKE_PERIOD) / SMOKE_COUNT) % SMOKE_PERIOD) / SMOKE_PERIOD;
+      puff.position.set(SMOKE_START_X - phase * 0.5, 0.22 + phase * 0.35, 0);
+      const scale = 0.06 + phase * 0.16;
+      puff.scale.setScalar(scale);
+      const material = puff.material as THREE.MeshStandardMaterial;
+      material.opacity = (1 - phase) * 0.45;
+    });
+  });
+
+  return (
+    <group ref={groupRef}>
+      {Array.from({ length: SMOKE_COUNT }, (_, i) => (
+        <mesh
+          key={i}
+          ref={(el) => {
+            puffRefs.current[i] = el;
+          }}
+          raycast={() => null}
+        >
+          {/* An 8-sided sphere: round enough to read as a puff, blocky
+              enough to match the rest of the vehicle. */}
+          <sphereGeometry args={[1, 6, 4]} />
+          <meshStandardMaterial color={SMOKE_COLOR} transparent opacity={0.4} depthWrite={false} />
+        </mesh>
+      ))}
     </group>
   );
 }
@@ -250,6 +475,7 @@ export function Forklift() {
       {showRoute &&
         run.legs.map((leg, i) => <LegLane key={i} points={leg.points} />)}
       {showRoute && <StopMarkers points={stopPoints} />}
+      <HoveredLegBlink />
       <Vehicle visible={showRoute} />
     </group>
   );
