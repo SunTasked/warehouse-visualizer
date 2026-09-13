@@ -833,8 +833,8 @@ run + forklift), `pathHeatmap`, `slotHeatmap`. Plus a `labelCounts` display *opt
 layer, that draws numeric counts alongside whichever heatmaps are on — deliberately not
 its own layer: the user's own original proposal was "heatmap colors" and "heatmap values"
 as two separate layers, but numbers with no coloring isn't a view anyone actually wants, so
-it's a modifier instead. Panel is docked bottom-left, always visible in view mode,
-collapsible. Gating lives centrally in `WarehouseScene.tsx` for most components (so the
+it's a modifier instead. Panel is docked bottom-right (bottom-left until the 2026-09-12
+console relayout, below), always visible in view mode, collapsible. Gating lives centrally in `WarehouseScene.tsx` for most components (so the
 layer model reads as one list in one place), with three deliberate exceptions that read
 layer state themselves: `Paths.tsx` (needs to know which of its own two layers —
 `paths`/`pathHeatmap` — is on to choose its render mode, see below), `Forklift.tsx` (keeps
@@ -850,6 +850,11 @@ heatmap (picks/stores per slot), and leaving empty rack frames standing while pa
 disappear would defeat that. `Slots.tsx` reads the `pallets` layer directly (one of the
 three exceptions above) to decide whether to mount its rack subtree, while the pad/entry
 marker/id label stay gated on `slots` centrally as before.
+
+`pallets` starts **hidden** (changed 2026-09-13, per the plant owner): the view opens on
+the layout itself — walls, slot pads, corridors, facilities — with stock one toggle away.
+Every other layer's default is unchanged: structure, slots, facilities, paths and route on;
+both heatmaps off.
 
 **The core clutter fix** (`Paths.tsx`): a path segment now renders EITHER as the plain
 black corridor OR as its two directional heatmap lanes — never both, closing the
@@ -1307,6 +1312,43 @@ Verified (per requester, not redone here): `tsc --noEmit` clean; Playwright zero
 errors; Toolbar absent in view mode; menu opens with the three expected items and closes
 on an outside click; Edit from the menu brings up the edit toolbar.
 
+#### Presets
+
+**Overview → Presets** expands, in place, into the warehouses shipped with the app —
+*Test plant* (the demo, `schema/warehouse.example.json`) and *CML* (Batiment 13A imported
+from the plant plan, `schema/CML.plan.json`, §5.7) — each loadable in one click, with a
+check mark against the one on screen. The registry is `src/data/presets.ts`; each preset
+imports its files lazily, so the 453-location plant only reaches the browser when opened.
+The submenu expands inside the dropdown rather than flying out sideways, so it behaves the
+same on a click and never runs off the screen edge.
+
+Preset ids must be unique. `App.tsx` keys the scene on `warehouse.id` to remount it and
+reframe the camera, and the demo still carries the id `bat-13a` from when it was named
+after that building — so the imported plant's id became `cml`. Two presets sharing an id
+would keep the previous building's camera framing after a switch.
+
+**Replacing the warehouse now resets everything that belonged to the old one**, for
+presets and **Load…** alike (the file load previously did none of this):
+- the recorded session and analytics snapshots are discarded — same reasoning as entering
+  edit mode, the runs were measured against a layout no longer on screen — behind a confirm
+  naming exactly what goes, unsaved changes included, asked only when something would be
+  lost. ("Changes", not "layout edits": a simulated run's picks and stores go through the
+  editor history too, so moved stock alone makes the warehouse dirty);
+- view focus resets to plant level, since a drill-down into a building that doesn't exist
+  in the new warehouse would leave the breadcrumb pointing at nothing;
+- a preset drops the file handles (`EditorContext.loadWarehouse`), so the next Save prompts
+  for a location instead of silently writing the preset over the file open before it.
+
+Verified: `tsc --noEmit` clean; Playwright zero console errors. Pallets starts unchecked
+with Slots still on; the menu reads Presets ▸ / Load… / Save / Edit layout…; the submenu
+lists Test plant ✓ and CML. Loading CML with nothing to lose asks nothing, closes the
+menu, shows "CML" with 453 slots / 12 paths / 1 lift station / 1 delivery space, and
+resets a drilled-in breadcrumb (2 crumbs → 1); the check mark follows the loaded preset;
+switching back to Test plant is likewise silent. With a recorded run, loading CML asks
+"Loading CML replaces the current warehouse. You will lose unsaved changes, plus 1
+recorded run and both heatmaps."; accepting leaves Performances disabled, capture disarmed
+and the run console idle. The geometry checker's results are unchanged on the renamed plan.
+
 ### 5.7 Importing a real plant from the CML workbook (decided, v1)
 
 The plant's real layout exists only as an Excel floor plan (`data/CML_warehouse.xlsx`,
@@ -1317,6 +1359,12 @@ a script rather than a one-off hand-built JSON, so a re-export can simply be re-
 ```
 python scripts/import_plan_xlsx.py --building "BATIMENT 13A"
 ```
+
+It writes `schema/CML.plan.json` (layout) and `schema/CML.content.json` (empty stock), both
+paths explicit flags rather than one derived from the other. The plant is the warehouse
+(`--id cml`, `--name CML`); the sheet's block becomes its building (`Batiment 13A`), which
+every corridor and facility belongs to. It superseded `scripts/generate-batiment-13a.js`,
+an eyeballed approximation with arbitrary ids, which was removed along with its npm script.
 
 **The workbook itself is deliberately not committed** (`.gitignore`): it carries real
 picking history, including operator initials, in its `Feuil2`/`Feuil3` sheets. Only the
@@ -1523,6 +1571,18 @@ stock lists don't apply to an imported plant.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-13 — Warehouse presets (§5.6): **Overview → Presets** loads *Test plant* or *CML*
+  in one click, from a lazily-imported registry in `src/data/presets.ts`. The imported plant
+  was renamed `schema/CML.plan.json` / `CML.content.json` with warehouse id `cml` and name
+  "CML", its building becoming "Batiment 13A" — the new id is required, not cosmetic: the
+  demo still carries `bat-13a`, and the scene only remounts and reframes its camera on an
+  id change. Replacing the warehouse, by preset *or* by **Load…**, now discards the
+  session and snapshots behind a confirm naming the losses, and resets view focus; the
+  file load previously did neither, leaving routes scored against a layout no longer on
+  screen and a breadcrumb pointing at a building that no longer existed. Presets also drop
+  the previous file's handles so Save can't overwrite that file with the preset. The
+  `pallets` layer now starts hidden (§5.4). Removed `scripts/generate-batiment-13a.js` and
+  its npm script, superseded by the real import.
 - 2026-09-13 — Real plant layouts can now be imported from the customer's Excel floor plan
   (new §5.7, `scripts/import_plan_xlsx.py`), replacing the hand-approximated
   `schema/warehouse.batiment-13a.json` with one derived from the source. The workbook

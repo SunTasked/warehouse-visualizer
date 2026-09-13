@@ -38,13 +38,14 @@ export const LAYER_LABELS: Record<LayerId, { label: string; hint: string }> = {
   slotHeatmap: { label: "Slot heatmap", hint: "Captured picks and stores per slot" },
 };
 
-// Everything physical on, measurements off: the default view answers "what is
-// this warehouse" — a heatmap answers a question the user has to ask first,
-// and (before any capture) would render as nothing anyway.
+// The building on, measurements off: the default view answers "what is this
+// warehouse" — a heatmap answers a question the user has to ask first, and
+// (before any capture) would render as nothing anyway. Stock starts hidden
+// too, so what the view shows first is the layout rather than what's in it.
 const DEFAULT_VISIBILITY: Record<LayerId, boolean> = {
   structure: true,
   slots: true,
-  pallets: true,
+  pallets: false,
   facilities: true,
   paths: true,
   route: true,

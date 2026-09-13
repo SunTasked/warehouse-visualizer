@@ -104,7 +104,10 @@ interface EditorContextValue {
   showHistory: boolean;
   setShowHistory: (value: boolean) => void;
   save: () => Promise<void>;
-  load: () => Promise<void>;
+  /** Opens a warehouse from files. Resolves false if the user cancelled the picker. */
+  load: () => Promise<boolean>;
+  /** Replaces the warehouse with one that has no file behind it (a preset). */
+  loadWarehouse: (warehouse: Warehouse) => void;
 }
 
 const EditorContext = createContext<EditorContextValue | null>(null);
@@ -440,19 +443,32 @@ export function EditorProvider({
     setDirty(false);
   }, [warehouse]);
 
-  const load = useCallback(async () => {
-    const result = await loadWarehouseFiles();
-    if (!result) return;
-    fileHandlesRef.current = result.handles;
+  const replaceWarehouse = useCallback((next: Warehouse, handles: WarehouseFileHandles) => {
+    fileHandlesRef.current = handles;
     setState({
-      warehouse: result.warehouse,
-      entries: [{ warehouse: result.warehouse, label: `Loaded ${result.warehouse.name}` }],
+      warehouse: next,
+      entries: [{ warehouse: next, label: `Loaded ${next.name}` }],
       cursor: 0,
     });
     setDirty(false);
     setSelectedSlotIds(new Set());
     setAddSlotMode(false);
   }, []);
+
+  const load = useCallback(async () => {
+    const result = await loadWarehouseFiles();
+    if (!result) return false;
+    replaceWarehouse(result.warehouse, result.handles);
+    return true;
+  }, [replaceWarehouse]);
+
+  // A preset has no file behind it, so the previous file's handles are
+  // dropped — otherwise the next Save would silently write the preset over
+  // whatever file was open before.
+  const loadWarehouse = useCallback(
+    (next: Warehouse) => replaceWarehouse(next, { configHandle: null, contentHandle: null }),
+    [replaceWarehouse],
+  );
 
   const value = useMemo<EditorContextValue>(
     () => ({
@@ -493,6 +509,7 @@ export function EditorProvider({
       setShowHistory,
       save,
       load,
+      loadWarehouse,
     }),
     [
       warehouse,
@@ -524,6 +541,7 @@ export function EditorProvider({
       showHistory,
       save,
       load,
+      loadWarehouse,
     ],
   );
 

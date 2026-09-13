@@ -299,8 +299,10 @@ def main():
     ap.add_argument("--workbook", default="data/CML_warehouse.xlsx")
     ap.add_argument("--sheet", default="PLAN_Sortie")
     ap.add_argument("--building", default="BATIMENT 13A")
-    ap.add_argument("--id", default="bat-13a")
-    ap.add_argument("--out", default="schema/warehouse.batiment-13a.json")
+    ap.add_argument("--id", default="cml")
+    ap.add_argument("--name", default="CML")
+    ap.add_argument("--out", default="schema/CML.plan.json")
+    ap.add_argument("--content-out", default="schema/CML.content.json")
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parent.parent
@@ -309,6 +311,10 @@ def main():
 
     r0, r1, label = find_building_rows(ws, args.building)
     print(f"{label}: rows {r0}..{r1}")
+    # The warehouse is the plant (--id/--name); the building is its wall loop,
+    # named after the sheet's own block, and what every facility and corridor
+    # belongs to.
+    building_id = label.title()
     locations, blacks = extract(ws, r0, r1)
     print(f"  {len(locations)} locations, {sum(len(l['cells']) for l in locations.values())} positions, "
           f"{len(blacks)} blocked")
@@ -451,7 +457,7 @@ def main():
         return [{"x": round(x, 3), "y": round(y, 3)} for x, y in pts]
 
     paths = [
-        {"id": p["id"], "points": fmt(p["points"]), "width": 2.2, "buildingIds": [args.id]}
+        {"id": p["id"], "points": fmt(p["points"]), "width": 2.2, "buildingIds": [building_id]}
         for p in paths
         if len(p["points"]) > 1
     ]
@@ -459,16 +465,16 @@ def main():
     # --- home base ---------------------------------------------------------
     # Not in the spreadsheet: the app needs somewhere for a forklift to start
     # and deliver to. Placed on the clear floor south of the last rack.
-    lift = {"id": "CL01", "x": round(trunk_x + 6, 3), "y": round(dock_y - 2.5, 3), "buildingId": args.id}
-    dock = {"id": "DS01", "x": round(trunk_x + 18, 3), "y": round(dock_y - 2.5, 3), "buildingId": args.id}
+    lift = {"id": "CL01", "x": round(trunk_x + 6, 3), "y": round(dock_y - 2.5, 3), "buildingId": building_id}
+    dock = {"id": "DS01", "x": round(trunk_x + 18, 3), "y": round(dock_y - 2.5, 3), "buildingId": building_id}
 
     config = {
         "id": args.id,
-        "name": label.title(),
+        "name": args.name,
         "units": "m",
         "walls": [
             {
-                "id": args.id,
+                "id": building_id,
                 "closed": True,
                 "points": [
                     {"x": 0, "y": 0},
@@ -490,7 +496,9 @@ def main():
     out.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     print(f"  wrote {out.relative_to(root)}  ({len(slots)} slots, {len(paths)} paths)")
 
-    content_path = out.with_name(out.stem.replace("warehouse.", "warehouse.content.") + out.suffix)
+    # Explicit rather than derived from the plan's filename: deriving it once
+    # silently pointed the empty content file at the plan itself.
+    content_path = root / args.content_out
     content_path.write_text(
         json.dumps({"warehouseId": args.id, "slots": []}, indent=2) + "\n", encoding="utf-8"
     )

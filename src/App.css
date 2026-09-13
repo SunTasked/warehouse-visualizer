@@ -1858,6 +1858,63 @@ body,
   margin: 0.25rem 0.3rem;
 }
 
+/* Presets submenu: expands in place rather than flying out sideways, so it
+   works the same on a click as on hover and never runs off the screen edge. */
+.app__menu-list {
+  min-width: 250px;
+}
+
+.app__menu-item--sub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.app__menu-caret {
+  font-size: 0.6rem;
+  color: #9aa3b5;
+}
+
+.app__submenu {
+  margin: 0.1rem 0 0.25rem 0.5rem;
+  padding-left: 0.3rem;
+  border-left: 2px solid #eef1f6;
+}
+
+.app__preset {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
+.app__preset:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.app__preset-check {
+  width: 0.8rem;
+  flex: none;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.app__preset-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.app__preset-label {
+  font-weight: 600;
+  color: #1a2233;
+}
+
+.app__preset-desc {
+  font-size: 0.7rem;
+  color: #5a6270;
+}
+
 /* --- Draggable run console --- */
 
 .run-console__bar {

@@ -4,6 +4,33 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-13 (cont'd) — warehouse presets, CML rename, pallets hidden by default
+
+- Design in specs.md §5.6 ("Presets"), §5.7 (new file names), §5.4 (layer default) plus one
+  decision log entry.
+- Renamed `schema/warehouse.batiment-13a.json` → `schema/CML.plan.json` and its content file
+  → `schema/CML.content.json` (git mv), then regenerated through the importer, which gained
+  `--name` and an explicit `--content-out`. Its old derivation of the content path from the
+  plan's filename would have written the empty content file over `CML.plan.json`.
+- Warehouse id `bat-13a` → `cml`, name → "CML", building/wall loop → "Batiment 13A". Needed
+  because the demo still carries `bat-13a` and `App.tsx` remounts the scene (reframing the
+  camera) only when the id changes.
+- New `src/data/presets.ts` registry (lazy JSON imports). `EditorContext`: shared
+  `replaceWarehouse`; `load()` now resolves a boolean; new `loadWarehouse()` drops file handles.
+  `AppHeader.tsx`: Presets submenu expanding in place, with a check on the preset on screen;
+  Load… and presets both confirm losses, then clear session/snapshots and reset view focus.
+- `LayerContext.tsx`: `pallets` default visibility → false.
+- Removed obsolete `scripts/generate-batiment-13a.js` + its `generate:batiment-13a` npm
+  script; README sample-data section rewritten around the two presets.
+- One wording fix found in verification: the confirm said "unsaved layout edits" after a run
+  that had only moved stock (simulated picks mark the warehouse dirty too) — now "unsaved
+  changes".
+- Verified: `tsc --noEmit` clean; Playwright zero console errors across default layers, menu
+  contents, both preset switches, check-mark tracking, focus reset, silent load when nothing
+  would be lost, and the confirm-then-clear path with a recorded run. Geometry checker
+  unchanged on the renamed plan. Dev server had stopped mid-session and was restarted.
+- Next: picking lists still name the Test plant's slots, so CML has no runnable lists.
+
 ## 2026-09-13 (cont'd) — import real plant layouts from the CML Excel floor plan
 
 - Full design in specs.md's new §5.7 ("Importing a real plant from the CML workbook") plus
