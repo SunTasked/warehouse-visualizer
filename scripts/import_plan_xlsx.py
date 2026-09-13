@@ -941,30 +941,43 @@ def main():
             offset -= ROAD_GAP + b["height"]
         b["y0"] = offset
 
+    # Slide each building's contents east or west so the aisle it is entered
+    # by lines up with the door of the building above: the plant's buildings
+    # are linked along one straight central aisle. 15K's trunk band came out
+    # 0.6 m east of the others' and 16G's entry aisle 0.15 m west, which had
+    # put a jog in both links. Only the contents move - the walls stay put, and
+    # both buildings keep metres of clear floor on the side they move towards.
+    for north, south in zip(buildings, buildings[1:]):
+        south["dx"] = north.get("dx", 0.0) + north["south_door"][0] - south["north_door"][0]
+    buildings[0]["dx"] = 0.0
+
     walls, doors, paths, lifts, deliveries, zones, slots = [], [], [], [], [], [], []
     for i, b in enumerate(buildings):
-        dy = b["y0"]
+        dx, dy = b["dx"], b["y0"]
+        if dx:
+            print(f"{b['id']}: contents moved {dx:+.2f} m to line up with the door above")
         walls.append({
             "id": b["id"],
             "closed": True,
             "points": [(0.0, dy), (b["width"], dy), (b["width"], dy + b["height"]), (0.0, dy + b["height"])],
         })
-        slots.extend({**s, "y": s["y"] + dy} for s in b["slots"])
-        paths.extend({**p, "points": [(x, y + dy) for x, y in p["points"]]} for p in b["paths"])
-        zones.extend({**z, "y": z["y"] + dy, "buildingId": b["id"]} for z in b["zones"])
+        slots.extend({**s, "x": s["x"] + dx, "y": s["y"] + dy} for s in b["slots"])
+        paths.extend({**p, "points": [(x + dx, y + dy) for x, y in p["points"]]} for p in b["paths"])
+        zones.extend({**z, "x": z["x"] + dx, "y": z["y"] + dy, "buildingId": b["id"]} for z in b["zones"])
         for side, door in (("N", b["north_door"]), ("S", b["south_door"])):
             if door:
-                doors.append({"id": f"Door-{b['id']}-{side}", "point": (door[0], door[1] + dy), "buildingId": b["id"]})
-        lifts.append({"id": f"CL{i + 1:02d}", "point": (b["lift"][0], b["lift"][1] + dy), "buildingId": b["id"]})
-        deliveries.append({"id": f"DS{i + 1:02d}", "point": (b["delivery"][0], b["delivery"][1] + dy), "buildingId": b["id"]})
+                doors.append({"id": f"Door-{b['id']}-{side}", "point": (door[0] + dx, door[1] + dy), "buildingId": b["id"]})
+        lifts.append({"id": f"CL{i + 1:02d}", "point": (b["lift"][0] + dx, b["lift"][1] + dy), "buildingId": b["id"]})
+        deliveries.append({"id": f"DS{i + 1:02d}", "point": (b["delivery"][0] + dx, b["delivery"][1] + dy), "buildingId": b["id"]})
 
     # The links: from each building's south door straight across to the north
-    # door of the one below, with a jog halfway when their central aisles
-    # don't line up. Their ends are the doors' own points, which the trunks
-    # inside end at - the exact-coincident-point rule that joins the network.
+    # door of the one below. The contents were lined up above, so these are
+    # straight; the jog halfway is kept for a plan whose doors still differ.
+    # Their ends are the doors' own points, which the trunks inside end at -
+    # the exact-coincident-point rule that joins the network.
     for north, south in zip(buildings, buildings[1:]):
-        a = (north["south_door"][0], north["south_door"][1] + north["y0"])
-        b = (south["north_door"][0], south["north_door"][1] + south["y0"])
+        a = (north["south_door"][0] + north["dx"], north["south_door"][1] + north["y0"])
+        b = (south["north_door"][0] + south["dx"], south["north_door"][1] + south["y0"])
         mid = (a[1] + b[1]) / 2
         points = [a, b] if abs(a[0] - b[0]) < 1e-9 else [a, (a[0], mid), (b[0], mid), b]
         paths.append({
