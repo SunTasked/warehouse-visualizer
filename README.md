@@ -20,7 +20,8 @@ npm run dev
 ```
 
 Opens a 3D view of `schema/warehouse.example.json` (walls + slots) at
-`http://localhost:5173` — orbit/pan/zoom with the mouse. It does not run any simulation yet.
+`http://localhost:5173` — orbit/pan/zoom with the mouse; the **Controls** panel in the
+bottom-left corner lists how, for the mode you're in. It does not run any simulation yet.
 
 Click **Editing** to edit the layout:
 - Drag an orange corner handle to reshape a wall.

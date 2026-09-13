@@ -19,6 +19,7 @@ import { FocusBreadcrumb } from "./components/FocusBreadcrumb";
 import { PickingListPanel } from "./components/PickingListPanel";
 import { RunConsole } from "./components/RunConsole";
 import { UsageLegend } from "./components/UsageLegend";
+import { ControlsLegend } from "./components/ControlsLegend";
 import { LayerPanel } from "./components/LayerPanel";
 import { LayerProvider } from "./state/LayerContext";
 import { AnalyticsProvider } from "./state/AnalyticsContext";
@@ -77,6 +78,11 @@ function AppShell() {
             <UsageLegend />
             <LayerPanel />
           </div>
+        </div>
+        {/* Not a camera inset: it is small and low, and framing every shot
+            around it would shrink them all for a panel you read once. */}
+        <div className="app__dock app__dock--bl">
+          <ControlsLegend />
         </div>
       </div>
     </div>

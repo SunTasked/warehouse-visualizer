@@ -49,6 +49,253 @@ body,
   align-items: flex-end;
 }
 
+.app__dock--bl {
+  bottom: 1rem;
+  left: 1rem;
+}
+
+/* How to get around the scene (ControlsLegend.tsx). */
+.controls-legend {
+  width: 250px;
+  background: #ffffff;
+  border: 1px solid #d7dbe3;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.12);
+  font-size: 0.75rem;
+  overflow: hidden;
+}
+
+.controls-legend__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: #f7f8fb;
+  padding: 0.4rem 0.7rem;
+  font: inherit;
+  font-weight: 600;
+  color: #1a2233;
+  cursor: pointer;
+  text-align: left;
+}
+
+.controls-legend__header--open {
+  border-bottom: 1px solid #eef1f6;
+}
+
+.controls-legend__chevron {
+  color: #5a6270;
+  font-size: 0.7rem;
+}
+
+.controls-legend__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  margin: 0;
+  padding: 0.5rem 0.7rem 0.6rem;
+}
+
+.controls-legend__row {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.controls-legend__row dt {
+  flex: none;
+  width: 5.6rem;
+  color: #5a6270;
+}
+
+.controls-legend__row dd {
+  margin: 0;
+  color: #1a2233;
+}
+
+.controls-legend kbd {
+  display: inline-block;
+  padding: 0 0.28rem;
+  border: 1px solid #c7ccd6;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: #f7f8fa;
+  font: inherit;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+/* Edge hints (WarehouseScene's EdgeHints): along each side of the view the
+   site carries on past, the scene blurs slightly and a faint glow and chevron
+   point the way. Over the canvas, under the docks, never catching the
+   pointer. */
+.edge-hints {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.edge-hint {
+  position: absolute;
+  display: flex;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+
+.edge-hint--on {
+  opacity: 1;
+}
+
+.edge-hint::before,
+.edge-hint::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.edge-hint::before {
+  backdrop-filter: blur(2.5px);
+  -webkit-mask-image: linear-gradient(var(--edge-inward), #000, transparent);
+  mask-image: linear-gradient(var(--edge-inward), #000, transparent);
+}
+
+.edge-hint::after {
+  background: var(--edge-glow);
+}
+
+.edge-hint__chevron {
+  position: relative;
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  margin: 10px;
+  border-left: 2px solid rgba(37, 71, 160, 0.5);
+  border-top: 2px solid rgba(37, 71, 160, 0.5);
+  transform: rotate(var(--edge-turn));
+}
+
+.edge-hint--top,
+.edge-hint--bottom {
+  left: 0;
+  right: 0;
+  height: 60px;
+  justify-content: center;
+}
+
+.edge-hint--left,
+.edge-hint--right {
+  top: 0;
+  bottom: 0;
+  width: 60px;
+  align-items: center;
+}
+
+.edge-hint--top {
+  top: 0;
+  align-items: flex-start;
+  --edge-inward: to bottom;
+  --edge-turn: 45deg;
+  --edge-glow: radial-gradient(ellipse 42% 100% at 50% 0%, rgba(37, 71, 160, 0.16), transparent);
+}
+
+.edge-hint--bottom {
+  bottom: 0;
+  align-items: flex-end;
+  --edge-inward: to top;
+  --edge-turn: 225deg;
+  --edge-glow: radial-gradient(ellipse 42% 100% at 50% 100%, rgba(37, 71, 160, 0.16), transparent);
+}
+
+.edge-hint--left {
+  left: 0;
+  justify-content: flex-start;
+  --edge-inward: to right;
+  --edge-turn: -45deg;
+  --edge-glow: radial-gradient(ellipse 100% 42% at 0% 50%, rgba(37, 71, 160, 0.16), transparent);
+}
+
+.edge-hint--right {
+  right: 0;
+  justify-content: flex-end;
+  --edge-inward: to left;
+  --edge-turn: 135deg;
+  --edge-glow: radial-gradient(ellipse 100% 42% at 100% 50%, rgba(37, 71, 160, 0.16), transparent);
+}
+
+/* The capture prompt (PickingListPanel's CaptureConfirm). */
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.confirm {
+  width: min(400px, calc(100vw - 2rem));
+  padding: 1rem 1.1rem;
+  background: #ffffff;
+  border: 1px solid #d7dbe3;
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.25);
+  font-family: system-ui, sans-serif; /* portalled to <body>, outside .app's font */
+  font-size: 0.85rem;
+  color: #1a2233;
+}
+
+.confirm h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.45rem;
+  font-size: 0.95rem;
+}
+
+.confirm p {
+  margin: 0 0 0.9rem;
+  color: #4b5563;
+  line-height: 1.45;
+}
+
+.confirm__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.confirm__btn {
+  border: 1px solid #d7dbe3;
+  background: #ffffff;
+  border-radius: 6px;
+  padding: 0.4rem 0.7rem;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.confirm__btn:hover {
+  background: #f3f5f9;
+}
+
+.confirm__btn--primary {
+  border-color: #b91c1c;
+  background: #b91c1c;
+  color: #ffffff;
+}
+
+.confirm__btn--primary:hover {
+  background: #991b1b;
+}
+
+.confirm .capture__dot--on {
+  background: #dc2626;
+}
+
 /* Pinned to the bottom of the right column, whatever sits above it. Like the
    dock itself, the group is click-through and only its panels aren't. */
 .app__dock > .app__dock-bottom {
@@ -434,6 +681,14 @@ body,
 
 .focus-breadcrumb__crumb--current:hover {
   background: #eaf0ff;
+}
+
+.focus-breadcrumb__crumb--resettable {
+  cursor: pointer;
+}
+
+.focus-breadcrumb__crumb--resettable:hover {
+  background: #dde7ff;
 }
 
 .focus-breadcrumb__level {
@@ -1590,6 +1845,11 @@ body,
 
 .run-console__animate input {
   margin: 0;
+}
+
+.run-console__animate--disabled {
+  color: #9ca3af;
+  cursor: default;
 }
 
 .run-console__speed {

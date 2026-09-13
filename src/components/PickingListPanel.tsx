@@ -1,6 +1,73 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import type { PickingList } from "../types/simulation";
 import { useEditor } from "../state/EditorContext";
 import { useSimulation } from "../state/SimulationContext";
+
+/**
+ * Asked before lists run while capture is armed: a demo or a test run played
+ * with capture forgotten on quietly skews the measurement, and nothing
+ * afterwards can take it back out.
+ */
+function CaptureConfirm({
+  count,
+  onCapture,
+  onWithoutCapture,
+  onCancel,
+}: {
+  count: number;
+  onCapture: () => void;
+  onWithoutCapture: () => void;
+  onCancel: () => void;
+}) {
+  const primaryRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    primaryRef.current?.focus();
+    // Capture phase, and stopped there: Escape otherwise also reaches the
+    // view's own handler and sends the camera back to the plant.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      onCancel();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [onCancel]);
+
+  return createPortal(
+    <div
+      className="confirm-backdrop"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onCancel();
+      }}
+    >
+      <div className="confirm" role="dialog" aria-modal="true" aria-labelledby="capture-confirm-title">
+        <h3 id="capture-confirm-title">
+          <span className="capture__dot capture__dot--on" />
+          Capture is on
+        </h3>
+        <p>
+          {count === 1 ? "This list" : `These ${count} lists`} will be measured into the path and slot
+          heatmaps and the capture's record. Run {count === 1 ? "it" : "them"} without capturing if this
+          isn't part of the measurement.
+        </p>
+        <div className="confirm__actions">
+          <button className="confirm__btn" onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="confirm__btn" onClick={onWithoutCapture}>
+            Run without capturing
+          </button>
+          <button ref={primaryRef} className="confirm__btn confirm__btn--primary" onClick={onCapture}>
+            Run and capture
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 /**
  * The catalogue of picking lists (§5.3): what you can launch, and how. Kept
@@ -14,7 +81,12 @@ export function PickingListPanel() {
   const simulation = useSimulation();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [collapsed, setCollapsed] = useState(false);
+  const [pendingLists, setPendingLists] = useState<PickingList[] | null>(null);
   const selectAllRef = useRef<HTMLInputElement>(null);
+  // Asked once per capture: after "Run and capture" the user has said what
+  // they want, and asking again before every list of a long capture would
+  // only teach them to click through it. Disarming forgets the answer.
+  const captureConfirmedRef = useRef(false);
 
   const all = simulation.pickingLists;
   const allSelected = all.length > 0 && selected.size === all.length;
@@ -30,6 +102,12 @@ export function PickingListPanel() {
   useEffect(() => {
     if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected;
   }, [someSelected]);
+
+  useEffect(() => {
+    if (!simulation.captureArmed) captureConfirmedRef.current = false;
+  }, [simulation.captureArmed]);
+
+  const cancelPending = useCallback(() => setPendingLists(null), []);
 
   if (mode !== "view") return null;
 
@@ -47,6 +125,15 @@ export function PickingListPanel() {
   };
 
   const selectedLists = all.filter((list) => selected.has(list.id));
+
+  const launch = (lists: PickingList[]) => {
+    if (lists.length === 0) return;
+    if (simulation.captureArmed && !captureConfirmedRef.current) {
+      setPendingLists(lists);
+      return;
+    }
+    simulation.playQueue(lists);
+  };
 
   return (
     <div className="picking-panel">
@@ -92,7 +179,7 @@ export function PickingListPanel() {
                 <span>{list.stops.map((s) => s.id).join(" → ")}</span>
               </div>
             </div>
-            <button className="picking-panel__play" onClick={() => simulation.playList(list)}>
+            <button className="picking-panel__play" onClick={() => launch([list])}>
               Play
             </button>
           </li>
@@ -106,7 +193,7 @@ export function PickingListPanel() {
         <button
           className="picking-panel__btn"
           disabled={selectedLists.length === 0}
-          onClick={() => simulation.playQueue(selectedLists)}
+          onClick={() => launch(selectedLists)}
           title="Run the ticked lists back to back"
         >
           Run selected ({selectedLists.length})
@@ -120,6 +207,23 @@ export function PickingListPanel() {
         </button>
       </div>
         </>
+      )}
+
+      {pendingLists && (
+        <CaptureConfirm
+          count={pendingLists.length}
+          onCancel={cancelPending}
+          onCapture={() => {
+            captureConfirmedRef.current = true;
+            setPendingLists(null);
+            simulation.playQueue(pendingLists);
+          }}
+          onWithoutCapture={() => {
+            simulation.setCaptureArmed(false);
+            setPendingLists(null);
+            simulation.playQueue(pendingLists);
+          }}
+        />
       )}
     </div>
   );

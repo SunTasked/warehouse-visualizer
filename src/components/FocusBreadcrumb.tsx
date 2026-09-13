@@ -61,14 +61,22 @@ export function FocusBreadcrumb() {
     <div className="focus-breadcrumb">
       {crumbs.map((crumb) => {
         const isCurrent = crumb.level === focus.level;
+        // Plant stays clickable while current: it resets the zoom to the
+        // plant's default shot, from wherever the user has zoomed or panned.
+        const clickable = !isCurrent || crumb.level === "plant";
         return (
           <div
             key={crumb.level}
-            className={
-              isCurrent ? "focus-breadcrumb__crumb focus-breadcrumb__crumb--current" : "focus-breadcrumb__crumb"
-            }
-            onClick={isCurrent ? undefined : crumb.onClick}
-            role={isCurrent ? undefined : "button"}
+            className={[
+              "focus-breadcrumb__crumb",
+              isCurrent ? "focus-breadcrumb__crumb--current" : "",
+              isCurrent && clickable ? "focus-breadcrumb__crumb--resettable" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+            onClick={clickable ? crumb.onClick : undefined}
+            role={clickable ? "button" : undefined}
+            title={crumb.level === "plant" ? "Back to the plant's default zoom (Esc)" : undefined}
           >
             <span className="focus-breadcrumb__level">{crumb.label}</span>
             <span className="focus-breadcrumb__value">{crumb.value}</span>

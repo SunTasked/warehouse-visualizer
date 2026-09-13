@@ -256,7 +256,8 @@ authoritative for inspecting/changing actual counts).
 A **left-side breadcrumb widget** (`src/components/FocusBreadcrumb.tsx`) always shows
 the current path (e.g. "Warehouse: Main warehouse / Slot: A02") — every crumb except the
 current (deepest) one is clickable and jumps *straight* to that level, not just one
-step at a time.
+step at a time. Plant stays clickable even while current: it resets the zoom (§5.6
+"Getting around a large plant").
 
 State lives in `src/state/ViewFocusContext.tsx` (deliberately separate from
 `EditorContext` — this is view-mode navigation UI state, not warehouse data), tracking
@@ -1441,6 +1442,83 @@ and counting dark (rack, corridor, wall, name) pixels: none under the left (398 
 (350 px) panels and 27–46 k between them, for Test plant, Main warehouse, the Annex, CML and
 13A alike.
 
+#### Getting around a large plant: default zoom, edge hints, Follow, capture prompt, controls
+
+From the plant owner's review of the nine-building CML plant.
+
+**The plant shot takes in two buildings.** Fitted whole, CML's half-kilometre column of
+buildings left every slot a speck. The plant-level shot (`plantShot` in `focusBounds.ts`)
+now fits `defaultPlantBox`: the plant's two northernmost buildings, names included, or the
+whole plant when it has no more than two (so the Test plant is framed as before). Zooming
+out further is still free. The first shot is centred on those buildings. Every later one
+(the Plant crumb, which now stays clickable while current, Escape, backing out of a
+building) resets only the zoom and keeps whatever is in the middle of the view. That
+middle is taken where the view's centre ray meets the floor, not at the orbit target:
+panning a tilted camera raises or lowers the target too, and recentring on it had landed
+7.5 m off. The centre is held just far enough inside the plant that the shot never looks
+out past its edge, and the shot is aimed at floor level so repeated resets don't creep.
+
+**Edge hints.** Along each side of the view the site carries on past, the scene blurs
+slightly under a faint glow with a small chevron pointing out — a quieter take on the
+owner's video-game reference. `OverflowProbe` (WarehouseScene) projects the shown box's
+floor corners every frame and reports only changes: the plant at plant level, the focused
+building at building level (the hidden ones aren't more to see), nothing deeper in or in
+edit mode. `EdgeHints` sits over the canvas, under the docks, and never takes the pointer.
+
+**Runs no longer move the camera.** `FocusCameraDriver` reframed whenever the warehouse
+changed, and every pick and store changes it, so each list snapped the view back to the
+plant. Only a change of focus moves the camera now; the warehouse and the viewport are read
+when a shot is framed. A run starting still has to show every building, so a cross-building
+route isn't cut off by building visibility (§5.1). It calls `revealPlant()`, which drops to
+plant level with `keepCamera` set, and the driver leaves that focus alone. `reset()` sets a
+fresh focus object each time, so asking for the plant while already there still reaches the
+driver.
+
+**Follow** (run console, after Animate's speed; disabled without Animate). `Forklift.tsx`
+writes the vehicle's position to `vehiclePositionRef` every frame, and `FollowCameraDriver`
+eases the orbit target onto it through CameraControls' own smoothing (`moveTo` with a
+transition), so the camera trails the truck instead of jittering with it. The first time
+there is a forklift to follow, the shot zooms to the building it is in, as a building click
+would. After that only the target moves, so a zoom or angle the user picks sticks across
+legs, buildings and runs. Right-drag and multi-touch pans are switched off while following
+(they would only be dragged straight back) and restored after. Any shot the user asks for —
+a click, a crumb, Escape — turns Follow off.
+
+**Capture prompt.** Launching lists (Play or Run selected) while capture is armed asks
+first: Cancel, Run without capturing (disarms, then runs), or Run and capture. It is asked
+once per capture; disarming forgets the answer, since asking before every list of a long
+capture would only teach people to click through it. "Run without capturing" disarms and
+launches in one click, before React re-renders, so `recordRun` and `beginOrderList` read
+`captureArmedRef` rather than the state — the same trick as `animateRef`. The dialog is
+portalled to `<body>` and swallows Escape in the capture phase, so cancelling it doesn't also
+send the camera to the plant.
+
+**Controls legend** (`ControlsLegend.tsx`), bottom-left in its own dock (`.app__dock--bl`,
+not a camera inset), collapsible, per mode. View mode: scroll zooms, right-drag pans,
+left-drag rotates (camera-controls' defaults); hover for details, click to zoom in, click
+empty floor to back out, Esc or the Plant crumb for the plant. Edit mode: OrbitControls'
+right-drag pan is taken by box select, so panning is Shift + left-drag.
+
+Verified in Playwright on the GPU, zero console errors, camera read back from the view
+matrix uploaded to the GPU:
+- **Default shots:** CML opens on 13A and 12B at 200 m with a bottom hint only. The Test
+  plant is still framed whole, with no hint.
+- **Runs keep the view:** two runs from a zoomed-in, panned view left the camera
+  identical to the decimetre. So did a run started from a zoomed-in 12B, whose breadcrumb
+  dropped back to Plant.
+- **Plant resets the zoom, keeps the centre:** after panning south to y = −87.6, Plant
+  returned to 200 m centred at −87.4. After panning to 16G it showed 15K and 16G, with
+  top and bottom hints.
+- **Follow:** it zoomed to 13A (162 m) and trailed the forklift 10 m a second down the
+  trunk into 12B. A zoom-out held for the rest of the run. Clicking Plant turned it off
+  and the camera stayed put.
+- **Capture prompt:**
+  - Cancel ran nothing.
+  - Without capturing, capture was disarmed and nothing was measured.
+  - Escape closed the prompt without touching the view.
+  - Run and capture measured the run, and a second list in the same capture didn't ask.
+- **Lists:** all 16 CML lists run with no warnings.
+
 ### 5.7 Importing a real plant from the CML workbook (decided, v1)
 
 The plant's real layout exists only as an Excel floor plan (`data/CML_warehouse.xlsx`,
@@ -1596,10 +1674,13 @@ in the north wall of the building below (`Door-12B-N`), where that building's tr
 one cross-building connector per pair of neighbours (`link-13A-12B`, …, each with
 `endpointBuildingIds`), the shape the building focus already draws as a stub and arrow.
 Their ends are the doors' own points, so the network joins under the exact-coincident-point
-rule. The trunks line up at x = 28 m from 13A to 14J, where the links are straight. 15K's
-central band sits one column further east, narrowed by a train strip on each side, so the
-link into it jogs halfway across the gap; 16G, with no north–south trunk, is entered down
-the aisle that opens onto its north wall nearest the door above. A single-building import
+rule. Every link is straight, at x = 28 m: each building's *contents* are slid east or west,
+walls left where they are, until the aisle it is entered by lines up with the door above.
+15K's central band came out 0.6 m east of the others' (narrowed by a train strip on each
+side), and 16G — with no north–south trunk, entered down the aisle that opens onto its north
+wall nearest the door above — 0.15 m west, which had put a jog in both links (owner's
+review). Neither move brings anything near a wall: 15K's racking starts 10 m in from its
+west wall and 16G's ends 3 m short of its east wall. A single-building import
 makes no door and no link. Corridor ids every building has carry its name (`trunk-13A`,
 `dock-13A`); aisle ids already differ (`aisle-AA`, `aisle-BA`).
 
@@ -1627,7 +1708,9 @@ doors on their walls and on the network; the network in one piece. Three warning
 corridor's drawn 2.2 m width grazes the racks along an aisle drawn one row wide: 13A's
 aisle K (14 slots, older than these imports), 10H's short east end of aisle A (5) and 15K's
 aisle R (11). The first five buildings' 3,200 slots didn't move; only their trunks and
-docks changed. In the app, with zero console errors, all 16 CML lists run in one go without
+docks changed. Straightening the last two links moved only 15K's and 16G's contents (445
+slots each, with their corridors, pads, doors and zones), and the checker's result is the
+same. In the app, with zero console errors, all 16 CML lists run in one go without
 a skipped stop — among them a pick from 10H, 14J, 15K and 16G back to 13A along the links.
 
 #### Rendering a plant this size
@@ -1791,6 +1874,15 @@ from 12B–06F and one from 10H–16G — 16 lists in all.
 ## 10. Decision Log
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
+
+- 2026-09-13 — Getting around a large plant (§5.6), from the plant owner's review of CML.
+  The plant shot fits the two northernmost buildings instead of the whole plant, with
+  subtle blurred edge hints wherever the plant carries on past the view. The Plant crumb
+  (and Escape) resets the zoom to that shot but keeps the centre. Runs no longer move the
+  camera at all. A Follow mode keeps the camera on the animated forklift at a zoom the user
+  can change. Launching lists while capture is armed asks first. A controls legend sits
+  bottom-left. In the import (§5.7), 15K's and 16G's contents slide into line with the door
+  above, so every central-aisle link is straight.
 
 - 2026-09-13 — CML completed to all nine buildings (§5.7): 10H, 14J, 15K and 16G join, still
   stacked in sheet order. On the plant owner's review of the five-building plant, buildings

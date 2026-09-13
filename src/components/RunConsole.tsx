@@ -434,6 +434,24 @@ export function RunConsole() {
               title="Travel speed for the animation only (m/s)"
             />
           )}
+          <label
+            className={
+              simulation.animate ? "run-console__animate" : "run-console__animate run-console__animate--disabled"
+            }
+            title={
+              simulation.animate
+                ? "Keep the camera on the forklift while it drives — scroll to zoom, drag to turn"
+                : "Needs Animate: a route shown complete has no forklift to follow"
+            }
+          >
+            <input
+              type="checkbox"
+              checked={simulation.follow}
+              disabled={!simulation.animate}
+              onChange={(e) => simulation.setFollow(e.target.checked)}
+            />
+            <span>Follow</span>
+          </label>
           <span className="run-console__status">
             {run ? (
               <>

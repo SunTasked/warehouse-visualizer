@@ -95,6 +95,11 @@ interface SimulationContextValue {
   /** Meters/second, animated mode only. */
   speed: number;
   setSpeed: (value: number) => void;
+  /** Whether the camera keeps the forklift in view while it drives (WarehouseScene's FollowCameraDriver). Only does anything for an animated run. */
+  follow: boolean;
+  setFollow: (value: boolean) => void;
+  /** Where the forklift is drawn right now, or null when there is none — written every frame by Forklift.tsx, so a ref, like progressRef. */
+  vehiclePositionRef: MutableRefObject<Point | null>;
   playList: (list: PickingList) => void;
   playQueue: (lists: PickingList[]) => void;
   stop: () => void;
@@ -359,7 +364,7 @@ function buildLegs(stops: PickingStop[], warehouse: Warehouse, graph: PathGraph)
 
 export function SimulationProvider({ children }: { children: ReactNode }) {
   const editor = useEditor();
-  const { reset: resetFocus } = useViewFocus();
+  const { revealPlant } = useViewFocus();
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
   // Off by default: showing a route complete is the quicker read, and the
   // metrics are identical either way — animation is something you turn on to
@@ -373,6 +378,8 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
    */
   const animateRef = useRef(animate);
   const [speed, setSpeed] = useState(2); // m/s — a plausible forklift travel speed
+  const [follow, setFollow] = useState(false);
+  const vehiclePositionRef = useRef<Point | null>(null);
   const [showPanel, setShowPanel] = useState(false);
   // Directed per-segment travel tallies for the path heatmap (Paths.tsx) —
   // keyed `"${nodeIdA}→${nodeIdB}"` (RouteEdge's own ids, already the same
@@ -383,7 +390,18 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   // (SlotHeatmap.tsx) — answers "is load balanced across the racks", which
   // the path tallies can't, since several slots share one corridor.
   const [slotUsage, setSlotUsage] = useState<Record<string, number>>({});
-  const [captureArmed, setCaptureArmed] = useState(false);
+  const [captureArmed, setCaptureArmedState] = useState(false);
+  /**
+   * Mirrors `captureArmed` for recordRun and beginOrderList, for the same
+   * reason animateRef exists: the capture prompt's "Run without capturing"
+   * disarms and launches in one click, before React re-renders, and reading
+   * the state would still find capture armed and measure the run after all.
+   */
+  const captureArmedRef = useRef(captureArmed);
+  const setCaptureArmed = useCallback((value: boolean) => {
+    captureArmedRef.current = value;
+    setCaptureArmedState(value);
+  }, []);
   const [sessionRuns, setSessionRuns] = useState<CapturedRun[]>([]);
   const [orderListStart, setOrderListStart] = useState(0);
   const [reviewedRunId, setReviewedRunId] = useState<string | null>(null);
@@ -436,6 +454,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
    */
   const recordRun = useCallback(
     (list: PickingList, stops: PickingStop[], legs: Leg[], events: StopEvent[]): number => {
+      const captured = captureArmedRef.current;
       const profiles = legs.map((leg) => legProfile(leg.points));
       const handling = resolveHandling(stops, events, editor.warehouse);
       // A ref, not current.length inside the updater: that updater runs
@@ -455,12 +474,12 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
             profiles,
             handling,
             at: Date.now(),
-            captured: captureArmed,
+            captured,
           },
         ];
       });
 
-      if (!captureArmed) return index;
+      if (!captured) return index;
 
       setEdgeUsage((current) => {
         const next = { ...current };
@@ -484,7 +503,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
 
       return index;
     },
-    [captureArmed, editor.warehouse],
+    [editor.warehouse],
   );
 
   // playNext calls itself (directly for static-mode's immediate completion
@@ -503,7 +522,9 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       setActiveRun(null);
       return;
     }
-    resetFocus(); // don't let a cross-building route get truncated by per-building visibility (§5.1)
+    // Don't let a cross-building route get truncated by per-building
+    // visibility (§5.1) — but leave the camera where the user put it.
+    revealPlant();
 
     const stops = stopsWithDepot(list, editor.warehouse);
     const events = planEvents(stops, list.mode);
@@ -538,7 +559,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       return;
     }
     setActiveRun({ list, mode: "animated", stops, events, legs, currentLegIndex: 0, isPaused: false, sessionIndex });
-  }, [applyEvent, recordRun, editor.warehouse, graph, resetFocus, syncQueuedLists]);
+  }, [applyEvent, recordRun, editor.warehouse, graph, revealPlant, syncQueuedLists]);
 
   playNextRef.current = playNext;
 
@@ -548,8 +569,8 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
    * list *is* the capture's record, so it keeps everything and simply grows.
    */
   const beginOrderList = useCallback(() => {
-    if (!captureArmed) setOrderListStart(sessionCountRef.current);
-  }, [captureArmed]);
+    if (!captureArmedRef.current) setOrderListStart(sessionCountRef.current);
+  }, []);
 
   const playList = useCallback(
     (list: PickingList) => {
@@ -676,7 +697,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     setActiveRun(null);
     setReviewedRunId(null);
     setCaptureArmed(false);
-  }, []);
+  }, [setCaptureArmed]);
 
   /**
    * Re-displays a run already played this session without re-executing it —
@@ -797,6 +818,9 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       setAnimate,
       speed,
       setSpeed,
+      follow,
+      setFollow,
+      vehiclePositionRef,
       playList,
       playQueue,
       stop,
@@ -835,6 +859,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       animate,
       setAnimate,
       speed,
+      follow,
       playList,
       playQueue,
       stop,

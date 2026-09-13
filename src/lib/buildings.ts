@@ -77,6 +77,27 @@ export function buildingLabel(loop: WallLoop, wallThickness: number): BuildingLa
   };
 }
 
+/** The building a point stands in — or, for a point between buildings (a forklift crossing to the next one), the nearest. */
+export function buildingAt(point: Point, walls: WallLoop[]): WallLoop | undefined {
+  const loops = closedLoops(walls);
+  const hit = loops.find((loop) => pointInPolygon(point, loop.points));
+  if (hit) return hit;
+  let nearest: WallLoop | undefined;
+  let nearestDistance = Infinity;
+  for (const loop of loops) {
+    const xs = loop.points.map((p) => p.x);
+    const ys = loop.points.map((p) => p.y);
+    const dx = Math.max(Math.min(...xs) - point.x, 0, point.x - Math.max(...xs));
+    const dy = Math.max(Math.min(...ys) - point.y, 0, point.y - Math.max(...ys));
+    const distance = Math.hypot(dx, dy);
+    if (distance < nearestDistance) {
+      nearest = loop;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
+}
+
 /**
  * Which building a slot belongs to, by testing its center point against
  * each closed loop. Falls back to the sole building (if there's only one)

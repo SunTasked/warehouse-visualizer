@@ -1,6 +1,6 @@
 import { Text } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
-import { useMemo, useRef, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import * as THREE from "three";
 import type { Point } from "../types/warehouse";
 import { useEditor } from "../state/EditorContext";
@@ -289,6 +289,14 @@ function Vehicle({ visible }: { visible: boolean }) {
   // puffs. A ref, not state: it changes every frame and nothing but the
   // smoke's own useFrame needs to read it.
   const movingRef = useRef(false);
+  const { vehiclePositionRef } = simulation;
+  // Nothing left to follow once the vehicle is gone (the run ended or stopped).
+  useEffect(
+    () => () => {
+      vehiclePositionRef.current = null;
+    },
+    [vehiclePositionRef],
+  );
   const run = simulation.activeRun;
   // Recomputed only when the run itself changes (every leg transition
   // produces a new activeRun object already, via setActiveRun), not every
@@ -303,6 +311,7 @@ function Vehicle({ visible }: { visible: boolean }) {
     const run = simulation.activeRun;
     if (!run || run.mode !== "animated" || run.currentLegIndex >= run.legs.length) {
       movingRef.current = false;
+      simulation.vehiclePositionRef.current = null;
       return;
     }
     const leg: Leg = run.legs[run.currentLegIndex];
@@ -328,6 +337,7 @@ function Vehicle({ visible }: { visible: boolean }) {
     // otherwise it sits wherever it was last drawn until playback resumes.
     if (!offsetLegPoints) return;
     const { point, angleRad } = pointAtDistance(offsetLegPoints, simulation.progressRef.current);
+    simulation.vehiclePositionRef.current = point;
     groupRef.current?.position.set(point.x, 0, -point.y);
     groupRef.current?.rotation.set(0, angleRad, 0);
   });

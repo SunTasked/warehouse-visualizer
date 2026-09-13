@@ -36,6 +36,8 @@ export interface Focus {
   slotId?: string;
   subSlotIndex?: number;
   palletIndex?: number;
+  /** Arrived at without asking for a new shot: the camera stays where the user left it (see revealPlant). */
+  keepCamera?: boolean;
 }
 
 const PLANT: Focus = { level: "plant" };
@@ -54,8 +56,10 @@ interface ViewFocusContextValue {
   ) => void;
   /** Rolls back one drill-down level (pallet -> slot-space -> slot -> warehouse -> plant). */
   back: () => void;
-  /** Jumps straight back to plant (the whole map) from any level. */
+  /** Jumps straight back to plant from any level, at the plant's default zoom — even when already there, which is how the Plant crumb resets a zoom. */
   reset: () => void;
+  /** Shows every building again (plant level) but leaves the camera alone — for a run starting, which mustn't take the user's view away from them. */
+  revealPlant: () => void;
   /** The slot currently under the pointer in view mode, and where to anchor its hover card. */
   hover: HoverPoint | null;
   setHover: (hover: HoverPoint | null) => void;
@@ -115,7 +119,14 @@ export function ViewFocusProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const reset = useCallback(() => setFocus(PLANT), []);
+  // A fresh object every time, so asking for the plant while already there
+  // still reaches the camera driver and resets the zoom.
+  const reset = useCallback(() => setFocus({ level: "plant" }), []);
+
+  const revealPlant = useCallback(
+    () => setFocus((current) => (current.level === "plant" ? current : { level: "plant", keepCamera: true })),
+    [],
+  );
 
   // Leaving view mode (toggling to edit) drops any drill-down state so it
   // doesn't linger stale for the next time view mode is entered.
@@ -141,11 +152,12 @@ export function ViewFocusProvider({ children }: { children: ReactNode }) {
       focusPallet,
       back,
       reset,
+      revealPlant,
       hover,
       setHover,
       cameraControlsRef,
     }),
-    [focus, focusWarehouse, focusSlot, focusSlotSpace, focusPallet, back, reset, hover],
+    [focus, focusWarehouse, focusSlot, focusSlotSpace, focusPallet, back, reset, revealPlant, hover],
   );
 
   return <ViewFocusContext.Provider value={value}>{children}</ViewFocusContext.Provider>;

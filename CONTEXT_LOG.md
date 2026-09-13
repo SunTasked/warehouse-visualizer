@@ -4,6 +4,43 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-13 (cont'd) — Owner review: straight links, camera kept during runs, Follow, capture prompt, plant zoom and edge hints, controls legend
+
+- Feedback, six items:
+  1. line 15K up with the vertical path;
+  2. stop resetting the view to the plant at the start of each list;
+  3. a mode that follows the cart, toggled next to Animate, at building zoom by default but adjustable;
+  4. prompt before running lists while capture is selected;
+  5. cap the default plant zoom to the top two buildings, with Plant resetting to it and keeping the centre, plus subtle blurred hints where the plant overflows;
+  6. a controls legend bottom-left.
+- Specs: new §5.6 subsection "Getting around a large plant", §5.7 links paragraph and result,
+  §5.1 breadcrumb note, one decision log entry. README: the legend.
+- Importer: each building's contents slide by the offset that lines its entry aisle up with
+  the door above; walls stay put. 15K moves −0.60 m and 16G +0.15 m, and all eight links are
+  straight at x = 28. Only their slots (445 each), corridors, pads, doors and zones moved.
+  The checker still passes, with the same three warnings.
+- Camera and focus changes:
+  - `FocusCameraDriver` depends on `focus` only; the warehouse and aspect are read through a ref.
+  - `Focus.keepCamera` and `revealPlant()` (used by `playNext`); `reset()` makes a fresh object.
+  - `defaultPlantBox`/`plantShot` in focusBounds.ts; `buildingAt()` in buildings.ts.
+  - The Plant crumb stays clickable while current.
+- Edge hints: `OverflowProbe` projects the shown box's floor corners per frame; `EdgeHints`
+  styles each side with a masked backdrop blur, a radial glow and a chevron.
+- Follow:
+  - SimulationContext gains `follow`/`setFollow` and `vehiclePositionRef`, written by
+    Forklift's Vehicle.
+  - `FollowCameraDriver` zooms to the building once, then eases the target along with `moveTo`.
+  - Pans are locked while following; any focus shot turns Follow off.
+- Capture prompt: `CaptureConfirm` in PickingListPanel (portal; asked once per capture). The
+  simulation reads `captureArmedRef`, so "Run without capturing" doesn't measure the run.
+- `ControlsLegend.tsx` in `.app__dock--bl`, with view and edit variants.
+- Found while verifying, all fixed:
+  - Plant recentred on the orbit target, which lands 7.5 m off after panning a tilted
+    camera; it now uses the floor point under the view's centre.
+  - Repeated resets crept 0.3 m, because the shot aimed at the names' height; it now aims at
+    the floor.
+  - The portalled prompt rendered in a serif font, and its dot was grey.
+
 ## 2026-09-13 (cont'd) — CML plant: buildings 10H, 14J, 15K, 16G; central-aisle links; inaccessible zones
 
 - Owner feedback on the five-building plant: link buildings along the central aisle, not the
