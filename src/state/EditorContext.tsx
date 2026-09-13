@@ -11,8 +11,10 @@ import {
 } from "react";
 import type { Camera } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
-import type { Point, Slot, SubSlot, Warehouse } from "../types/warehouse";
-import { loadWarehouseFiles, saveWarehouseFiles, type WarehouseFileHandles } from "../lib/file";
+import type { Point, Slot, SubSlot, Warehouse, WarehouseConfig, WarehouseContent } from "../types/warehouse";
+import type { PickingList } from "../types/simulation";
+import { saveWarehouseFiles, type FileHandle, type WarehouseFileHandles } from "../lib/file";
+import { mergeWarehouse, splitWarehouse } from "../lib/warehouseFiles";
 
 export type Mode = "view" | "edit";
 
@@ -43,19 +45,55 @@ function mapSubSlot(slot: Slot, subSlotIndex: number, fn: (subSlot: SubSlot) => 
   return { ...slot, subSlots: slot.subSlots.map((ss, i) => (i === subSlotIndex ? fn(ss) : ss)) };
 }
 
+/**
+ * Where a history entry came from. Only "edit" — a change made in edit mode —
+ * counts as unsaved: the simulation's picks and stores run through this same
+ * history (which is how "Reset warehouse" undoes them) but aren't changes
+ * anyone made to the warehouse, and a load is by definition what's on disk.
+ */
+export type HistoryOrigin = "load" | "edit" | "simulation";
+
 export interface HistoryEntry {
   warehouse: Warehouse;
   label: string;
+  origin: HistoryOrigin;
 }
 
 interface EditorState {
   warehouse: Warehouse; // live/current document — may be ahead of entries[cursor] mid-gesture
   entries: HistoryEntry[]; // committed checkpoints, oldest first; entries[0] is the loaded state
   cursor: number; // entries[cursor].warehouse === warehouse whenever no gesture is in progress
+  /** Index of the entry matching what was last loaded or saved. */
+  baseline: number;
+  /** Unsaved edits the history can no longer point at: made before a content load reset it, or lost with a redo tail a new commit dropped. */
+  carriedEdits: boolean;
+}
+
+/** Whether any edit-mode entry lies between two history positions — in either direction, since undoing past a save point unsaves too. */
+function editsBetween(entries: HistoryEntry[], a: number, b: number): boolean {
+  for (let i = Math.min(a, b) + 1; i <= Math.max(a, b); i++) {
+    if (entries[i]?.origin === "edit") return true;
+  }
+  return false;
+}
+
+/**
+ * Unsaved = edit-mode changes since the last load or save. Derived from the
+ * history rather than kept as a flag that every change sets, so moving back
+ * to the saved state — an undo, a simulation reset — clears it on its own,
+ * and the simulation moving stock never raises it.
+ */
+function hasUnsavedEdits(s: EditorState): boolean {
+  return (
+    s.carriedEdits ||
+    editsBetween(s.entries, s.baseline, s.cursor) ||
+    s.warehouse !== s.entries[s.cursor]?.warehouse // an edit gesture still in progress
+  );
 }
 
 interface EditorContextValue {
   warehouse: Warehouse;
+  /** Edit-mode changes since the last load or save — see hasUnsavedEdits. */
   dirty: boolean;
   mode: Mode;
   setMode: (mode: Mode) => void;
@@ -104,28 +142,43 @@ interface EditorContextValue {
   showHistory: boolean;
   setShowHistory: (value: boolean) => void;
   save: () => Promise<void>;
-  /** Opens a warehouse from files. Resolves false if the user cancelled the picker. */
-  load: () => Promise<boolean>;
-  /** Replaces the warehouse with one that has no file behind it (a preset). */
-  loadWarehouse: (warehouse: Warehouse) => void;
+  /** The plant's forklift work orders — its third file, alongside the plan and content. */
+  pickingLists: PickingList[];
+  /** Replaces the warehouse with a plan file. It loads empty: stock is the separate content file. */
+  applyPlan: (config: WarehouseConfig, handle: FileHandle | null) => void;
+  /** Replaces the stock with a content file, on the plan already on screen. */
+  applyContent: (content: WarehouseContent, handle: FileHandle | null) => void;
+  applyPickingLists: (lists: PickingList[]) => void;
+  /** Replaces the warehouse and its picking lists with ones that have no file behind them (a preset). */
+  loadWarehouse: (warehouse: Warehouse, pickingLists: PickingList[]) => void;
+  /** Undoes the simulation's trailing stock moves, stopping at the first change that wasn't one. */
+  revertSimulation: () => void;
 }
 
 const EditorContext = createContext<EditorContextValue | null>(null);
 
 export function EditorProvider({
   initialWarehouse,
+  initialPickingLists,
   children,
 }: {
   initialWarehouse: Warehouse;
+  initialPickingLists: PickingList[];
   children: ReactNode;
 }) {
   const [state, setState] = useState<EditorState>({
     warehouse: initialWarehouse,
-    entries: [{ warehouse: initialWarehouse, label: "Loaded" }],
+    entries: [{ warehouse: initialWarehouse, label: "Loaded", origin: "load" }],
     cursor: 0,
+    baseline: 0,
+    carriedEdits: false,
   });
-  const [dirty, setDirty] = useState(false);
+  const dirty = hasUnsavedEdits(state);
+  const [pickingLists, setPickingLists] = useState<PickingList[]>(initialPickingLists);
   const [mode, setMode] = useState<Mode>("view");
+  // commit() reads this to tag each entry with the mode it was made in.
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
   const [addSlotMode, setAddSlotMode] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [selectedSlotIds, setSelectedSlotIds] = useState<Set<string>>(new Set());
@@ -182,16 +235,27 @@ export function EditorProvider({
   // into one history entry instead of one per pointermove/keystroke.
   const mutateWarehouse = useCallback((updater: (w: Warehouse) => Warehouse) => {
     setState((s) => ({ ...s, warehouse: updater(s.warehouse) }));
-    setDirty(true);
   }, []);
 
   // Records the current live warehouse as one committed history entry,
   // dropping any redo tail beyond the current cursor. Pure — only reads its
   // own `s` argument, safe under Strict Mode's double-invocation of updaters.
   const commit = useCallback((label: string) => {
+    // Outside edit mode, the only thing that commits is the simulation
+    // moving stock. Read at call time, not inside the updater.
+    const origin: HistoryOrigin = modeRef.current === "edit" ? "edit" : "simulation";
     setState((s) => {
       const truncated = s.entries.slice(0, s.cursor + 1);
-      return { warehouse: s.warehouse, entries: [...truncated, { warehouse: s.warehouse, label }], cursor: truncated.length };
+      // If the saved entry sits in the redo tail about to be dropped, rebase
+      // onto this entry's parent and carry forward any edits lost with it.
+      const baselineDropped = s.baseline > s.cursor;
+      return {
+        warehouse: s.warehouse,
+        entries: [...truncated, { warehouse: s.warehouse, label, origin }],
+        cursor: truncated.length,
+        baseline: baselineDropped ? s.cursor : s.baseline,
+        carriedEdits: s.carriedEdits || (baselineDropped && editsBetween(s.entries, s.cursor, s.baseline)),
+      };
     });
   }, []);
 
@@ -408,22 +472,31 @@ export function EditorProvider({
   );
 
   const undo = useCallback(() => {
-    setState((s) => (s.cursor <= 0 ? s : { warehouse: s.entries[s.cursor - 1].warehouse, entries: s.entries, cursor: s.cursor - 1 }));
-    setDirty(true);
+    setState((s) => (s.cursor <= 0 ? s : { ...s, warehouse: s.entries[s.cursor - 1].warehouse, cursor: s.cursor - 1 }));
   }, []);
 
   const redo = useCallback(() => {
     setState((s) =>
-      s.cursor >= s.entries.length - 1
-        ? s
-        : { warehouse: s.entries[s.cursor + 1].warehouse, entries: s.entries, cursor: s.cursor + 1 },
+      s.cursor >= s.entries.length - 1 ? s : { ...s, warehouse: s.entries[s.cursor + 1].warehouse, cursor: s.cursor + 1 },
     );
-    setDirty(true);
   }, []);
 
   const jumpTo = useCallback((index: number) => {
-    setState((s) => (index < 0 || index >= s.entries.length ? s : { warehouse: s.entries[index].warehouse, entries: s.entries, cursor: index }));
-    setDirty(true);
+    setState((s) => (index < 0 || index >= s.entries.length ? s : { ...s, warehouse: s.entries[index].warehouse, cursor: index }));
+  }, []);
+
+  /**
+   * "Reset warehouse": steps back over the simulation's own trailing stock
+   * moves and stops at the first entry that wasn't one. Jumping straight to
+   * the loaded state instead would also undo layout edits made before the
+   * runs, which resetting the *simulation* has no business touching.
+   */
+  const revertSimulation = useCallback(() => {
+    setState((s) => {
+      let target = s.cursor;
+      while (target > 0 && s.entries[target].origin === "simulation") target--;
+      return target === s.cursor ? s : { ...s, warehouse: s.entries[target].warehouse, cursor: target };
+    });
   }, []);
 
   useEffect(() => {
@@ -439,36 +512,62 @@ export function EditorProvider({
   }, [undo, redo]);
 
   const save = useCallback(async () => {
-    fileHandlesRef.current = await saveWarehouseFiles(warehouse, fileHandlesRef.current);
-    setDirty(false);
+    const saved = warehouse;
+    fileHandlesRef.current = await saveWarehouseFiles(saved, fileHandlesRef.current);
+    // What was saved becomes the baseline — unless the history moved on while
+    // the save dialog was open, in which case the disk is still behind it.
+    setState((s) => (s.warehouse === saved ? { ...s, baseline: s.cursor, carriedEdits: false } : s));
   }, [warehouse]);
 
-  const replaceWarehouse = useCallback((next: Warehouse, handles: WarehouseFileHandles) => {
-    fileHandlesRef.current = handles;
-    setState({
-      warehouse: next,
-      entries: [{ warehouse: next, label: `Loaded ${next.name}` }],
-      cursor: 0,
-    });
-    setDirty(false);
+  // Every load starts a fresh history whose only entry is what was loaded —
+  // the baseline unsaved changes are measured from.
+  const resetHistory = useCallback((next: Warehouse, label: string, carriedEdits: boolean) => {
+    setState({ warehouse: next, entries: [{ warehouse: next, label, origin: "load" }], cursor: 0, baseline: 0, carriedEdits });
     setSelectedSlotIds(new Set());
     setAddSlotMode(false);
   }, []);
-
-  const load = useCallback(async () => {
-    const result = await loadWarehouseFiles();
-    if (!result) return false;
-    replaceWarehouse(result.warehouse, result.handles);
-    return true;
-  }, [replaceWarehouse]);
 
   // A preset has no file behind it, so the previous file's handles are
   // dropped — otherwise the next Save would silently write the preset over
   // whatever file was open before.
   const loadWarehouse = useCallback(
-    (next: Warehouse) => replaceWarehouse(next, { configHandle: null, contentHandle: null }),
-    [replaceWarehouse],
+    (next: Warehouse, lists: PickingList[]) => {
+      fileHandlesRef.current = { configHandle: null, contentHandle: null };
+      resetHistory(next, `Loaded ${next.name}`, false);
+      setPickingLists(lists);
+    },
+    [resetHistory],
   );
+
+  // A plan replaces the building, so it loads empty — its stock is the
+  // separate content file. Picking lists survive only a reload of the same
+  // plant: another plant's orders name locations this one doesn't have.
+  const applyPlan = useCallback(
+    (config: WarehouseConfig, handle: FileHandle | null) => {
+      fileHandlesRef.current = { configHandle: handle, contentHandle: null };
+      if (config.id !== warehouse.id) setPickingLists([]);
+      resetHistory(mergeWarehouse(config, null), `Loaded plan ${config.name}`, false);
+    },
+    [warehouse.id, resetHistory],
+  );
+
+  // Content lands on the plan already on screen. Unsaved edits made before it
+  // can't be told apart from the stock it replaces, so they stay flagged
+  // rather than being silently marked saved.
+  const applyContent = useCallback((content: WarehouseContent, handle: FileHandle | null) => {
+    fileHandlesRef.current = { ...fileHandlesRef.current, contentHandle: handle };
+    setState((s) => {
+      const next = mergeWarehouse(splitWarehouse(s.warehouse).config, content);
+      return {
+        warehouse: next,
+        entries: [{ warehouse: next, label: "Loaded content", origin: "load" }],
+        cursor: 0,
+        baseline: 0,
+        carriedEdits: hasUnsavedEdits(s),
+      };
+    });
+    setSelectedSlotIds(new Set());
+  }, []);
 
   const value = useMemo<EditorContextValue>(
     () => ({
@@ -508,8 +607,12 @@ export function EditorProvider({
       showHistory,
       setShowHistory,
       save,
-      load,
+      pickingLists,
+      applyPlan,
+      applyContent,
+      applyPickingLists: setPickingLists,
       loadWarehouse,
+      revertSimulation,
     }),
     [
       warehouse,
@@ -540,8 +643,11 @@ export function EditorProvider({
       jumpTo,
       showHistory,
       save,
-      load,
+      pickingLists,
+      applyPlan,
+      applyContent,
       loadWarehouse,
+      revertSimulation,
     ],
   );
 

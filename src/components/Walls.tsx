@@ -1,14 +1,16 @@
 import { useMemo } from "react";
 import type { ThreeEvent } from "@react-three/fiber";
+import { Text } from "@react-three/drei";
 import * as THREE from "three";
 import type { Door, WallLoop } from "../types/warehouse";
 import { useEditor } from "../state/EditorContext";
 import { useViewFocus } from "../state/ViewFocusContext";
 import { isBuildingVisible } from "../lib/visibility";
+import { buildingLabel } from "../lib/buildings";
 import { DOOR_DEFAULT_WIDTH } from "./Doors";
 
 export const WALL_HEIGHT = 3;
-const WALL_THICKNESS = 0.2;
+export const WALL_THICKNESS = 0.2;
 const HANDLE_RADIUS = 0.35;
 const HANDLE_Y = 0.15;
 const WALL_COLOR = "#8a8f98";
@@ -212,6 +214,36 @@ function BuildingFloor({ loop }: { loop: WallLoop }) {
   );
 }
 
+const LABEL_COLOR = "#374151";
+// At the top of the walls, not on the floor: on the floor, the north wall hid
+// the near half of the name from the top-down camera, which sits slightly
+// south of the building it frames.
+export const BUILDING_LABEL_Y = WALL_HEIGHT + 0.02;
+
+/**
+ * A building's name, outside its north-west corner at wall-top height —
+ * top-left on the plan (placement in buildingLabel(), which the camera
+ * framing also reads, so the name is never cropped). Lies flat like the
+ * facility labels, so it reads from the top-down plant and warehouse shots.
+ * Ignores the pointer: a click on the name behaves like a click on the floor.
+ */
+function BuildingLabel({ loop }: { loop: WallLoop }) {
+  const label = useMemo(() => buildingLabel(loop, WALL_THICKNESS), [loop]);
+  return (
+    <Text
+      position={[label.x, BUILDING_LABEL_Y, -label.y]}
+      rotation={[-Math.PI / 2, 0, 0]}
+      fontSize={label.fontSize}
+      color={LABEL_COLOR}
+      anchorX="left"
+      anchorY="bottom"
+      raycast={() => null}
+    >
+      {label.text}
+    </Text>
+  );
+}
+
 export function Walls({ walls, doors }: { walls: WallLoop[]; doors: Door[] }) {
   const { mode } = useEditor();
   const { focus, hover, setHover, back, focusWarehouse } = useViewFocus();
@@ -223,6 +255,11 @@ export function Walls({ walls, doors }: { walls: WallLoop[]; doors: Door[] }) {
         walls
           .filter((w) => w.closed && w.points.length >= 3)
           .map((loop) => <BuildingFloor key={loop.id} loop={loop} />)}
+      {walls
+        .filter((w) => w.closed && w.points.length >= 3 && isBuildingVisible(focus, w.id))
+        .map((loop) => (
+          <BuildingLabel key={`${loop.id}-label`} loop={loop} />
+        ))}
       {segments.map((segment) => {
         if (segment.isBuilding && !isBuildingVisible(focus, segment.loopId)) return null;
 

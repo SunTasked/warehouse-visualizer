@@ -31,17 +31,50 @@ function pointInPolygon(point: Point, polygon: Point[]): boolean {
 }
 
 /**
- * One entry per closed wall loop. Labeled with the warehouse's own name when
- * there's only one (the common case today), otherwise the loop's own id —
- * there's no dedicated "building name" field in the schema.
+ * One entry per closed wall loop, labeled with the loop's own id — which is
+ * the building's name ("Main warehouse", "13A"). A lone building used to
+ * borrow the warehouse's name instead, which labelled a plant's only building
+ * with the plant's own name (CML) rather than its own (13A).
  */
-export function listBuildings(walls: WallLoop[], warehouseName: string): Building[] {
-  const loops = closedLoops(walls);
-  return loops.map((loop) => ({
-    id: loop.id,
-    label: loops.length === 1 ? warehouseName : loop.id,
-    loop,
-  }));
+export function listBuildings(walls: WallLoop[]): Building[] {
+  return closedLoops(walls).map((loop) => ({ id: loop.id, label: loop.id, loop }));
+}
+
+/** Clear floor between a building's outer north wall face and its name. */
+const LABEL_GAP = 0.6;
+
+export interface BuildingLabelPlacement {
+  text: string;
+  /** Warehouse-space anchor: the name's bottom-left corner. */
+  x: number;
+  y: number;
+  fontSize: number;
+  /** Approximate extent, for camera framing only — the real glyph metrics exist only once rendered. */
+  width: number;
+  height: number;
+}
+
+/**
+ * Where a building's name goes: outside its north-west corner (top-left on
+ * the plan), left edge flush with the west wall's outer face, sitting just
+ * past the north wall. Sized to the building so a 98 m hall and a 12 m annex
+ * both stay legible at plant zoom without the small one's name swamping it.
+ * One function for both the renderer and the camera framing, so the two
+ * can't disagree about where the name is.
+ */
+export function buildingLabel(loop: WallLoop, wallThickness: number): BuildingLabelPlacement {
+  const xs = loop.points.map((p) => p.x);
+  const ys = loop.points.map((p) => p.y);
+  const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  const fontSize = Math.min(3.5, Math.max(0.8, span * 0.035));
+  return {
+    text: loop.id,
+    x: Math.min(...xs) - wallThickness / 2,
+    y: Math.max(...ys) + wallThickness / 2 + LABEL_GAP,
+    fontSize,
+    width: loop.id.length * fontSize * 0.62,
+    height: fontSize * 1.2,
+  };
 }
 
 /**

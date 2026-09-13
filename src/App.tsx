@@ -1,7 +1,9 @@
 import { useRef } from "react";
 import warehouseConfig from "../schema/warehouse.example.json";
 import warehouseContent from "../schema/warehouse.content.example.json";
+import warehousePickingLists from "../schema/warehouse.picking-lists.example.json";
 import type { WarehouseConfig, WarehouseContent } from "./types/warehouse";
+import type { PickingListsFile } from "./types/simulation";
 import { mergeWarehouse } from "./lib/warehouseFiles";
 import { EditorProvider, useEditor } from "./state/EditorContext";
 import { ViewFocusProvider } from "./state/ViewFocusContext";
@@ -25,13 +27,15 @@ import { AppHeader } from "./components/AppHeader";
 import { useAnalytics } from "./state/AnalyticsContext";
 import "./App.css";
 
-// First the warehouse configuration (layout) loads, then its content
-// (inventory) — same two-file split as Toolbar's Load button (see
-// src/lib/file.ts / src/lib/warehouseFiles.ts).
+// The Test plant preset, imported statically so the first paint already has a
+// warehouse: its plan, its content (inventory) and its picking lists — the
+// same three files Overview → Load reads one at a time (src/lib/file.ts,
+// src/lib/warehouseFiles.ts) and a preset bundles (src/data/presets.ts).
 const initialWarehouse = mergeWarehouse(
   warehouseConfig as WarehouseConfig,
   warehouseContent as WarehouseContent,
 );
+const initialPickingLists = (warehousePickingLists as unknown as PickingListsFile).lists;
 
 function AppShell() {
   const { warehouse } = useEditor();
@@ -55,16 +59,22 @@ function AppShell() {
         <SelectionOverlay containerRef={sceneRef} />
         <HoverCard />
         <FacilityTooltip />
-        <PickingListPanel />
-        {/* Corner docks: panels that share a corner stack in one column so
-            neither has to be positioned around the other's height. */}
+        {/* Docks: panels that share an edge stack in one column so neither
+            has to be positioned around the other's height. */}
         <div className="app__dock app__dock--tl">
           <FocusBreadcrumb />
           <RunConsole />
         </div>
-        <div className="app__dock app__dock--br">
-          <UsageLegend />
-          <LayerPanel />
+        {/* The right edge is a single column: the picking lists take
+            whatever height the legend and layer panel leave and scroll
+            inside it, rather than running underneath them — a plant with
+            more lists otherwise buried "Reset warehouse" under the layers. */}
+        <div className="app__dock app__dock--right">
+          <PickingListPanel />
+          <div className="app__dock-bottom">
+            <UsageLegend />
+            <LayerPanel />
+          </div>
         </div>
       </div>
     </div>
@@ -73,7 +83,7 @@ function AppShell() {
 
 export default function App() {
   return (
-    <EditorProvider initialWarehouse={initialWarehouse}>
+    <EditorProvider initialWarehouse={initialWarehouse} initialPickingLists={initialPickingLists}>
       <ViewFocusProvider>
         <SimulationProvider>
           <LayerProvider>

@@ -21,7 +21,7 @@ export function FocusBreadcrumb() {
   const { focus, reset, focusWarehouse, focusSlot, focusSlotSpace } = useViewFocus();
   if (mode !== "view") return null;
 
-  const buildings = listBuildings(warehouse.walls, warehouse.name);
+  const buildings = listBuildings(warehouse.walls);
   const slot = focus.slotId ? warehouse.slots.find((s) => s.id === focus.slotId) : undefined;
   const subSlot = slot && focus.subSlotIndex !== undefined ? slot.subSlots?.[focus.subSlotIndex] : undefined;
   const pallet = subSlot && focus.palletIndex !== undefined ? subSlot.pallets[focus.palletIndex] : undefined;

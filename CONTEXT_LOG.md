@@ -4,6 +4,40 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-13 (cont'd) — plant files: Load submenu, per-plant picking lists, building names, unsaved indicator
+
+- Design in specs.md §5.6 ("Plant files: the Load submenu, picking lists, building names,
+  unsaved changes"), touch-ups in §5.3/§5.7, plus one decision log entry.
+- Picking lists: `src/data/pickingLists.ts` removed → `schema/warehouse.picking-lists.example.json`;
+  new `schema/CML.picking-lists.json` (6 lists, storing first — CML's stock is empty) and
+  `schema/picking-lists.schema.json`; `PickingListsFile` type. Held in `EditorContext`
+  (`pickingLists`, `applyPickingLists`) and read by `SimulationContext`; presets load all three files.
+- Load submenu (`AppHeader.tsx`): plan / content / picking lists, one JSON file each via the new
+  `openJsonFile` (`src/lib/file.ts`; the two-step `loadWarehouseFiles` is gone). `applyPlan` loads
+  empty and drops the lists if the plant id differs; `applyContent` merges onto the plan on
+  screen; confirms on plant mismatch, unknown ids, or stock being replaced.
+- Unsaved indicator: `dirty` now derived (`hasUnsavedEdits`) from history entries tagged
+  `load`/`edit`/`simulation`, a `baseline` index and a `carriedEdits` flag; `setDirty` removed.
+  `revertSimulation` replaces Reset warehouse's `jumpTo(0)`.
+- Building names: `buildingLabel()` in `src/lib/buildings.ts` (shared with the `focusBounds.ts`
+  framing), rendered by `Walls.tsx` at wall-top height; `listBuildings` always labels with the loop
+  id. Importer names the building after the sheet block minus "BATIMENT" → CML regenerated, "13A".
+- Found and fixed while verifying: the taller CML picking panel ran under the Layers panel, which
+  intercepted clicks on Reset warehouse → the right edge is one full-height dock
+  (`.app__dock--right`) with the list scrolling inside the panel. Floor-level names were half
+  hidden behind the north wall → raised to wall-top height.
+- Correction to a conclusion reached in conversation last session: the blank white rectangle at
+  bottom-left in drilled-in screenshots is not a transient mid-zoom frame — it persists. A
+  clipped capture of the same instant shows floor colour there and no page element covers the
+  spot, so it is most likely a full-page screenshot artifact, not something the app draws.
+- Verified: `tsc --noEmit` clean; Playwright zero console errors across both plants' lists, menu
+  structure, run + reset leaving the dot off with stock reverted, edit/undo/redo toggling it, all
+  three Load items including the cross-plant warnings, breadcrumb 13A, and names at plant and
+  building zoom.
+- Open: at the default framing CML's "13A" (and the start of "Main warehouse" at building zoom)
+  sits under the top-left breadcrumb and run console — asked the owner how framing should
+  handle the panels.
+
 ## 2026-09-13 (cont'd) — warehouse presets, CML rename, pallets hidden by default
 
 - Design in specs.md §5.6 ("Presets"), §5.7 (new file names), §5.4 (layer default) plus one

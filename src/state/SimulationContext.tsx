@@ -10,7 +10,6 @@ import {
 } from "react";
 import type { Point, Warehouse } from "../types/warehouse";
 import type { PickingList, PickingStop } from "../types/simulation";
-import { pickingLists as exampleLists } from "../data/pickingLists";
 import { buildPathGraph, routeBetween, type PathGraph, type RouteEdge } from "../lib/pathGraph";
 import { slotEntryPoint } from "../lib/geometry";
 import type { LegProfile, StopHandling } from "../lib/timeModel";
@@ -761,10 +760,12 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   );
 
   /**
-   * Discards every simulation-driven pallet mutation by jumping the editor's
-   * own history back to entries[0] (the originally loaded state) — reusing
-   * the existing undo/history system rather than a separate snapshot, since
-   * every pick/store this simulation makes already flows through it.
+   * Discards the simulation's pallet mutations by stepping the editor's own
+   * history back over them (revertSimulation) — reusing the undo system
+   * rather than a separate snapshot, since every pick/store this simulation
+   * makes already flows through it, tagged as such. Stops at the first entry
+   * that wasn't a simulated move, so layout edits made before the runs
+   * survive a reset, and the unsaved-changes indicator stays untouched.
    *
    * Deliberately leaves the captured heatmaps alone (clearCapture is its own
    * action): restocking between runs is a normal thing to do *during* a
@@ -776,12 +777,14 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     fastForwardSpeedRef.current = null;
     setActiveRun(null);
     setQueuedLists([]);
-    editor.jumpTo(0);
+    editor.revertSimulation();
   }, [editor]);
 
   const value = useMemo<SimulationContextValue>(
     () => ({
-      pickingLists: exampleLists,
+      // Plant data, loaded with the plan and content (EditorContext) —
+      // presets or Overview → Load → Picking lists.
+      pickingLists: editor.pickingLists,
       activeRun,
       animate,
       setAnimate,
@@ -820,6 +823,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       setHoveredStep,
     }),
     [
+      editor.pickingLists,
       activeRun,
       animate,
       setAnimate,

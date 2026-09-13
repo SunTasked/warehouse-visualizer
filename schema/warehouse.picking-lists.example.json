@@ -1,0 +1,60 @@
+{
+  "warehouseId": "bat-13a",
+  "lists": [
+    {
+      "id": "quick-pick",
+      "label": "Quick pick",
+      "mode": "picking",
+      "stops": [
+        { "kind": "slot", "id": "A02" },
+        { "kind": "depot", "id": "DS01" }
+      ]
+    },
+    {
+      "id": "full-batch-pick",
+      "label": "Full batch pick",
+      "mode": "picking",
+      "stops": [
+        { "kind": "slot", "id": "A01" },
+        { "kind": "slot", "id": "A04" },
+        { "kind": "slot", "id": "B03" },
+        { "kind": "depot", "id": "DS01" },
+        { "kind": "slot", "id": "M03" },
+        { "kind": "slot", "id": "N02" },
+        { "kind": "depot", "id": "DS01" }
+      ]
+    },
+    {
+      "id": "cross-building-pick",
+      "label": "Cross-building pick",
+      "mode": "picking",
+      "stops": [
+        { "kind": "slot", "id": "N01" },
+        { "kind": "slot", "id": "C02" },
+        { "kind": "depot", "id": "DS01" }
+      ]
+    },
+    {
+      "id": "restock",
+      "label": "Restock",
+      "mode": "storing",
+      "stops": [
+        { "kind": "depot", "id": "DS01" },
+        { "kind": "slot", "id": "A05" },
+        { "kind": "slot", "id": "B05" },
+        { "kind": "slot", "id": "N04" }
+      ]
+    },
+    {
+      "id": "annex-restock",
+      "label": "Annex restock",
+      "mode": "storing",
+      "stops": [
+        { "kind": "depot", "id": "DS01" },
+        { "kind": "slot", "id": "C01" },
+        { "kind": "slot", "id": "C02" },
+        { "kind": "slot", "id": "C03" }
+      ]
+    }
+  ]
+}

@@ -598,10 +598,12 @@ now.
 
 **Picking list semantics** (`src/types/simulation.ts`): `{ id, label, mode: "picking" |
 "storing", stops: [{kind: "slot"|"depot", id}] }` — an explicit `mode` field (not
-inferred from stop order, per explicit user preference), with test data in
-`src/data/pickingLists.ts` (five lists: a simple pick, the exact multi-trip/capacity-
-chaining example given in the original request, a cross-building pick, a storing run,
-and a storing run that also crosses buildings). A forklift **always starts its journey
+inferred from stop order, per explicit user preference), with test data originally in
+`src/data/pickingLists.ts` — since 2026-09-13 a per-plant data file instead,
+`schema/warehouse.picking-lists.example.json` for the Test plant (§5.6) — five lists: a
+simple pick, the exact multi-trip/capacity-chaining example given in the original
+request, a cross-building pick, a storing run, and a storing run that also crosses
+buildings. A forklift **always starts its journey
 at its home lift station** (per user feedback) — `SimulationContext.tsx`'s
 `stopsWithDepot()` prepends the warehouse's first `LiftStation` as an extra depot stop
 ahead of whatever the list itself starts with, rather than the list needing to spell
@@ -1103,7 +1105,8 @@ scrollable region inside the app scrolls on its own.
 
 **Corner docks.** Panels that share a screen corner are no longer each positioned
 absolutely; they stack in one `.app__dock` column (`--tl`: breadcrumb then run console;
-`--br`: heatmap legend then layer panel) so neither has to know the other's height — the
+`--br`: heatmap legend then layer panel — since 2026-09-13 a full-height `--right` column
+with the picking lists above them, §5.6) so neither has to know the other's height — the
 breadcrumb grows with the drill-down depth, and the legend appears only when a heatmap
 layer is on. The dock is `pointer-events: none` with its panels re-enabling them, so the
 column's empty space doesn't eat clicks meant for the scene. The run console's default
@@ -1349,6 +1352,86 @@ switching back to Test plant is likewise silent. With a recorded run, loading CM
 recorded run and both heatmaps."; accepting leaves Performances disabled, capture disarmed
 and the run console idle. The geometry checker's results are unchanged on the renamed plan.
 
+#### Plant files: the Load submenu, picking lists, building names, unsaved changes
+
+**A plant is three files, and Load reads them one at a time.** Overview → **Load** is now a
+submenu like Presets (only one of the two open at once): *Warehouse plan…*, *Warehouse
+content…* and *Picking lists…*, each opening exactly one JSON file (`openJsonFile` in
+`src/lib/file.ts`, replacing the old plan-then-content picker sequence). A preset is the
+same three files bundled (`src/data/presets.ts`).
+- **Plan** replaces the warehouse and loads it *empty* — stock is the content file, loaded
+  next. Picking lists survive only a reload of the same plant (same `id`), since another
+  plant's orders name locations the new plan doesn't have. Like a preset it discards the
+  session and resets focus, behind a confirm naming what goes (unsaved changes, the stock in
+  the racks, the lists, the session), asked only when something would be lost.
+- **Content** lands on the plan already on screen. It asks first only when the file names a
+  different `warehouseId`, references slots the plan doesn't have (those are ignored), or
+  would replace stock already in the racks.
+- **Picking lists** replace the plant's lists. It asks first when the file was written for
+  another plant, or visits locations the plan lacks (naming up to four), since routing
+  skips those stops.
+
+**Picking lists are plant data**, no longer a hardcoded module: `src/data/pickingLists.ts`
+became `schema/warehouse.picking-lists.example.json`, with a JSON Schema at
+`schema/picking-lists.schema.json` (`{ warehouseId, lists[] }`, the same shape as the
+content file). They live in `EditorContext` beside the warehouse, and
+`SimulationContext.pickingLists` reads them from there. CML ships
+`schema/CML.picking-lists.json`: six lists over real 13A locations, **ordered storing
+first**. CML's content is empty, so a pick only finds a pallet once a receiving list has
+stored one — run the batch in order, or the two "Receive…" lists first. The panel clears
+its ticks when the lists change, and says how to load some when a plant has none.
+
+**Building names on the plan.** Each building's name sits outside its north-west corner
+(top-left on the plan) at wall-top height, sized to the building — not on the floor, where
+the north wall hid its near half from the top-down camera, which sits slightly south of
+what it frames. A lone building no longer
+borrows the plant's name (`listBuildings`), so CML's building reads "13A" in both the label
+and the breadcrumb, and the importer names a building after its sheet block minus the
+"BATIMENT" prefix. Placement is one function (`buildingLabel`) shared by the renderer and
+the camera framing (`plantWorldBox`/`buildingWorldBox`), so the plant and warehouse shots
+take the name in rather than cropping it.
+
+*Open conflict:* the framing fills the whole canvas and ignores the floating panels, and the
+top-left of the plan is exactly where the breadcrumb and run console are docked. A building
+whose north-west corner lands there has its name under those panels — CML's "13A" at both
+plant and building zoom, and the start of "Main warehouse" at building zoom. Framing clear
+of the panels would shrink the building on screen, against the earlier "make the building
+fill the screen" feedback, so it is left for the plant owner to decide.
+
+**Unsaved changes track edits, not the simulation.** "Reset warehouse" on CML lit the
+unsaved indicator outside edit mode because `dirty` was a flag every change set — undo,
+redo, a history jump, and the simulation's own picks and stores alike. It is now *derived*
+from the history. Each entry is tagged `load`, `edit` or `simulation` by the mode it was
+committed in (outside edit mode only the simulation commits), and "unsaved" means an `edit`
+entry between the last load-or-save baseline and the cursor, in either direction. A run
+therefore never raises it, undoing back to the saved state clears it, and a reset leaves it
+alone. Two cases carry a flag instead: edits made before a content load, which resets the
+history but can't tell layout edits from the stock it replaces, so keeps them flagged rather
+than silently marking them saved; and a saved entry dropped from a truncated redo tail.
+
+**Reset warehouse no longer jumps to the loaded state.** It steps back over the trailing
+simulation entries and stops at the first entry that isn't one (`revertSimulation`).
+Jumping to entry 0, as before, would have silently undone layout edits made before the
+runs, contradicting the button's own "undo every pallet the simulation moved".
+
+**The right edge is one column.** Found while verifying: CML's six lists made the picking
+panel tall enough to run under the layer panel, whose header then swallowed clicks on
+"Reset warehouse". The right edge is now a single full-height dock (`.app__dock--right`):
+the picking lists take whatever height the legend and layer panel leave, and only the list
+itself scrolls, so the header and the Run/Reset buttons stay reachable.
+
+Verified: `tsc --noEmit` clean; Playwright zero console errors. Test plant starts with its
+five lists and CML brings its six. The menu reads Presets ▸ / Load ▸ / Save / Edit layout…;
+Load lists its three items, and opening Presets closes Load. On CML a view-mode run leaves
+the unsaved dot off, and so does Reset warehouse — which also removes the pallets that run
+stored in AA01/AA03/AA05 (compared in before/after screenshots). In edit mode, Add Slot
+raises the dot, undo clears it, redo restores it. Loading the Test plant's picking lists onto
+CML asks first, naming the plant mismatch and the 13 locations CML lacks; loading the Test
+plant plan then asks only about losing those 5 lists, and leaves the panel empty with its
+hint; matching content and lists then load without asking, the dot still off. The breadcrumb
+reads CML › 13A. Building names read in full for Test plant at plant zoom and for the Annex
+at building zoom — but see *Open conflict* above for names under the left panels.
+
 ### 5.7 Importing a real plant from the CML workbook (decided, v1)
 
 The plant's real layout exists only as an Excel floor plan (`data/CML_warehouse.xlsx`,
@@ -1362,8 +1445,8 @@ python scripts/import_plan_xlsx.py --building "BATIMENT 13A"
 
 It writes `schema/CML.plan.json` (layout) and `schema/CML.content.json` (empty stock), both
 paths explicit flags rather than one derived from the other. The plant is the warehouse
-(`--id cml`, `--name CML`); the sheet's block becomes its building (`Batiment 13A`), which
-every corridor and facility belongs to. It superseded `scripts/generate-batiment-13a.js`,
+(`--id cml`, `--name CML`); the sheet's block becomes its building, named without the
+"BATIMENT" prefix (`13A`), which every corridor and facility belongs to. It superseded `scripts/generate-batiment-13a.js`,
 an eyeballed approximation with arbitrary ids, which was removed along with its npm script.
 
 **The workbook itself is deliberately not committed** (`.gitignore`): it carries real
@@ -1429,8 +1512,8 @@ the corridor graph is fully connected under the app's own exact-coincident-point
 slot footprint overlaps another; none pokes outside the envelope; no corridor centreline
 runs through a slot; the layout renders in the app with zero console errors.
 
-Known gap: `src/data/pickingLists.ts` still names the example warehouse's slots, so the
-stock lists don't apply to an imported plant.
+Picking lists are authored separately from the import, as the plant's third file
+(`schema/CML.picking-lists.json`, §5.6) — the workbook's plan says nothing about orders.
 
 ## 6. Core Features / Visualizations
 
@@ -1571,6 +1654,21 @@ stock lists don't apply to an imported plant.
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
 
+- 2026-09-13 — A plant is three files, and the app now treats it that way (§5.6). Picking
+  lists moved out of a hardcoded module into a per-plant JSON file with its own schema
+  (`schema/picking-lists.schema.json`), held beside the warehouse and bundled into presets;
+  CML got six lists over real 13A locations, ordered storing-first because its content is
+  empty. Overview → Load became a submenu reading the plan, content or lists independently;
+  a plan loads empty and keeps the lists only when it is the same plant. The unsaved-changes
+  indicator is now derived from origin-tagged history (`edit`/`simulation`/`load`) rather
+  than a flag every change set, which fixes "Reset warehouse" lighting it outside edit mode;
+  Reset now reverts only the trailing simulated moves instead of jumping to the loaded state,
+  which would have undone earlier layout edits. Building names are drawn at wall-top height
+  outside each building's north-west corner, and a lone building no longer borrows its
+  plant's name, so CML's building reads "13A" (the importer strips "BATIMENT"). The
+  right-edge panels became one full-height dock after the taller CML picking panel buried
+  Reset under the layer panel. Left open for the owner: the default framing puts the plan's
+  top-left under the breadcrumb and run console, hiding CML's name.
 - 2026-09-13 — Warehouse presets (§5.6): **Overview → Presets** loads *Test plant* or *CML*
   in one click, from a lazily-imported registry in `src/data/presets.ts`. The imported plant
   was renamed `schema/CML.plan.json` / `CML.content.json` with warehouse id `cml` and name

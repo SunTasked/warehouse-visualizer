@@ -1,7 +1,7 @@
 // Picking-list simulation types — deliberately separate from warehouse.ts:
-// these are ephemeral test/demo constructs (a forklift's work order), never
-// saved/loaded through the file system the way the physical layer is. See
-// specs.md §5.3 "Warehouse management: forklift picking-list simulation".
+// these describe a forklift's work orders rather than the building itself.
+// They load from their own file, the third of a plant alongside its plan and
+// content (schema/picking-lists.schema.json; specs.md §5.3 and §5.6).
 
 export type StopKind = "slot" | "depot";
 
@@ -26,4 +26,11 @@ export interface PickingList {
   label: string;
   mode: PickingMode;
   stops: PickingStop[];
+}
+
+/** A plant's picking lists file. */
+export interface PickingListsFile {
+  /** The plan (warehouse config) id these orders were written for. */
+  warehouseId: string;
+  lists: PickingList[];
 }

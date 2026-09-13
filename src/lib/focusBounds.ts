@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import type { Slot, SlotSize, WallLoop, Warehouse } from "../types/warehouse";
 import { computeBounds, slotFootprint, toSceneXZ } from "./geometry";
+import { buildingLabel } from "./buildings";
+import { BUILDING_LABEL_Y, WALL_THICKNESS } from "../components/Walls";
 import { SLOT_HEIGHT } from "../components/Slots";
 import { LEVEL_HEIGHT, RACK_MARGIN_FACTOR } from "../components/Rack";
 
@@ -68,7 +70,19 @@ export function subSlotWorldBox(slot: Slot, defaults: SlotSize, subSlotIndex: nu
   );
 }
 
-/** The whole loaded site (plant level) — all walls' extent, at floor level. */
+/** Grows a box to take in a building's name, drawn on the floor outside its walls (Walls.tsx) — otherwise the frame, fitted to the walls alone, can crop it. */
+function expandByBuildingLabel(box: THREE.Box3, loop: WallLoop): void {
+  const label = buildingLabel(loop, WALL_THICKNESS);
+  for (const [x, y] of [
+    [label.x, label.y],
+    [label.x + label.width, label.y + label.height],
+  ] as const) {
+    const [sx, sz] = toSceneXZ(x, y);
+    box.expandByPoint(new THREE.Vector3(sx, BUILDING_LABEL_Y, sz));
+  }
+}
+
+/** The whole loaded site (plant level) — all walls' extent plus the buildings' names, at floor level. */
 export function plantWorldBox(warehouse: Warehouse): THREE.Box3 {
   const bounds = computeBounds(warehouse);
   const box = new THREE.Box3();
@@ -81,10 +95,13 @@ export function plantWorldBox(warehouse: Warehouse): THREE.Box3 {
     const [sx, sz] = toSceneXZ(x, y);
     box.expandByPoint(new THREE.Vector3(sx, 0, sz));
   }
+  for (const loop of warehouse.walls) {
+    if (loop.closed && loop.points.length >= 3) expandByBuildingLabel(box, loop);
+  }
   return box;
 }
 
-/** One building (a closed wall loop), from floor to wall height. */
+/** One building (a closed wall loop), from floor to wall height, plus its name. */
 export function buildingWorldBox(loop: WallLoop, wallHeight: number): THREE.Box3 {
   const box = new THREE.Box3();
   for (const p of loop.points) {
@@ -92,6 +109,7 @@ export function buildingWorldBox(loop: WallLoop, wallHeight: number): THREE.Box3
     box.expandByPoint(new THREE.Vector3(sx, 0, sz));
     box.expandByPoint(new THREE.Vector3(sx, wallHeight, sz));
   }
+  expandByBuildingLabel(box, loop);
   return box;
 }
 

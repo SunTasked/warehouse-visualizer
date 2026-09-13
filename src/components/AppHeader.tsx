@@ -4,6 +4,13 @@ import { useSimulation } from "../state/SimulationContext";
 import { useAnalytics } from "../state/AnalyticsContext";
 import { useViewFocus } from "../state/ViewFocusContext";
 import { WAREHOUSE_PRESETS, type WarehousePreset } from "../data/presets";
+import { openJsonFile, type FileHandle } from "../lib/file";
+import type { WarehouseConfig, WarehouseContent } from "../types/warehouse";
+import type { PickingListsFile } from "../types/simulation";
+
+type Submenu = "presets" | "load";
+
+const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 /**
  * Title, warehouse identity and the two top-level tabs (specs.md §5.6).
@@ -12,18 +19,31 @@ import { WAREHOUSE_PRESETS, type WarehousePreset } from "../data/presets";
  * plainly than an empty board would.
  */
 export function AppHeader() {
-  const { warehouse, mode, setMode, setAddSlotMode, dirty, save, load, loadWarehouse } = useEditor();
+  const {
+    warehouse,
+    mode,
+    setMode,
+    setAddSlotMode,
+    dirty,
+    save,
+    pickingLists,
+    applyPlan,
+    applyContent,
+    applyPickingLists,
+    loadWarehouse,
+  } = useEditor();
   const simulation = useSimulation();
   const analytics = useAnalytics();
   const { reset: resetFocus } = useViewFocus();
   const [showInfo, setShowInfo] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
-  const [showPresets, setShowPresets] = useState(false);
+  const [openSub, setOpenSub] = useState<Submenu | null>(null);
   const [loadingPreset, setLoadingPreset] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const hasSession = simulation.capturedRuns.length > 0;
   const wallCount = warehouse.walls.length;
+  const hasStock = warehouse.slots.some((slot) => slot.subSlots?.some((subSlot) => subSlot.pallets.length > 0));
 
   // A menu that stays open after you click past it is worse than no menu.
   useEffect(() => {
@@ -37,8 +57,11 @@ export function AppHeader() {
 
   // Reopening the menu starts from its top level, not a submenu left open.
   useEffect(() => {
-    if (!showMenu) setShowPresets(false);
+    if (!showMenu) setOpenSub(null);
   }, [showMenu]);
+
+  // One submenu at a time, so the menu never grows taller than it needs to.
+  const toggleSub = (sub: Submenu) => setOpenSub((current) => (current === sub ? null : sub));
 
   const select = (tab: "overview" | "performances") => {
     if (tab === "performances" && !hasSession) return;
@@ -50,8 +73,8 @@ export function AppHeader() {
     const runs = simulation.sessionRuns.length;
     const snapshots = analytics.snapshots.length;
     return [
-      runs > 0 ? `${runs} recorded run${runs === 1 ? "" : "s"} and both heatmaps` : null,
-      snapshots > 0 ? `${snapshots} saved snapshot${snapshots === 1 ? "" : "s"}` : null,
+      runs > 0 ? `${plural(runs, "recorded run")} and both heatmaps` : null,
+      snapshots > 0 ? plural(snapshots, "saved snapshot") : null,
     ].filter((loss): loss is string => loss !== null);
   };
 
@@ -90,13 +113,11 @@ The routes were measured against this layout, so they can't be compared against 
 
   /**
    * Swapping in another warehouse loses more than editing does: unsaved
-   * edits too, not just the session. Same principle as toggleMode — name the
-   * cost, and only ask when there is one.
+   * changes too, not just the session. Same principle as toggleMode — name
+   * the cost, and only ask when there is one.
    */
-  const confirmReplace = (action: string): boolean => {
-    // "Changes", not "layout edits": a simulated run's picks and stores go
-    // through the same history, so moved stock alone makes the warehouse dirty.
-    const lost = [dirty ? "unsaved changes" : null, ...sessionLosses()].filter(Boolean);
+  const confirmReplace = (action: string, extraLosses: (string | null)[] = []): boolean => {
+    const lost = [dirty ? "unsaved changes" : null, ...extraLosses, ...sessionLosses()].filter(Boolean);
     if (lost.length === 0) return true;
     return window.confirm(`${action} replaces the current warehouse.
 
@@ -111,17 +132,12 @@ Continue?`);
     resetFocus();
   };
 
-  const openFile = async () => {
-    setShowMenu(false);
-    if (!confirmReplace("Loading another warehouse")) return;
-    if (await load()) afterReplace();
-  };
-
   const openPreset = async (preset: WarehousePreset) => {
     if (!confirmReplace(`Loading ${preset.label}`)) return;
     setLoadingPreset(preset.warehouseId);
     try {
-      loadWarehouse(await preset.load());
+      const loaded = await preset.load();
+      loadWarehouse(loaded.warehouse, loaded.pickingLists);
       afterReplace();
       setShowMenu(false);
     } catch (err) {
@@ -131,6 +147,96 @@ Continue?`);
       setLoadingPreset(null);
     }
   };
+
+  /** One JSON file from the picker — null when cancelled, or when it isn't JSON (which it says). */
+  const pickFile = async <T,>(): Promise<{ data: T; handle: FileHandle | null } | null> => {
+    setShowMenu(false);
+    try {
+      return await openJsonFile<T>();
+    } catch (err) {
+      console.error(err);
+      window.alert("That file couldn't be read as JSON.");
+      return null;
+    }
+  };
+
+  const loadPlan = async () => {
+    const picked = await pickFile<WarehouseConfig>();
+    if (!picked) return;
+    const config = picked.data;
+    if (!Array.isArray(config?.walls) || !Array.isArray(config?.slots)) {
+      window.alert("That file isn't a warehouse plan — it has no walls or slots.");
+      return;
+    }
+    // A plan loads empty (its stock is the content file), and a different
+    // plant's picking lists name locations the new plan won't have.
+    const otherPlant = config.id !== warehouse.id;
+    const ok = confirmReplace(`Loading the plan "${config.name}"`, [
+      hasStock ? "the stock in the racks (load the plan's content next)" : null,
+      otherPlant && pickingLists.length > 0 ? `this plant's ${plural(pickingLists.length, "picking list")}` : null,
+    ]);
+    if (!ok) return;
+    applyPlan(config, picked.handle);
+    afterReplace();
+  };
+
+  const loadContent = async () => {
+    const picked = await pickFile<WarehouseContent>();
+    if (!picked) return;
+    const content = picked.data;
+    if (!Array.isArray(content?.slots)) {
+      window.alert("That file isn't warehouse content — it has no slots.");
+      return;
+    }
+    const known = new Set(warehouse.slots.map((slot) => slot.id));
+    const unknown = content.slots.filter((entry) => !known.has(entry.slotId)).length;
+    const warnings = [
+      content.warehouseId !== warehouse.id
+        ? `It was written for "${content.warehouseId}", but the plan on screen is "${warehouse.id}".`
+        : null,
+      unknown > 0 ? `${unknown} of its ${plural(content.slots.length, "slot")} aren't in this plan and will be ignored.` : null,
+      hasStock ? "It replaces the stock currently in the racks." : null,
+    ].filter((warning): warning is string => warning !== null);
+    if (warnings.length > 0 && !window.confirm(`Load this content?\n\n${warnings.join("\n")}`)) return;
+    applyContent(content, picked.handle);
+  };
+
+  const loadPickingLists = async () => {
+    const picked = await pickFile<PickingListsFile>();
+    if (!picked) return;
+    const file = picked.data;
+    if (!Array.isArray(file?.lists)) {
+      window.alert("That file isn't a picking lists file — it has no lists.");
+      return;
+    }
+    const places = new Set([
+      ...warehouse.slots.map((slot) => slot.id),
+      ...warehouse.liftStations.map((station) => station.id),
+      ...warehouse.deliverySpaces.map((space) => space.id),
+    ]);
+    const unknown = [...new Set(file.lists.flatMap((list) => (list.stops ?? []).map((stop) => stop.id)))].filter(
+      (id) => !places.has(id),
+    );
+    const warnings = [
+      file.warehouseId !== warehouse.id
+        ? `They were written for "${file.warehouseId}", but the plan on screen is "${warehouse.id}".`
+        : null,
+      unknown.length > 0
+        ? `${plural(unknown.length, "location")} they visit ${unknown.length === 1 ? "isn't" : "aren't"} in this plan (${unknown
+            .slice(0, 4)
+            .join(", ")}${unknown.length > 4 ? ", …" : ""}), so routes will skip ${unknown.length === 1 ? "it" : "them"}.`
+        : null,
+    ].filter((warning): warning is string => warning !== null);
+    if (warnings.length > 0 && !window.confirm(`Load these picking lists?\n\n${warnings.join("\n")}`)) return;
+    applyPickingLists(file.lists);
+  };
+
+  /** The three files a plant is made of, each loadable on its own. */
+  const loadItems = [
+    { key: "plan", label: "Warehouse plan…", description: "Layout: walls, slots, corridors, facilities", run: loadPlan },
+    { key: "content", label: "Warehouse content…", description: "Stock: the pallets in each slot", run: loadContent },
+    { key: "lists", label: "Picking lists…", description: "Work orders for the forklift", run: loadPickingLists },
+  ];
 
   return (
     <header className="app__header">
@@ -174,6 +280,10 @@ Continue?`);
                 <span>{warehouse.deliverySpaces.length}</span>
               </div>
               <div className="app__info-row">
+                <span>Picking lists</span>
+                <span>{pickingLists.length}</span>
+              </div>
+              <div className="app__info-row">
                 <span>Recorded runs</span>
                 <span>{simulation.capturedRuns.length}</span>
               </div>
@@ -203,42 +313,68 @@ Continue?`);
           {showMenu && (
             <div className="app__menu-list">
               {dirty && <div className="app__menu-note">● unsaved changes</div>}
+
               <button
                 className="app__menu-item app__menu-item--sub"
-                onClick={() => setShowPresets((v) => !v)}
-                aria-expanded={showPresets}
+                onClick={() => toggleSub("presets")}
+                aria-expanded={openSub === "presets"}
               >
                 Presets
-                <span className="app__menu-caret">{showPresets ? "▾" : "▸"}</span>
+                <span className="app__menu-caret">{openSub === "presets" ? "▾" : "▸"}</span>
               </button>
-              {showPresets && (
+              {openSub === "presets" && (
                 <div className="app__submenu">
                   {WAREHOUSE_PRESETS.map((preset) => {
                     const current = warehouse.id === preset.warehouseId;
                     return (
                       <button
                         key={preset.warehouseId}
-                        className="app__menu-item app__preset"
+                        className="app__menu-item app__subitem"
                         disabled={loadingPreset !== null}
                         onClick={() => void openPreset(preset)}
                         title={current ? `${preset.description} · on screen now` : preset.description}
                       >
-                        <span className="app__preset-check">{current ? "✓" : ""}</span>
-                        <span className="app__preset-text">
-                          <span className="app__preset-label">
+                        <span className="app__subitem-check">{current ? "✓" : ""}</span>
+                        <span className="app__subitem-text">
+                          <span className="app__subitem-label">
                             {preset.label}
                             {loadingPreset === preset.warehouseId && " …"}
                           </span>
-                          <span className="app__preset-desc">{preset.description}</span>
+                          <span className="app__subitem-desc">{preset.description}</span>
                         </span>
                       </button>
                     );
                   })}
                 </div>
               )}
-              <button className="app__menu-item" onClick={() => void openFile()}>
-                Load…
+
+              <button
+                className="app__menu-item app__menu-item--sub"
+                onClick={() => toggleSub("load")}
+                aria-expanded={openSub === "load"}
+              >
+                Load
+                <span className="app__menu-caret">{openSub === "load" ? "▾" : "▸"}</span>
               </button>
+              {openSub === "load" && (
+                <div className="app__submenu">
+                  {loadItems.map((item) => (
+                    <button
+                      key={item.key}
+                      className="app__menu-item app__subitem"
+                      onClick={() => void item.run()}
+                      title={item.description}
+                    >
+                      <span className="app__subitem-check" />
+                      <span className="app__subitem-text">
+                        <span className="app__subitem-label">{item.label}</span>
+                        <span className="app__subitem-desc">{item.description}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <button
                 className="app__menu-item"
                 onClick={() => {

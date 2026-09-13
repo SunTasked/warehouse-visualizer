@@ -20,6 +20,12 @@ export function PickingListPanel() {
   const allSelected = all.length > 0 && selected.size === all.length;
   const someSelected = selected.size > 0 && !allSelected;
 
+  // Loading another plant replaces the lists wholesale; ticks left on ids
+  // that no longer exist would throw select-all's count off.
+  useEffect(() => {
+    setSelected(new Set());
+  }, [all]);
+
   // "Some selected" has no HTML attribute — it only exists as a DOM property.
   useEffect(() => {
     if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected;
@@ -51,10 +57,16 @@ export function PickingListPanel() {
 
       {!collapsed && (
         <>
-      <label className="picking-panel__select-all">
-        <input ref={selectAllRef} type="checkbox" checked={allSelected} onChange={toggleAll} />
-        <span>Select all</span>
-      </label>
+      {all.length === 0 ? (
+        <div className="picking-panel__empty">
+          No picking lists for this plant — load some from Overview → Load → Picking lists…
+        </div>
+      ) : (
+        <label className="picking-panel__select-all">
+          <input ref={selectAllRef} type="checkbox" checked={allSelected} onChange={toggleAll} />
+          <span>Select all</span>
+        </label>
+      )}
 
       <ul className="picking-panel__list">
         {all.map((list) => (

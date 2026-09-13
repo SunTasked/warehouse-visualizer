@@ -1,0 +1,72 @@
+{
+  "warehouseId": "cml",
+  "lists": [
+    {
+      "id": "receive-aisle-a",
+      "label": "Receive into aisle A",
+      "mode": "storing",
+      "stops": [
+        { "kind": "depot", "id": "DS01" },
+        { "kind": "slot", "id": "AA01" },
+        { "kind": "slot", "id": "AA03" },
+        { "kind": "slot", "id": "AA05" }
+      ]
+    },
+    {
+      "id": "receive-deep-lanes",
+      "label": "Receive into deep lanes",
+      "mode": "storing",
+      "stops": [
+        { "kind": "depot", "id": "DS01" },
+        { "kind": "slot", "id": "AC01" },
+        { "kind": "slot", "id": "AC02" },
+        { "kind": "slot", "id": "AD01" }
+      ]
+    },
+    {
+      "id": "quick-pick",
+      "label": "Quick pick",
+      "mode": "picking",
+      "stops": [
+        { "kind": "slot", "id": "AA01" },
+        { "kind": "depot", "id": "DS01" }
+      ]
+    },
+    {
+      "id": "batch-pick",
+      "label": "Batch pick across aisles",
+      "mode": "picking",
+      "stops": [
+        { "kind": "slot", "id": "AA03" },
+        { "kind": "slot", "id": "AC01" },
+        { "kind": "slot", "id": "AD01" },
+        { "kind": "depot", "id": "DS01" },
+        { "kind": "slot", "id": "AA05" },
+        { "kind": "slot", "id": "AC02" },
+        { "kind": "depot", "id": "DS01" }
+      ]
+    },
+    {
+      "id": "restock-z-block",
+      "label": "Restock the Z block",
+      "mode": "storing",
+      "stops": [
+        { "kind": "depot", "id": "DS01" },
+        { "kind": "slot", "id": "AZ01" },
+        { "kind": "slot", "id": "AZ03" },
+        { "kind": "slot", "id": "AZ05" }
+      ]
+    },
+    {
+      "id": "restock-side-blocks",
+      "label": "Restock the side blocks",
+      "mode": "storing",
+      "stops": [
+        { "kind": "depot", "id": "DS01" },
+        { "kind": "slot", "id": "AN02" },
+        { "kind": "slot", "id": "AL01" },
+        { "kind": "slot", "id": "AK01" }
+      ]
+    }
+  ]
+}

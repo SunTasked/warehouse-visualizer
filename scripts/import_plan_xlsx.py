@@ -312,9 +312,9 @@ def main():
     r0, r1, label = find_building_rows(ws, args.building)
     print(f"{label}: rows {r0}..{r1}")
     # The warehouse is the plant (--id/--name); the building is its wall loop,
-    # named after the sheet's own block, and what every facility and corridor
-    # belongs to.
-    building_id = label.title()
+    # named after the sheet's own block without the "BATIMENT" prefix (so
+    # "BATIMENT 13A" -> "13A"), and what every facility and corridor belongs to.
+    building_id = re.sub(r"^BATIMENT\s+", "", label, flags=re.I).strip() or label
     locations, blacks = extract(ws, r0, r1)
     print(f"  {len(locations)} locations, {sum(len(l['cells']) for l in locations.values())} positions, "
           f"{len(blacks)} blocked")
