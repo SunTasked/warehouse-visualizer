@@ -1391,12 +1391,16 @@ and the breadcrumb, and the importer names a building after its sheet block minu
 the camera framing (`plantWorldBox`/`buildingWorldBox`), so the plant and warehouse shots
 take the name in rather than cropping it.
 
-*Open conflict:* the framing fills the whole canvas and ignores the floating panels, and the
-top-left of the plan is exactly where the breadcrumb and run console are docked. A building
-whose north-west corner lands there has its name under those panels — CML's "13A" at both
-plant and building zoom, and the start of "Main warehouse" at building zoom. Framing clear
-of the panels would shrink the building on screen, against the earlier "make the building
-fill the screen" feedback, so it is left for the plant owner to decide.
+**Plant and building shots frame clear of the side panels.** The top-down framing used to
+fill the whole canvas, and the top-left of the plan is exactly where the breadcrumb and run
+console are docked, so a name could land under them — CML's "13A" at both zooms, the start
+of "Main warehouse" at building zoom. Offered the trade-off (buildings smaller on screen,
+against the earlier "fill the screen" feedback), the plant owner chose to keep *all* panels
+clear, not just the left ones. Whenever it frames a plant or building, `FocusCameraDriver`
+measures the two docks App.tsx marks with `data-camera-inset` — at framing time only, so
+collapsing a panel afterwards doesn't move the camera — and `frameBox` fits the box's width
+into the strip between them (never less than 30% of the canvas), then slides the view so
+the box sits centred in that strip. Slot, slot-space and pallet close-ups are unchanged.
 
 **Unsaved changes track edits, not the simulation.** "Reset warehouse" on CML lit the
 unsaved indicator outside edit mode because `dirty` was a flag every change set — undo,
@@ -1429,8 +1433,10 @@ raises the dot, undo clears it, redo restores it. Loading the Test plant's picki
 CML asks first, naming the plant mismatch and the 13 locations CML lacks; loading the Test
 plant plan then asks only about losing those 5 lists, and leaves the panel empty with its
 hint; matching content and lists then load without asking, the dot still off. The breadcrumb
-reads CML › 13A. Building names read in full for Test plant at plant zoom and for the Annex
-at building zoom — but see *Open conflict* above for names under the left panels.
+reads CML › 13A. Framing, measured at 1600×950 by hiding the panels once each shot settles
+and counting dark (rack, corridor, wall, name) pixels: none under the left (398 px) or right
+(350 px) panels and 27–46 k between them, for Test plant, Main warehouse, the Annex, CML and
+13A alike.
 
 ### 5.7 Importing a real plant from the CML workbook (decided, v1)
 
@@ -1667,8 +1673,9 @@ Date-stamped record of decisions that changed scope or direction. Newest first.
   outside each building's north-west corner, and a lone building no longer borrows its
   plant's name, so CML's building reads "13A" (the importer strips "BATIMENT"). The
   right-edge panels became one full-height dock after the taller CML picking panel buried
-  Reset under the layer panel. Left open for the owner: the default framing puts the plan's
-  top-left under the breadcrumb and run console, hiding CML's name.
+  Reset under the layer panel. Plant and building shots now frame clear of the side panels,
+  which had hidden CML's name under the breadcrumb and run console — the owner chose this
+  over keeping buildings as large as before, and over clearing only the left panels.
 - 2026-09-13 — Warehouse presets (§5.6): **Overview → Presets** loads *Test plant* or *CML*
   in one click, from a lazily-imported registry in `src/data/presets.ts`. The imported plant
   was renamed `schema/CML.plan.json` / `CML.content.json` with warehouse id `cml` and name

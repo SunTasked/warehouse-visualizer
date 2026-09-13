@@ -10,6 +10,7 @@ import {
   plantWorldBox,
   frameBox,
   CAMERA_FOV_DEG,
+  type ViewportInsets,
 } from "../lib/focusBounds";
 import { useEditor } from "../state/EditorContext";
 import { useViewFocus } from "../state/ViewFocusContext";
@@ -25,6 +26,28 @@ import { SlotHeatmap } from "./SlotHeatmap";
 import { StepBlink } from "./StepBlink";
 import { useLayers } from "../state/LayerContext";
 
+/** Clear space kept between a framed building and the panels beside it. */
+const PANEL_CLEARANCE_PX = 16;
+
+/**
+ * How far the floating panels reach in from the canvas's left and right
+ * edges, measured from the docks App.tsx marks with `data-camera-inset`.
+ * Read only when a shot is framed, never continuously: collapsing or
+ * expanding a panel afterwards shouldn't make the camera move.
+ */
+function measurePanelInsets(canvas: HTMLCanvasElement): ViewportInsets {
+  const bounds = canvas.getBoundingClientRect();
+  let left = 0;
+  let right = 0;
+  for (const dock of document.querySelectorAll<HTMLElement>("[data-camera-inset]")) {
+    const rect = dock.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) continue; // nothing docked on that side
+    if (dock.dataset.cameraInset === "left") left = Math.max(left, rect.right - bounds.left + PANEL_CLEARANCE_PX);
+    else right = Math.max(right, bounds.right - rect.left + PANEL_CLEARANCE_PX);
+  }
+  return { left, right, width: bounds.width };
+}
+
 // Drives the view-mode camera drill-down: whenever `focus` changes, smoothly
 // moves the CameraControls to a fixed-angle shot of the relevant box
 // (computed analytically by focusBounds.ts) — plant/warehouse from directly
@@ -37,7 +60,7 @@ import { useLayers } from "../state/LayerContext";
 function FocusCameraDriver() {
   const { warehouse } = useEditor();
   const { focus, cameraControlsRef } = useViewFocus();
-  const { size } = useThree();
+  const { size, gl } = useThree();
   const aspect = size.width / size.height;
 
   useEffect(() => {
@@ -46,11 +69,12 @@ function FocusCameraDriver() {
 
     let view;
     if (focus.level === "plant") {
-      view = frameBox(plantWorldBox(warehouse), "top", aspect);
+      // Plant and building shots fit between the side panels, never under them.
+      view = frameBox(plantWorldBox(warehouse), "top", aspect, measurePanelInsets(gl.domElement));
     } else if (focus.level === "warehouse") {
       const loop = warehouse.walls.find((w) => w.id === focus.buildingId);
       if (!loop) return;
-      view = frameBox(buildingWorldBox(loop, WALL_HEIGHT), "top", aspect);
+      view = frameBox(buildingWorldBox(loop, WALL_HEIGHT), "top", aspect, measurePanelInsets(gl.domElement));
     } else {
       const slot = warehouse.slots.find((s) => s.id === focus.slotId);
       if (!slot) return;

@@ -34,9 +34,13 @@ top. This is a log of what happened each session — the current-state snapshot 
   structure, run + reset leaving the dot off with stock reverted, edit/undo/redo toggling it, all
   three Load items including the cross-plant warnings, breadcrumb 13A, and names at plant and
   building zoom.
-- Open: at the default framing CML's "13A" (and the start of "Main warehouse" at building zoom)
-  sits under the top-left breadcrumb and run console — asked the owner how framing should
-  handle the panels.
+- Framing: at the default zoom CML's "13A" (and the start of "Main warehouse" at building zoom)
+  sat under the top-left breadcrumb and run console. The owner chose "clear of all panels" over
+  clearing only the left ones or keeping the zoom: `FocusCameraDriver` measures the
+  `data-camera-inset` docks when framing a plant or building, and `frameBox` fits the box
+  between them (at least 30% of the width) and centres it there. Measured with the panels
+  hidden after each shot: 0 dark pixels under either panel for Test plant, Main warehouse,
+  Annex, CML and 13A.
 
 ## 2026-09-13 (cont'd) — warehouse presets, CML rename, pallets hidden by default
 

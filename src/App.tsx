@@ -60,8 +60,10 @@ function AppShell() {
         <HoverCard />
         <FacilityTooltip />
         {/* Docks: panels that share an edge stack in one column so neither
-            has to be positioned around the other's height. */}
-        <div className="app__dock app__dock--tl">
+            has to be positioned around the other's height. data-camera-inset
+            marks them for the camera, which frames plant and building shots
+            clear of them (WarehouseScene's FocusCameraDriver). */}
+        <div className="app__dock app__dock--tl" data-camera-inset="left">
           <FocusBreadcrumb />
           <RunConsole />
         </div>
@@ -69,7 +71,7 @@ function AppShell() {
             whatever height the legend and layer panel leave and scroll
             inside it, rather than running underneath them — a plant with
             more lists otherwise buried "Reset warehouse" under the layers. */}
-        <div className="app__dock app__dock--right">
+        <div className="app__dock app__dock--right" data-camera-inset="right">
           <PickingListPanel />
           <div className="app__dock-bottom">
             <UsageLegend />

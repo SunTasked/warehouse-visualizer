@@ -157,27 +157,65 @@ export const CAMERA_FOV_DEG = 45;
  * the box is shaped, and however wide the window is, it always fills the
  * frame the same way.
  */
-export function frameBox(box: THREE.Box3, angle: "top" | "iso", aspect = 16 / 9): FramedView {
+export function frameBox(
+  box: THREE.Box3,
+  angle: "top" | "iso",
+  aspect = 16 / 9,
+  insets?: ViewportInsets,
+): FramedView {
   const center = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3());
   const ratio = angle === "top" ? TOP_DOWN_RATIO : ISO_RATIO;
 
   let span: number;
+  let shiftX = 0;
   if (angle === "top") {
     const cameraDistanceFactor = Math.hypot(ratio.x, ratio.y, ratio.z); // camera sits this many `span`s from the target
     const halfVFov = THREE.MathUtils.degToRad(CAMERA_FOV_DEG) / 2;
+    // With panels over the canvas's edges, the box has to fit the strip
+    // between them rather than the whole width.
+    const hasInsets = insets !== undefined && insets.width > 0;
+    const usable = hasInsets
+      ? Math.max(MIN_USABLE_WIDTH, (insets.width - insets.left - insets.right) / insets.width)
+      : 1;
     const spanForDepth = ((size.z / 2) * TOP_FRAME_PADDING) / (cameraDistanceFactor * Math.tan(halfVFov));
-    const spanForWidth = ((size.x / 2) * TOP_FRAME_PADDING) / (cameraDistanceFactor * Math.tan(halfVFov) * aspect);
+    const spanForWidth =
+      ((size.x / 2) * TOP_FRAME_PADDING) / (cameraDistanceFactor * Math.tan(halfVFov) * aspect * usable);
     span = Math.max(spanForDepth, spanForWidth, 1);
+    if (hasInsets) {
+      // ...and then sit centred in that strip. Its centre is (left - right) / 2
+      // pixels off the canvas centre; converted to world units at the target
+      // plane, moving the camera and target the opposite way carries the box
+      // there. Screen-right is world +X in this shot (the camera sits south of
+      // its target, looking north and down).
+      const distance = cameraDistanceFactor * span;
+      const worldPerPixel = (2 * distance * Math.tan(halfVFov)) / (insets.width / aspect);
+      shiftX = ((insets.left - insets.right) / 2) * worldPerPixel;
+    }
   } else {
     span = Math.max(size.x, size.y, size.z, 1) * FRAME_PADDING;
   }
 
   return {
-    position: [center.x + span * ratio.x, center.y + span * ratio.y, center.z + span * ratio.z],
-    target: [center.x, center.y, center.z],
+    position: [center.x - shiftX + span * ratio.x, center.y + span * ratio.y, center.z + span * ratio.z],
+    target: [center.x - shiftX, center.y, center.z],
   };
 }
+
+/**
+ * Canvas pixels covered by floating panels along its left and right edges,
+ * which a "top" shot keeps the framed box clear of (per the plant owner's
+ * choice: buildings smaller on screen, but never under a panel).
+ */
+export interface ViewportInsets {
+  left: number;
+  right: number;
+  /** The canvas's own width in pixels, to turn the insets into a share of the view. */
+  width: number;
+}
+
+/** However wide the panels, a shot never gets squeezed into less than this share of the canvas width. */
+const MIN_USABLE_WIDTH = 0.3;
 
 /** One pallet's tier within its sub-slot's rack. */
 export function palletWorldBox(
