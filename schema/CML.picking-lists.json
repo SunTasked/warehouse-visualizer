@@ -124,6 +124,63 @@
         { "kind": "slot", "id": "FP04A" },
         { "kind": "depot", "id": "DS01" }
       ]
+    },
+    {
+      "id": "receive-10h",
+      "label": "Receive into 10H",
+      "mode": "storing",
+      "stops": [
+        { "kind": "depot", "id": "DS06" },
+        { "kind": "slot", "id": "HA76" },
+        { "kind": "slot", "id": "HA78" },
+        { "kind": "slot", "id": "HK20" }
+      ]
+    },
+    {
+      "id": "receive-14j",
+      "label": "Receive into 14J",
+      "mode": "storing",
+      "stops": [
+        { "kind": "depot", "id": "DS07" },
+        { "kind": "slot", "id": "JB01" },
+        { "kind": "slot", "id": "JB03" },
+        { "kind": "slot", "id": "JI28" }
+      ]
+    },
+    {
+      "id": "receive-15k",
+      "label": "Receive into 15K",
+      "mode": "storing",
+      "stops": [
+        { "kind": "depot", "id": "DS08" },
+        { "kind": "slot", "id": "KA02" },
+        { "kind": "slot", "id": "KA04" },
+        { "kind": "slot", "id": "KE26" }
+      ]
+    },
+    {
+      "id": "receive-16g",
+      "label": "Receive into 16G",
+      "mode": "storing",
+      "stops": [
+        { "kind": "depot", "id": "DS09" },
+        { "kind": "slot", "id": "GA01" },
+        { "kind": "slot", "id": "GB01" },
+        { "kind": "slot", "id": "GE24" }
+      ]
+    },
+    {
+      "id": "pick-far-buildings",
+      "label": "Pick from the far buildings",
+      "mode": "picking",
+      "stops": [
+        { "kind": "slot", "id": "HA76" },
+        { "kind": "slot", "id": "JB01" },
+        { "kind": "slot", "id": "KA02" },
+        { "kind": "depot", "id": "DS01" },
+        { "kind": "slot", "id": "GA01" },
+        { "kind": "depot", "id": "DS01" }
+      ]
     }
   ]
 }

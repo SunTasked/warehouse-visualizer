@@ -16,7 +16,8 @@ guessing from geometry, because the drawing is self-describing:
   aisle A, the 'AA01, AA03, ...' line names the rack above it and the
   'AA02, AA04, ...' line the rack below. Odd codes therefore always face
   south and even codes north (verified: true for every two-sided aisle in
-  13A, no exceptions).
+  13A, no exceptions). 16G is drawn the other way round: its aisles run
+  north-south, with the labels in columns and every rack facing east or west.
 
 * Every drawn box carries a formula that identifies it:
     =VLOOKUP(<its own label cell>, Analyse!...)  -> the FRONT position, the
@@ -33,9 +34,9 @@ guessing from geometry, because the drawing is self-describing:
 * Black-filled boxes are drawn but carry no formula and no code - blocked
   positions (pillars and the like). They become holes in the racking.
 
-* A box whose label cell is blank (07D's would-be DM02, 06F's would-be FP12)
-  names nothing, and neither code appears in the picking history: it is left
-  out as a blocked position too, per the plant owner.
+* A box whose label cell is blank (07D's would-be DM02, 06F's would-be FP12,
+  15K's T358) names nothing: it is left out as a blocked position too, per
+  the plant owner.
 
 * Aisles P and D of 06F are drawn one row tall with a single line of even
   codes, and the lanes on *both* sides look up the same label: FP04 is one
@@ -43,6 +44,12 @@ guessing from geometry, because the drawing is self-describing:
   uses the plain code). Such a code becomes two slots, suffixed A for the
   lane north of (or west of) the aisle and B for the other, per the plant
   owner.
+
+* Areas forklifts can't enter are named on the plan - some as merged cells
+  ("Lithium"), most as drawn text boxes, which openpyxl doesn't load and are
+  read from the drawing XML ("TRAIN", "ZONE MU"). Per the plant owner they
+  become inaccessible zones. A text box is the area itself, except "ZONE MU",
+  which only labels the medium-bordered box drawn around it.
 
 * Bold borders mark back-to-back facings, as the plan's author intended, but
   the file is not consistent about it (the D/E block uses a thin line for the
@@ -63,11 +70,13 @@ a pitch depending on its role (rack row vs aisle line), and a slot is
 anchored at the aisle-facing edge of its front box. Relative positions - the
 thing the plan actually encodes - are preserved exactly.
 
-Aisles come out of the same label rows: the corridor centreline for aisle A
-is the line its 'AA..' labels are written on, spanning the columns those
-labels cover. Those corridors are joined by a vertical trunk in the empty
-column band between the main rack blocks, plus one down any block of
-east/west-facing racks (13A's Z block).
+Aisles come out of the same label lines: the corridor centreline for aisle A
+is the line its 'AA..' labels are written on, spanning the labels. One aisle
+letter can label two separate aisles (10H's short east end of aisle A);
+each becomes its own corridor. Aisles are joined by a trunk in the empty band
+between the rack blocks - a column band where aisles run east-west, 16G's
+cross-aisle row band where they run north-south - and a short spur links an
+aisle that can't reach the trunk to a neighbouring one that does.
 
 --------------------------------------------------------------------------
 How the buildings become a plant
@@ -75,19 +84,20 @@ How the buildings become a plant
 The workbook draws every building in the same template and says nothing
 about where they stand. Per the plant owner, they are stacked north to south
 in sheet order (the first --building furthest north), west walls aligned,
-ROAD_GAP metres apart.
+ROAD_GAP metres apart, and linked along the central aisle: each trunk runs on
+to a door in the building's south wall, and a short connector crosses to a
+door in the north wall of the building below (16G, with no central aisle
+north-south, is entered down its aisle nearest the one above).
 
-Each building gets a delivery space on the clear floor south of its last
-rack, beside the corridor that runs along that strip; the first building also
-gets the lift station the forklift starts from. Neither is in the workbook.
-With more than one building, that corridor continues west to a door in the
-west wall, and one outdoor road links neighbouring buildings' doors, running
-ROAD_OFFSET metres west of the walls - one cross-building connector per pair,
-the shape the app's building focus expects.
+Every building gets a lift station and a delivery space on the clear floor
+south of its last rack, beside the corridor that runs along that strip; the
+first building's lift station is where the forklift starts. Neither is in
+the workbook.
 """
 import argparse
 import json
 import re
+import zipfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -110,9 +120,18 @@ CLEAR = 0.5         # clearance between a corridor or pad and racking or a wall
 PAD_W, PAD_D = 6.0, 2.0  # lift station / delivery space footprint (the app's fixed size)
 PAD_GAP = 0.4       # between the dock corridor and the pads beside it
 ROAD_GAP = 10.0     # clear ground between two stacked buildings
-ROAD_OFFSET = 5.0   # the shared road's centreline, west of the west walls
 
-DEFAULT_BUILDINGS = ["BATIMENT 13A", "BATIMENT 12B", "BATIMENT 08C", "BATIMENT 07D", "BATIMENT 06F"]
+DEFAULT_BUILDINGS = [
+    "BATIMENT 13A", "BATIMENT 12B", "BATIMENT 08C", "BATIMENT 07D", "BATIMENT 06F",
+    "BATIMENT 10H", "BATIMENT 14J", "BATIMENT 15K", "BATIMENT 16G",
+]
+
+# --- Areas forklifts can't enter ---------------------------------------------
+# Plan wording (matched as whole words, any case) -> the zone's label.
+ZONE_LABELS = {"TRAIN": "Train", "ZONE MU": "Zone MU", "LITHIUM": "Lithium"}
+# Labels that name a bordered area rather than being the area.
+BOXED_ZONES = {"Zone MU"}
+COVER = 0.4  # a shape's edge cell counts once the shape covers this much of it
 
 # rotationDeg -> facing, per Slots.tsx's rotation math (see the example
 # generator, which documents the same mapping).
@@ -122,6 +141,10 @@ VLOOKUP = re.compile(r"^=VLOOKUP\(\$?([A-Z]{1,2})\$?(\d+)\s*,", re.I)
 BROKEN = re.compile(r"^=VLOOKUP\(\s*,", re.I)
 REF = re.compile(r"^=\$?([A-Z]{1,2})\$?(\d+)$", re.I)
 CODE = re.compile(r"^[A-Z]{2}\d{2,3}$")
+ANCHOR = re.compile(
+    r"<xdr:(from|to)><xdr:col>(\d+)</xdr:col><xdr:colOff>(-?\d+)</xdr:colOff>"
+    r"<xdr:row>(\d+)</xdr:row><xdr:rowOff>(-?\d+)</xdr:rowOff></xdr:\1>"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -306,26 +329,186 @@ def extract(ws, r0, r1, c1=200):
 
 
 # ---------------------------------------------------------------------------
+# Inaccessible zones
+# ---------------------------------------------------------------------------
+def _attrs(tag):
+    return dict(re.findall(r'([\w:]+)="([^"]*)"', tag))
+
+
+def _rels(z, path):
+    try:
+        xml = z.read(path).decode("utf8")
+    except KeyError:
+        return {}
+    return {a["Id"]: a["Target"] for a in map(_attrs, re.findall(r"<Relationship\b[^>]*>", xml))}
+
+
+def _drawing_xml(workbook_path, sheet_name):
+    """The drawing layer (shapes, text boxes) of one sheet, which openpyxl doesn't load."""
+    with zipfile.ZipFile(workbook_path) as z:
+        sheets = map(_attrs, re.findall(r"<sheet\b[^>]*>", z.read("xl/workbook.xml").decode("utf8")))
+        rid = next((s.get("r:id") for s in sheets if s.get("name") == sheet_name), None)
+        target = _rels(z, "xl/_rels/workbook.xml.rels").get(rid)
+        if not target:
+            return ""
+        sheet_path = "xl/" + target.lstrip("/").removeprefix("xl/")
+        folder, base = sheet_path.rsplit("/", 1)
+        drawings = [t.rsplit("/", 1)[1] for t in _rels(z, f"{folder}/_rels/{base}.rels").values() if "drawings/" in t]
+        return "".join(z.read(f"xl/drawings/{d}").decode("utf8", "replace") for d in drawings if d.endswith(".xml"))
+
+
+def _zone_label(text):
+    if not isinstance(text, str):
+        return None
+    words = " ".join(text.upper().split())
+    return next((name for key, name in ZONE_LABELS.items() if re.search(rf"\b{re.escape(key)}\b", words)), None)
+
+
+def _col_emu(ws, c):
+    dim = ws.column_dimensions.get(get_column_letter(c))
+    width = dim.width if dim is not None and dim.width else (ws.sheet_format.defaultColWidth or 8.43)
+    return (width * 7 + 5) * 9525
+
+
+def _row_emu(ws, r):
+    dim = ws.row_dimensions.get(r)
+    height = dim.height if dim is not None and dim.height else (ws.sheet_format.defaultRowHeight or 15)
+    return height * 12700
+
+
+def _enclosing_box(ws, cells, reach=60):
+    """The medium-bordered box drawn around a label, as cells, or None."""
+    r0, c0, r1, c1 = cells
+
+    def medium(cell, side):
+        return _style(getattr(cell.border, side)) == "medium"
+
+    top = next((r for r in range(r0, max(1, r0 - reach), -1)
+                if medium(ws.cell(r, c0), "top") or medium(ws.cell(r - 1, c0), "bottom")), None)
+    bottom = next((r for r in range(r1, r1 + reach)
+                   if medium(ws.cell(r, c0), "bottom") or medium(ws.cell(r + 1, c0), "top")), None)
+    left = next((c for c in range(c0, max(1, c0 - reach), -1)
+                 if medium(ws.cell(r0, c), "left") or medium(ws.cell(r0, c - 1), "right")), None)
+    right = next((c for c in range(c1, c1 + reach)
+                  if medium(ws.cell(r0, c), "right") or medium(ws.cell(r0, c + 1), "left")), None)
+    if None in (top, bottom, left, right):
+        return None
+    return top, left, bottom, right
+
+
+def read_zones(ws, workbook_path, sheet_name):
+    """-> [(label, (r0, c0, r1, c1))]: the sheet's no-access areas, in cells."""
+    zones, seen = [], set()
+    xml = _drawing_xml(workbook_path, sheet_name)
+    for body in re.findall(r"<xdr:twoCellAnchor\b[^>]*>(.*?)</xdr:twoCellAnchor>", xml, re.S):
+        label = _zone_label(" ".join(re.findall(r"<a:t>([^<]*)</a:t>", body)))
+        anchors = {m[0]: tuple(int(v) for v in m[1:]) for m in ANCHOR.findall(body)}
+        if not label or len(anchors) != 2:
+            continue
+        c0, co0, r0, ro0 = anchors["from"]
+        c1, co1, r1, ro1 = anchors["to"]
+        c0, r0, c1, r1 = c0 + 1, r0 + 1, c1 + 1, r1 + 1  # the XML counts from 0
+        cells = (
+            r0 if 1 - ro0 / _row_emu(ws, r0) >= COVER else r0 + 1,
+            c0 if 1 - co0 / _col_emu(ws, c0) >= COVER else c0 + 1,
+            r1 if ro1 / _row_emu(ws, r1) >= COVER else r1 - 1,
+            c1 if co1 / _col_emu(ws, c1) >= COVER else c1 - 1,
+        )
+        if (label, cells) in seen:  # the drawing repeats some of its shapes
+            continue
+        seen.add((label, cells))
+        if label in BOXED_ZONES:
+            cells = _enclosing_box(ws, cells) or cells
+        zones.append((label, cells))
+    for mr in ws.merged_cells.ranges:
+        label = _zone_label(ws.cell(mr.min_row, mr.min_col).value)
+        if label:
+            zones.append((label, (mr.min_row, mr.min_col, mr.max_row, mr.max_col)))
+    return zones
+
+
+# ---------------------------------------------------------------------------
 # Geometry
 # ---------------------------------------------------------------------------
-def build_axes(locations, r0, r1):
-    """Per-row heights and per-column widths, then cumulative edges.
+def _clusters(values, gap):
+    """Sorted distinct values, split wherever two neighbours are more than `gap` apart."""
+    out = []
+    for v in sorted(set(values)):
+        if out and v - out[-1][-1] <= gap:
+            out[-1].append(v)
+        else:
+            out.append([v])
+    return out
+
+
+def ew_aisles(locations):
+    """Aisles of east/west-facing racks: one per code prefix and cluster of label columns."""
+    by_prefix = defaultdict(list)
+    for code, loc in locations.items():
+        if loc["face"] in "WE":
+            by_prefix[code[:2]].append(loc)
+    out = []
+    for prefix, locs in sorted(by_prefix.items()):
+        groups = _clusters([l["label"][1] for l in locs], 2)
+        for n, cols in enumerate(groups, 1):
+            members = [l for l in locs if cols[0] <= l["label"][1] <= cols[-1]]
+            out.append({
+                "id": f"aisle-{prefix}" + (f"-{n}" if len(groups) > 1 else ""),
+                "cols": cols,
+                "rows": sorted({l["label"][0] for l in members}),
+            })
+    return out
+
+
+def ns_aisles(locations, blockers):
+    """Aisles of north/south-facing racks: one per code prefix and run of label rows.
+
+    Two label rows of one prefix are one aisle unless racking or a zone stands
+    between them, across the columns their labels span - which is what makes
+    10H's short east end of aisle A, behind a rack, an aisle of its own.
+    """
+    by_prefix = defaultdict(lambda: defaultdict(list))  # prefix -> label row -> label columns
+    for code, loc in locations.items():
+        if loc["face"] in "NS":
+            by_prefix[code[:2]][loc["label"][0]].append(loc["label"][1])
+    out = []
+    for prefix, rows in sorted(by_prefix.items()):
+        groups = []
+        for r in sorted(rows):
+            if groups:
+                previous = groups[-1]
+                cols = rows[r] + [c for pr in previous for c in rows[pr]]
+                between = range(previous[-1] + 1, r)
+                if not any((rr, c) in blockers for rr in between for c in range(min(cols), max(cols) + 1)):
+                    previous.append(r)
+                    continue
+            groups.append([r])
+        for n, group in enumerate(groups, 1):
+            out.append({
+                "id": f"aisle-{prefix}" + (f"-{n}" if len(groups) > 1 else ""),
+                "rows": group,
+                "cols": sorted({c for r in group for c in rows[r]}),
+            })
+    return out
+
+
+def build_axes(locations, r0, r1, transposed=False, zone_cells=frozenset()):
+    """Per-row heights and per-column widths.
 
     A row that carries the labels of a north/south-facing rack *is* that
     rack's aisle, so it gets aisle pitch; every other row is a rack row at one
-    pallet position deep. Same idea transposed for the (rare) east/west racks,
-    whose labels sit in a column instead.
+    pallet position deep. Same idea transposed for east/west racks, whose
+    labels sit in columns instead.
     """
-    aisle_rows, aisle_cols = set(), set()
-    for loc in locations.values():
-        lr, lc = loc["label"]
-        (aisle_rows if loc["face"] in "NS" else aisle_cols).add(lr if loc["face"] in "NS" else lc)
+    aisle_rows = {loc["label"][0] for loc in locations.values() if loc["face"] in "NS"}
 
     # An aisle drawn with blank rows between its two label lines (the main
-    # cross-aisle) is wider; absorb those blanks into the group.
+    # cross-aisle) is wider; absorb those blanks into the group. A zone's rows
+    # aren't blank: absorbed, 10H's Lithium store and Zone MU were squashed to
+    # an aisle's share of height, and Lithium spilled over the racks beside it.
     if aisle_rows:
         lo, hi = min(aisle_rows), max(aisle_rows)
-        occupied = {r for loc in locations.values() for r, _ in loc["cells"]}
+        occupied = {r for loc in locations.values() for r, _ in loc["cells"]} | {r for r, _ in zone_cells}
         for r in range(lo, hi + 1):
             if r not in aisle_rows and r not in occupied:
                 if any(x in aisle_rows for x in range(lo, r)) and any(x in aisle_rows for x in range(r + 1, hi + 1)):
@@ -363,11 +546,23 @@ def build_axes(locations, r0, r1):
     c0, c1 = min(cols), max(cols)
     occupied_cols = set(cols)
     col_w = {c: LANE_W for c in range(c0 - 1, c1 + 2)}
-    for c in aisle_cols:
-        if c not in occupied_cols:
-            col_w[c] = AISLE_W
+    for aisle in ew_aisles(locations):
+        if transposed:
+            # 16G: an aisle's label columns, and anything drawn between them,
+            # share one aisle's width; a column that carries racking elsewhere
+            # (its two rack blocks don't line up) keeps a position's pitch.
+            span = range(aisle["cols"][0], aisle["cols"][-1] + 1)
+            for c in span:
+                if c not in occupied_cols:
+                    col_w[c] = max(col_w.get(c, LANE_W), AISLE_W / len(span))
+        else:
+            # A side block of east/west racks (13A's Z block): each label
+            # column is an aisle's width, as it has always been imported.
+            for c in aisle["cols"]:
+                if c not in occupied_cols:
+                    col_w[c] = AISLE_W
 
-    return row_h, col_w, aisle_rows, aisle_cols, (c0 - 1, c1 + 1)
+    return row_h, col_w, (c0 - 1, c1 + 1)
 
 
 def axis_edges(sizes, lo, hi):
@@ -380,8 +575,25 @@ def axis_edges(sizes, lo, hi):
     return out, acc
 
 
-def import_building(ws, sheet_name, with_door):
-    """One building in local coordinates: its south-west wall corner at (0, 0)."""
+def _widest_interior_band(indices, occupied_indices):
+    """The widest run of consecutive empty indices with something occupied on both sides."""
+    bands = []
+    for i in indices:
+        if bands and i == bands[-1][-1] + 1:
+            bands[-1].append(i)
+        else:
+            bands.append([i])
+    interior = [b for b in bands if any(i < b[0] for i in occupied_indices) and any(i > b[-1] for i in occupied_indices)]
+    return max(interior, key=len) if interior else (bands[-1] if bands else None)
+
+
+def import_building(ws, sheet_name, sheet_zones, north_link_x=None, south_link=False):
+    """One building in local coordinates: its south-west wall corner at (0, 0).
+
+    north_link_x: where the building to the north enters from (its south
+    door's x), or None when there is none; south_link: whether a building
+    follows to the south.
+    """
     r0, r1, label = find_building_rows(ws, sheet_name)
     # Named after the sheet's own block without the "BATIMENT" prefix (so
     # "BATIMENT 13A" -> "13A"): the wall loop's id, and what every facility
@@ -389,18 +601,47 @@ def import_building(ws, sheet_name, with_door):
     building_id = re.sub(r"^BATIMENT\s+", "", label, flags=re.I).strip() or label
     print(f"{label}: rows {r0}..{r1}")
     locations, blacks, shared = extract(ws, r0, r1)
-    print(f"  {len(locations)} locations, {sum(len(l['cells']) for l in locations.values())} positions, "
-          f"{len(blacks)} blocked" + (f", {len(shared)} codes split into A/B lanes" if shared else ""))
+    racking = {(r, c) for loc in locations.values() for r, c in loc["cells"]}
 
-    row_h, col_w, _, _, (_, cmax) = build_axes(locations, r0, r1)
+    zones = []
+    for zone_label, (zr0, zc0, zr1, zc1) in sheet_zones:
+        rows, cols = (max(zr0, r0), min(zr1, r1)), (max(zc0, 2), zc1)
+        if rows[0] > rows[1]:
+            continue
+        cells = {(r, c) for r in range(rows[0], rows[1] + 1) for c in range(cols[0], cols[1] + 1)}
+        if cells & racking:
+            print(f"  ! {zone_label} zone {get_column_letter(cols[0])}{rows[0]} covers racking, skipped")
+            continue
+        zones.append({"label": zone_label, "rows": rows, "cols": cols, "cells": cells})
+    zone_cells = set().union(*(z["cells"] for z in zones)) if zones else set()
+    blockers = racking | zone_cells      # what a corridor may not cross
+    occupied = blockers | set(blacks)    # what a trunk band keeps entirely clear of
+
+    transposed = sum(l["face"] in "WE" for l in locations.values()) > len(locations) / 2
+    print(f"  {len(locations)} locations, {sum(len(l['cells']) for l in locations.values())} positions, "
+          f"{len(blacks)} blocked" + (f", {len(shared)} codes split into A/B lanes" if shared else "")
+          + (f", zones: {', '.join(z['label'] for z in zones)}" if zones else "")
+          + (", aisles run north-south" if transposed else ""))
+
+    row_h, col_w, (_, cmax) = build_axes(locations, r0, r1, transposed, zone_cells)
+    if zones:
+        cmax = max(cmax, max(z["cols"][1] for z in zones) + 1)
     # The floor is the building's whole interior, not just its racked part -
     # the clear strip south of the last rack is where the dock goes.
     rmin, rmax = r0, r1
     cmin = 2  # column 1 is the rotated building-name strip, outside the wall
 
+    if transposed:
+        # The cross-aisle between rack blocks is the trunk: one wide aisle,
+        # however many rows it was drawn.
+        occupied_rows = {r for r, _ in occupied}
+        band_rows = _widest_interior_band(
+            [r for r in range(rmin, rmax + 1) if r not in occupied_rows], occupied_rows)
+        for r in band_rows:
+            row_h[r] = max(MIN_FREE_ROW, WIDE_AISLE_W / len(band_rows))
+
     ys, total_h = axis_edges(row_h, rmin, rmax)
     xs, total_w = axis_edges(col_w, cmin, cmax)
-    occupied = {(r, c) for loc in locations.values() for r, c in loc["cells"]} | set(blacks)
     last_rack = max(r for r, _ in occupied)
 
     # The dock strip holds a corridor along the last rack and, south of it,
@@ -456,94 +697,200 @@ def import_building(ws, sheet_name, with_door):
             slot["depth"] = depth
         slots.append(slot)
 
-    # --- aisles ------------------------------------------------------------
-    # One corridor per aisle prefix, on the very line its labels are written
-    # on, spanning the columns (or rows) those labels cover.
-    racking = {(r, c) for loc in locations.values() for r, c in loc["cells"]}
+    # --- zones ---------------------------------------------------------------
+    zone_counts = defaultdict(int)
+    for z in zones:
+        zone_counts[z["label"]] += 1
+    zone_seen = defaultdict(int)
+    zones_out = []
+    for z in sorted(zones, key=lambda z: (z["rows"][0], z["cols"][0])):
+        zone_seen[z["label"]] += 1
+        slug = z["label"].lower().replace(" ", "-")
+        x0, x1 = x_left(z["cols"][0]), x_right(z["cols"][1])
+        yb, yt = y_bot(z["rows"][1]), y_top(z["rows"][0])
+        zones_out.append({
+            "id": f"{building_id}-{slug}" + (f"-{zone_seen[z['label']]}" if zone_counts[z["label"]] > 1 else ""),
+            "label": z["label"],
+            "x": (x0 + x1) / 2, "y": (yb + yt) / 2, "width": x1 - x0, "depth": yt - yb,
+        })
 
-    def clear_between_cols(rows, ca, cb):
-        """No racking between two columns, along a corridor's own rows.
-
-        Blocked cells don't count: they are pillars, which a corridor already
-        runs past within its own span (06F's aisle D has three), and one
-        standing at the mouth of that aisle had cut it off from the trunk.
-        """
-        lo, hi = sorted((ca, cb))
-        return not any((r, c) in racking for r in rows for c in range(lo + 1, hi))
-
-    aisles = defaultdict(list)
-    for code, loc in locations.items():
-        aisles[code[:2]].append(loc)
-
-    h_cor, v_cor = {}, {}
-    for prefix, locs in aisles.items():
-        lrs = sorted({l["label"][0] for l in locs})
-        lcs = sorted({l["label"][1] for l in locs})
-        if locs[0]["face"] in "NS":
-            h_cor[prefix] = {"rows": lrs, "y": (y_top(lrs[0]) + y_bot(lrs[-1])) / 2, "c0": lcs[0], "c1": lcs[-1]}
-        else:
-            v_cor[prefix] = {"cols": lcs, "x": (x_left(lcs[0]) + x_right(lcs[-1])) / 2, "r0": lrs[0], "r1": lrs[-1]}
-
-    # The trunk is the plan's own vertical circulation route: the widest fully
-    # empty column band that has racking on both sides of it. (Taking merely
-    # the widest empty band would pick the clear floor along a wall, and every
-    # aisle would then be dragged straight through the blocks in between.)
-    empty_cols = [c for c in range(cmin, cmax + 1) if not any((r, c) in occupied for r in range(rmin, rmax + 1))]
-    bands = []
-    for c in empty_cols:
-        if bands and c == bands[-1][-1] + 1:
-            bands[-1].append(c)
-        else:
-            bands.append([c])
-    occ_cols = {c for _, c in occupied}
-    interior = [b for b in bands if any(c < b[0] for c in occ_cols) and any(c > b[-1] for c in occ_cols)]
-    trunk_band = max(interior, key=len) if interior else bands[-1]
-    trunk_col = trunk_band[len(trunk_band) // 2]
-    trunk_x = (x_left(trunk_band[0]) + x_right(trunk_band[-1])) / 2
-
-    paths = []
-    joins = defaultdict(set)  # corridor key -> the y values it must carry a point at
-
-    for prefix, h in sorted(h_cor.items(), key=lambda kv: -kv[1]["y"]):
-        x0, x1 = x_mid(h["c0"]), x_mid(h["c1"])
-        # Reach the trunk, from whichever side it lies on - but only if the
-        # corridor's own rows are clear all the way there.
-        if trunk_col < h["c0"] and clear_between_cols(h["rows"], h["c0"], trunk_col):
-            x0 = trunk_x
-            joins["trunk"].add(h["y"])
-        elif trunk_col > h["c1"] and clear_between_cols(h["rows"], h["c1"], trunk_col):
-            x1 = trunk_x
-            joins["trunk"].add(h["y"])
-        # Reach any vertical service corridor further east, same condition.
-        for vp, v in v_cor.items():
-            if v["cols"][0] > h["c1"] and clear_between_cols(h["rows"], h["c1"], v["cols"][0]):
-                x1 = max(x1, v["x"])
-                joins[vp].add(h["y"])
-        paths.append({"id": f"aisle-{prefix}", "points": [(x0, h["y"]), (x1, h["y"])]})
-
-    # The dock corridor runs along the clear strip, just clear of the last rack.
     dock_y = y_bot(last_rack) - CLEAR - PATH_W / 2
-    dock_x1 = max(x_mid(h["c1"]) for h in h_cor.values())
+    paths = []
+    north_door = south_door = None
 
-    trunk_ys = sorted(joins["trunk"], reverse=True)
-    paths.append({"id": f"trunk-{building_id}", "points": [(trunk_x, y) for y in trunk_ys] + [(trunk_x, dock_y)]})
-    # With a road outside, the dock corridor carries on west to the door.
-    dock_points = ([(0.0, dock_y)] if with_door else []) + [(trunk_x, dock_y), (dock_x1, dock_y)]
-    paths.append({"id": f"dock-{building_id}", "points": dock_points})
+    if not transposed:
+        # --- aisles run east-west ---------------------------------------------
+        def clear_between_cols(rows, ca, cb):
+            """No racking or zone between two columns, along a corridor's own rows.
 
-    # Vertical service corridors (the Z block's own aisle), spanning their own
-    # locations and every horizontal aisle that reaches them.
-    for prefix, v in v_cor.items():
-        own = {y_top(v["r0"]), y_bot(v["r1"])}
-        pts = sorted(joins[prefix] | own, reverse=True)
-        if len(pts) > 1:
-            paths.append({"id": f"aisle-{prefix}", "points": [(v["x"], y) for y in pts]})
+            Blocked cells don't count: they are pillars, which a corridor already
+            runs past within its own span (06F's aisle D has three), and one
+            standing at the mouth of that aisle had cut it off from the trunk.
+            """
+            lo, hi = sorted((ca, cb))
+            return not any((r, c) in blockers for r in rows for c in range(lo + 1, hi))
+
+        # The trunk is the plan's own vertical circulation route: the widest fully
+        # empty column band that has racking on both sides of it. (Taking merely
+        # the widest empty band would pick the clear floor along a wall, and every
+        # aisle would then be dragged straight through the blocks in between.)
+        occupied_cols = {c for _, c in occupied}
+        trunk_band = _widest_interior_band(
+            [c for c in range(cmin, cmax + 1) if not any((r, c) in occupied for r in range(rmin, rmax + 1))],
+            occupied_cols)
+        trunk_col = trunk_band[len(trunk_band) // 2]
+        trunk_x = (x_left(trunk_band[0]) + x_right(trunk_band[-1])) / 2
+
+        h_cor = ns_aisles(locations, blockers)
+        for h in h_cor:
+            h["y"] = (y_top(h["rows"][0]) + y_bot(h["rows"][-1])) / 2
+            h["x0"], h["x1"] = x_mid(h["cols"][0]), x_mid(h["cols"][-1])
+            h["xs"], h["joined"] = set(), False
+        v_cor = ew_aisles(locations)
+        for v in v_cor:
+            v["x"] = (x_left(v["cols"][0]) + x_right(v["cols"][-1])) / 2
+            v["ys"] = {y_top(v["rows"][0]), y_bot(v["rows"][-1])}
+
+        trunk_ys = set()
+        for h in sorted(h_cor, key=lambda h: -h["y"]):
+            c0, c1 = h["cols"][0], h["cols"][-1]
+            # Reach the trunk, from whichever side it lies on - but only if the
+            # corridor's own rows are clear all the way there.
+            if trunk_col < c0 and clear_between_cols(h["rows"], c0, trunk_col):
+                h["x0"], h["joined"] = trunk_x, True
+                trunk_ys.add(h["y"])
+            elif trunk_col > c1 and clear_between_cols(h["rows"], c1, trunk_col):
+                h["x1"], h["joined"] = trunk_x, True
+                trunk_ys.add(h["y"])
+            elif c0 < trunk_col < c1:  # labelled on both sides: it crosses the trunk
+                h["xs"].add(trunk_x)
+                h["joined"] = True
+                trunk_ys.add(h["y"])
+            # Reach any vertical service corridor further east, same condition.
+            for v in v_cor:
+                if v["cols"][0] > c1 and clear_between_cols(h["rows"], c1, v["cols"][0]):
+                    h["x1"] = max(h["x1"], v["x"])
+                    v["ys"].add(h["y"])
+
+        # An aisle that can't reach the trunk along its own line (10H's short
+        # east end of aisle A, behind racking) gets a spur to the nearest aisle
+        # that does, across clear floor, which carries on to meet it.
+        def clear(rows, cols):
+            return not any((r, c) in blockers for r in rows for c in cols)
+
+        progress = True
+        while progress:
+            progress = False
+            for h in h_cor:
+                if h["joined"]:
+                    continue
+                best = None
+                for g in h_cor:
+                    if not g["joined"]:
+                        continue
+                    if g["rows"][-1] < h["rows"][0]:
+                        between = range(g["rows"][-1] + 1, h["rows"][0])
+                    elif g["rows"][0] > h["rows"][-1]:
+                        between = range(h["rows"][-1] + 1, g["rows"][0])
+                    else:
+                        continue
+                    for sc in range(h["cols"][0], h["cols"][-1] + 1):
+                        if not clear(between, range(sc - 1, sc + 2)):
+                            continue
+                        g0, g1 = g["cols"][0], g["cols"][-1]
+                        if sc > g1 and not clear(g["rows"], range(g1 + 1, sc + 1)):
+                            continue
+                        if sc < g0 and not clear(g["rows"], range(sc, g0)):
+                            continue
+                        cost = len(between) + min(abs(sc - g0), abs(sc - g1))
+                        if best is None or cost < best[0]:
+                            best = (cost, g, sc)
+                if best:
+                    _, g, sc = best
+                    x = x_mid(sc)
+                    h["xs"].add(x)
+                    g["xs"].add(x)
+                    g["x0"], g["x1"] = min(g["x0"], x), max(g["x1"], x)
+                    paths.append({"id": f"spur-{h['id']}", "points": [(x, h["y"]), (x, g["y"])]})
+                    h["joined"] = progress = True
+
+        for h in h_cor:
+            xs_ = sorted({h["x0"], h["x1"], *h["xs"]})
+            paths.append({"id": h["id"], "points": [(x, h["y"]) for x in xs_]})
+
+        dock_x1 = max(x_mid(h["cols"][-1]) for h in h_cor)
+        # The trunk carries on through both walls when there is a building to
+        # link to: the plant's buildings are linked along their central aisles.
+        trunk_points = (
+            ([(trunk_x, height)] if north_link_x is not None else [])
+            + [(trunk_x, y) for y in sorted(trunk_ys, reverse=True)]
+            + [(trunk_x, dock_y)]
+            + ([(trunk_x, 0.0)] if south_link else [])
+        )
+        paths.append({"id": f"trunk-{building_id}", "points": trunk_points})
+        paths.append({"id": f"dock-{building_id}", "points": [(trunk_x, dock_y), (dock_x1, dock_y)]})
+        for v in v_cor:
+            pts = sorted(v["ys"], reverse=True)
+            if len(pts) > 1:
+                paths.append({"id": v["id"], "points": [(v["x"], y) for y in pts]})
+        if north_link_x is not None:
+            north_door = (trunk_x, height)
+        if south_link:
+            south_door = (trunk_x, 0.0)
+        pad_x = trunk_x
+    else:
+        # --- aisles run north-south (16G) ---------------------------------------
+        def clear_between_rows(cols, ra, rb):
+            lo, hi = sorted((ra, rb))
+            return not any((r, c) in blockers for c in cols for r in range(lo + 1, hi))
+
+        trunk_y = (y_top(band_rows[0]) + y_bot(band_rows[-1])) / 2
+        v_cor = ew_aisles(locations)
+        trunk_xs, dock_xs = set(), set()
+        for v in v_cor:
+            span = range(v["cols"][0], v["cols"][-1] + 1)
+            v["span"] = span
+            v["x"] = (x_left(span[0]) + x_right(span[-1])) / 2
+            v["ys"] = {y_top(v["rows"][0]), y_bot(v["rows"][-1])}
+            top, bottom = v["rows"][0], v["rows"][-1]
+            if bottom < band_rows[0] and clear_between_rows(span, bottom, band_rows[0]):
+                v["ys"].add(trunk_y)
+                trunk_xs.add(v["x"])
+            elif top > band_rows[-1] and clear_between_rows(span, band_rows[-1], top):
+                v["ys"].add(trunk_y)
+                trunk_xs.add(v["x"])
+            elif top < band_rows[0] and bottom > band_rows[-1]:
+                v["ys"].add(trunk_y)
+                trunk_xs.add(v["x"])
+            if bottom > band_rows[-1] and clear_between_rows(span, bottom, last_rack + 1):
+                v["ys"].add(dock_y)
+                dock_xs.add(v["x"])
+
+        if north_link_x is not None:
+            # Entered from the north down whichever aisle opens onto the north
+            # wall nearest the building above's door.
+            open_north = [v for v in v_cor if clear_between_rows(v["span"], rmin - 1, v["rows"][0])]
+            entry = min(open_north, key=lambda v: abs(v["x"] - north_link_x))
+            entry["ys"].add(height)
+            north_door = (entry["x"], height)
+
+        pad_x = min(dock_xs)
+        if south_link:
+            south_door = (pad_x, 0.0)
+            paths.append({"id": f"exit-{building_id}", "points": [(pad_x, dock_y), (pad_x, 0.0)]})
+        for v in v_cor:
+            pts = sorted(v["ys"], reverse=True)
+            paths.append({"id": v["id"], "points": [(v["x"], y) for y in pts]})
+        paths.append({"id": f"trunk-{building_id}", "points": [(x, trunk_y) for x in sorted(trunk_xs)]})
+        dock_end = max(max(dock_xs), pad_x + 18 + PAD_W / 2)
+        paths.append({"id": f"dock-{building_id}", "points": [(x, dock_y) for x in sorted(dock_xs | {dock_end})]})
 
     for p in paths:
         p["buildingIds"] = [building_id]
     paths = [p for p in paths if len(p["points"]) > 1]
 
-    # Pads sit south of the dock corridor, where it runs east of the trunk.
+    # Pads sit south of the dock corridor, beside where the trunk (or, north-
+    # south, the westernmost aisle) meets it.
     pad_y = dock_y - PATH_W / 2 - PAD_GAP - PAD_D / 2
     return {
         "id": building_id,
@@ -551,11 +898,11 @@ def import_building(ws, sheet_name, with_door):
         "height": height,
         "slots": slots,
         "paths": paths,
-        "dock_y": dock_y,
-        "lift": (trunk_x + 6, pad_y),
-        "delivery": (trunk_x + 18, pad_y),
-        "blocked": len(blacks),
-        "shared": len(shared),
+        "zones": zones_out,
+        "north_door": north_door,
+        "south_door": south_door,
+        "lift": (pad_x + 6, pad_y),
+        "delivery": (pad_x + 18, pad_y),
     }
 
 
@@ -574,9 +921,16 @@ def main():
     root = Path(__file__).resolve().parent.parent
     wb = openpyxl.load_workbook(root / args.workbook, data_only=False)
     ws = wb[args.sheet]
+    sheet_zones = read_zones(ws, root / args.workbook, args.sheet)
 
-    with_road = len(args.building) > 1
-    buildings = [import_building(ws, name, with_road) for name in args.building]
+    buildings = []
+    for i, name in enumerate(args.building):
+        above = buildings[-1] if buildings else None
+        buildings.append(import_building(
+            ws, name, sheet_zones,
+            north_link_x=above["south_door"][0] if above else None,
+            south_link=i < len(args.building) - 1,
+        ))
 
     # Stack north to south: the first building's south wall stays at y = 0
     # (so a single-building import lands where it always did), each next one
@@ -587,10 +941,7 @@ def main():
             offset -= ROAD_GAP + b["height"]
         b["y0"] = offset
 
-    def shift(point, dy):
-        return (point[0], point[1] + dy)
-
-    walls, doors, paths, lifts, deliveries, slots = [], [], [], [], [], []
+    walls, doors, paths, lifts, deliveries, zones, slots = [], [], [], [], [], [], []
     for i, b in enumerate(buildings):
         dy = b["y0"]
         walls.append({
@@ -598,27 +949,27 @@ def main():
             "closed": True,
             "points": [(0.0, dy), (b["width"], dy), (b["width"], dy + b["height"]), (0.0, dy + b["height"])],
         })
-        for s in b["slots"]:
-            slots.append({**s, "y": s["y"] + dy})
-        for p in b["paths"]:
-            paths.append({**p, "points": [shift(pt, dy) for pt in p["points"]]})
-        b["door"] = (0.0, b["dock_y"] + dy)
-        if with_road:
-            doors.append({"id": f"Door-{b['id']}", "x": b["door"][0], "y": b["door"][1], "rotationDeg": 90,
-                          "buildingId": b["id"]})
-        if i == 0:
-            lifts.append({"id": "CL01", "point": shift(b["lift"], dy), "buildingId": b["id"]})
-        deliveries.append({"id": f"DS{i + 1:02d}", "point": shift(b["delivery"], dy), "buildingId": b["id"]})
+        slots.extend({**s, "y": s["y"] + dy} for s in b["slots"])
+        paths.extend({**p, "points": [(x, y + dy) for x, y in p["points"]]} for p in b["paths"])
+        zones.extend({**z, "y": z["y"] + dy, "buildingId": b["id"]} for z in b["zones"])
+        for side, door in (("N", b["north_door"]), ("S", b["south_door"])):
+            if door:
+                doors.append({"id": f"Door-{b['id']}-{side}", "point": (door[0], door[1] + dy), "buildingId": b["id"]})
+        lifts.append({"id": f"CL{i + 1:02d}", "point": (b["lift"][0], b["lift"][1] + dy), "buildingId": b["id"]})
+        deliveries.append({"id": f"DS{i + 1:02d}", "point": (b["delivery"][0], b["delivery"][1] + dy), "buildingId": b["id"]})
 
-    # The road: one connector per pair of neighbours, door to door, out along
-    # the west side. Its ends are the doors' own points, which the dock
-    # corridors inside start from - the exact-coincident-point rule that
-    # joins the path network.
+    # The links: from each building's south door straight across to the north
+    # door of the one below, with a jog halfway when their central aisles
+    # don't line up. Their ends are the doors' own points, which the trunks
+    # inside end at - the exact-coincident-point rule that joins the network.
     for north, south in zip(buildings, buildings[1:]):
-        road_x = -ROAD_OFFSET
+        a = (north["south_door"][0], north["south_door"][1] + north["y0"])
+        b = (south["north_door"][0], south["north_door"][1] + south["y0"])
+        mid = (a[1] + b[1]) / 2
+        points = [a, b] if abs(a[0] - b[0]) < 1e-9 else [a, (a[0], mid), (b[0], mid), b]
         paths.append({
-            "id": f"road-{north['id']}-{south['id']}",
-            "points": [north["door"], (road_x, north["door"][1]), (road_x, south["door"][1]), south["door"]],
+            "id": f"link-{north['id']}-{south['id']}",
+            "points": points,
             "buildingIds": [north["id"], south["id"]],
             "endpointBuildingIds": [north["id"], south["id"]],
         })
@@ -629,28 +980,34 @@ def main():
     def fmt(pts):
         return [{"x": r3(x), "y": r3(y)} for x, y in pts]
 
+    def placed(items):
+        return [{"id": f["id"], "x": r3(f["point"][0]), "y": r3(f["point"][1]), **({"rotationDeg": 0} if "Door" in f["id"] else {}),
+                 "buildingId": f["buildingId"]} for f in items]
+
     config = {
         "id": args.id,
         "name": args.name,
         "units": "m",
         "walls": [{**w, "points": fmt(w["points"])} for w in walls],
-        "doors": [{**d, "x": r3(d["x"]), "y": r3(d["y"])} for d in doors],
-        "paths": [{**p, "points": fmt(p["points"]), "width": PATH_W} for p in paths],
-        "liftStations": [
-            {"id": l["id"], "x": r3(l["point"][0]), "y": r3(l["point"][1]), "buildingId": l["buildingId"]} for l in lifts
+        "doors": placed(doors),
+        # Key order as the app's own files have it: id, points, width, buildingIds.
+        "paths": [
+            {"id": p["id"], "points": fmt(p["points"]), "width": PATH_W, "buildingIds": p["buildingIds"],
+             **({"endpointBuildingIds": p["endpointBuildingIds"]} if "endpointBuildingIds" in p else {})}
+            for p in paths
         ],
-        "deliverySpaces": [
-            {"id": d["id"], "x": r3(d["point"][0]), "y": r3(d["point"][1]), "buildingId": d["buildingId"]}
-            for d in deliveries
+        "liftStations": placed(lifts),
+        "deliverySpaces": placed(deliveries),
+        "inaccessibleZones": [
+            {"id": z["id"], "label": z["label"], "x": r3(z["x"]), "y": r3(z["y"]), "width": r3(z["width"]),
+             "depth": r3(z["depth"]), "buildingId": z["buildingId"]}
+            for z in zones
         ],
         "slotDefaults": {"width": LANE_W, "height": POS_D},
         "slots": [{**s, "x": r3(s["x"]), "y": r3(s["y"])} for s in sorted(slots, key=lambda s: s["id"])],
     }
-    # Key order as the app's own files have it: id, points, width, buildingIds.
-    config["paths"] = [
-        {k: p[k] for k in ("id", "points", "width", "buildingIds", "endpointBuildingIds") if k in p}
-        for p in config["paths"]
-    ]
+    if not config["inaccessibleZones"]:
+        del config["inaccessibleZones"]
 
     ids = [s["id"] for s in config["slots"]]
     if len(ids) != len(set(ids)):
@@ -659,7 +1016,7 @@ def main():
     out = root / args.out
     out.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {args.out}  ({len(buildings)} buildings, {len(slots)} slots, "
-          f"{len(config['paths'])} paths)")
+          f"{len(config['paths'])} paths, {len(zones)} zones)")
 
     # Explicit rather than derived from the plan's filename: deriving it once
     # silently pointed the empty content file at the plan itself.

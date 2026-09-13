@@ -7,9 +7,8 @@ Fails (exit 1) on anything that would draw or route wrongly:
   * duplicate ids (slots, paths, doors, facilities);
   * a slot outside every building, or overlapping another slot;
   * a corridor centreline running through a slot;
-  * a slot whose way out to its nearest corridor crosses other racking, or
-    reaches a corridor behind it rather than in front (served by the wrong
-    aisle, as the app's router would pick it);
+  * a slot with no corridor in front of it, or whose way out to the nearest
+    one in front (the one the app's router picks) crosses other racking;
   * a facility pad outside its building or on top of racking or a corridor;
   * a door off its building's wall, or not on the path network;
   * a path network in more than one piece.
@@ -18,7 +17,7 @@ Reports, without failing, corridors whose full drawn width grazes racking.
 Geometry mirrors the app: a slot's local depth axis runs from its entry edge
 at -cellDepth/2 backwards, rotated like Slots.tsx (rotationDeg 0 opens north,
 90 west, 180 south, 270 east); pathGraph.ts snaps a slot's entry point to the
-nearest point on any corridor.
+nearest point on a corridor in front of it.
 """
 import json
 import math
@@ -120,7 +119,7 @@ def main(path):
     def err(msg):
         errors.append(msg)
 
-    for kind in ("slots", "paths", "doors", "liftStations", "deliverySpaces"):
+    for kind in ("slots", "paths", "doors", "liftStations", "deliverySpaces", "inaccessibleZones"):
         counts = Counter(x["id"] for x in plan.get(kind, []))
         dup = sorted(i for i, n in counts.items() if n > 1)
         if dup:
@@ -169,20 +168,24 @@ def main(path):
 
     # --- every slot reaches its own aisle -------------------------------------
     longest = (0.0, None)
+    notches = []  # (slot id, corridor id, the way out as a zero-width rect)
     for sid, (rect, entry, facing) in geo.items():
-        best = None
+        best = None  # the nearest corridor in front of the slot, as the router picks it
         for pid, a, b, _ in segments:
             q = project(entry, a, b)
             d = math.dist(entry, q)
+            if (q[0] - entry[0]) * facing[0] + (q[1] - entry[1]) * facing[1] < -EPS:
+                continue
             if best is None or d < best[0]:
                 best = (d, q, pid)
+        if best is None:
+            err(f"slot {sid} has no corridor in front of it")
+            continue
         d, q, pid = best
         if d > longest[0]:
             longest = (d, sid)
-        if d > EPS and (q[0] - entry[0]) * facing[0] + (q[1] - entry[1]) * facing[1] < -EPS:
-            err(f"slot {sid} snaps to {pid} behind it")
-            continue
         notch = (min(entry[0], q[0]), min(entry[1], q[1]), max(entry[0], q[0]), max(entry[1], q[1]))
+        notches.append((sid, pid, notch))
         for other, orect in grid.query(notch):
             if other != sid and through(notch, orect):
                 err(f"slot {sid}'s way out to {pid} crosses slot {other}")
@@ -190,11 +193,13 @@ def main(path):
 
     # --- facilities ------------------------------------------------------------
     loop_by_id = {l["id"]: l for l in loops}
+    pad_rects = []
     for kind in ("liftStations", "deliverySpaces"):
         for f in plan.get(kind, []):
             rot = f.get("rotationDeg", 0) % 180
             hw, hd = (PAD_W / 2, PAD_D / 2) if rot == 0 else (PAD_D / 2, PAD_W / 2)
             rect = (f["x"] - hw, f["y"] - hd, f["x"] + hw, f["y"] + hd)
+            pad_rects.append((f["id"], rect))
             loop = loop_by_id.get(f["buildingId"])
             if not loop or not all(point_in_polygon(x, y, loop["points"]) for x in (rect[0], rect[2]) for y in (rect[1], rect[3])):
                 err(f"{f['id']} is not inside building {f['buildingId']}")
@@ -205,6 +210,33 @@ def main(path):
                 body = segment_rect(a, b, hw2)
                 if body and rect_overlap(rect, body):
                     err(f"{f['id']} overlaps path {pid}")
+
+    # --- inaccessible zones ------------------------------------------------------
+    # Nothing may be placed in one, and no corridor - nor any slot's way out to
+    # its corridor - may cross one; a corridor merely touching its edge is fine.
+    for z in plan.get("inaccessibleZones", []):
+        rect = (z["x"] - z["width"] / 2, z["y"] - z["depth"] / 2, z["x"] + z["width"] / 2, z["y"] + z["depth"] / 2)
+        loop = loop_by_id.get(z["buildingId"])
+        if not loop or not all(
+            point_in_polygon(x, y, loop["points"]) for x in (rect[0] + EPS, rect[2] - EPS) for y in (rect[1] + EPS, rect[3] - EPS)
+        ):
+            err(f"zone {z['id']} is not inside building {z['buildingId']}")
+        for sid, srect in grid.query(rect):
+            if rect_overlap(rect, srect):
+                err(f"zone {z['id']} overlaps slot {sid}")
+        for fid, frect in pad_rects:
+            if rect_overlap(rect, frect):
+                err(f"{fid} overlaps zone {z['id']}")
+        for pid, a, b, hw2 in segments:
+            line = segment_rect(a, b, 0.0)
+            body = segment_rect(a, b, hw2)
+            if line and through(line, rect):
+                err(f"path {pid} runs through zone {z['id']}")
+            elif body and rect_overlap(body, rect, eps=1e-3):
+                warnings.append(f"path {pid}'s drawn width grazes zone {z['id']}")
+        for sid, pid, notch in notches:
+            if through(notch, rect):
+                err(f"slot {sid}'s way out to {pid} crosses zone {z['id']}")
 
     # --- doors and connectivity -------------------------------------------------
     def key(x, y):

@@ -4,6 +4,48 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-13 (cont'd) — CML plant: buildings 10H, 14J, 15K, 16G; central-aisle links; inaccessible zones
+
+- Owner feedback on the five-building plant: link buildings along the central aisle, not the
+  west road; every building gets its own "delivery zone" (implemented as a lift station plus
+  a delivery space, as 13A had). Then: add 10H, 14J, 15K and 16G, and flag "Lithium", "Zone
+  MU" and "Train" as non-accessible, grey hatched zones.
+- Specs: §5.7 (zone sources, aisle splits and spurs, 16G transposed, per-building pads, new
+  "Inaccessible zones" subsection, central-aisle links, nine-building result), a §5.3 routing
+  note, one decision log entry.
+- Zones: `InaccessibleZone` type and optional `inaccessibleZones` in
+  `warehouse.schema.json`; merge/split (saved only when non-empty);
+  `src/components/InaccessibleZones.tsx` (shared 45° hatch CanvasTexture, outline, name along
+  a narrow zone's length, facility tooltip "Not accessible to forklifts", click passthrough
+  like a pad), in the Facilities layer. Importer reads them from merged cells ("Lithium")
+  and the drawing XML ("TRAIN"; "ZONE MU" grown to its enclosing medium-bordered box). Nine
+  zones: 12B 3 × Train, 10H Lithium + Zone MU, 14J 2 × Train, 15K 2 × Train. Seen but not
+  flagged (not asked): 06F "LOCAL BATTERIE", 15K "ZONE DE PREPARATION".
+- Importer: trunks run on to south/north doors, `link-<north>-<south>` connectors (jogging
+  where trunks don't line up: 14J→15K, 15K→16G); road and west doors removed; CL/DS per
+  building; zone cells occupied for bands and blank-row absorption, and blocking corridors;
+  north/south aisles split where racking or a zone stands between a prefix's label rows
+  (`aisle-HA-1/-2`) with a `spur-*` to a joined aisle; transposed import for 16G (vertical
+  aisles per label-column cluster sharing one aisle width, horizontal trunk in the
+  cross-aisle sharing 5 m, dock corridor, north entry down the aisle nearest the door
+  above). First tries moved 13A (a shared column-width rule narrowed its Z aisle), split
+  12B's aisle K (row-group clustering) and squashed 10H's zones (absorbed as blank aisle
+  rows); all three fixed before verifying. The first five buildings' 3,200 slots are
+  unchanged; only their trunks and docks changed.
+- Checker: zone checks (inside building, no slot/pad overlap, no corridor or slot way-out
+  through one, width grazing warned); slots now judged against the nearest corridor in front.
+- Routing: `connectPoint` takes an optional facing and prefers edges in front;
+  `slotFacing()` in geometry.ts; SimulationContext passes each slot stop's facing. Found via
+  10H's HA76, whose nearest corridor was the short aisle behind it.
+- Picking lists: +5 (receive into 10H/14J/15K/16G, pick from the far buildings) → 16; preset
+  description updated.
+- Result: 9 buildings, 4,910 slots, 138 corridors, 9 zones; checker OK with three
+  width-grazing warnings (13A aisle K, older; 10H HA-2; 15K KR).
+- Verified: `tsc --noEmit` clean; Playwright zero errors — CML plant 60 fps / 907 draw calls,
+  10H 400; all 16 CML lists and all 5 Test plant lists run with no warnings; hovering Lithium
+  shows "Not accessible to forklifts"; 16G slot hover card; screenshots of 10H (hatched zones,
+  route reaching HA76 from its front), 16G and 15K (trunk between its train strips).
+
 ## 2026-09-13 (cont'd) — CML plant: buildings 12B, 08C, 07D, 06F; batched slot rendering
 
 - Design in specs.md §5.7 (new "From buildings to a plant", "Result", "Rendering a plant this

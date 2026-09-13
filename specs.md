@@ -633,7 +633,10 @@ pair — spanning every building already, since a cross-building connector like
 arbitrary point (a slot's entry, a facility's center) onto the *nearest point along any
 edge*, not just onto existing nodes — using only nodes would route a slot to the nearest
 aisle *end* instead of the nearest aisle *point*, sending every slot along a long aisle
-through the same corner. `routeBetween()` runs **Dijkstra** (deliberately, not literal
+through the same corner. For a slot it considers only edges *in front of* the slot's entry
+(its facing, `slotFacing()` in `geometry.ts`) when there are any: a rack is entered from the
+aisle it opens onto, and 10H's HA76 had a short aisle behind it a few centimetres nearer
+than its own (§5.7). `routeBetween()` runs **Dijkstra** (deliberately, not literal
 BFS as the original request suggested — edges have real, unequal lengths, so only
 Dijkstra actually minimizes travel distance; BFS would minimize hop-count instead) and
 returns `[from, ...network nodes..., to]` — because `from`/`to` are the *exact* input
@@ -1447,7 +1450,7 @@ file — a script rather than a one-off hand-built JSON, so a re-export can simp
 re-imported — and `scripts/check_plan.py` checks the result the way the app will use it:
 
 ```
-python scripts/import_plan_xlsx.py                                # 13A, 12B, 08C, 07D, 06F
+python scripts/import_plan_xlsx.py                                # all nine blocks, 13A to 16G
 python scripts/import_plan_xlsx.py --building "BATIMENT 13A"      # any blocks, north to south
 python scripts/check_plan.py schema/CML.plan.json
 ```
@@ -1489,13 +1492,24 @@ needed, which is what makes the import trustworthy rather than approximate:
   Their code is recovered from the adjacent label cell.
 - **A blank label names nothing.** Two drawn lanes look up an empty label cell — where
   DM02 (07D) and FP12 (06F) would be — and neither code appears in the plant's picking
-  history. Per the plant owner they are left out, as blocked positions.
+  history. Per the plant owner they are left out, as blocked positions; 15K has a third,
+  at T358.
 - **One code can name two lanes.** 06F's aisles P and D are drawn one row tall with a
   single line of even codes, and the lanes on *both* sides look up the same label: FP04 is
   one address covering two facing one-deep lanes (the history only ever uses the plain
   even codes). Per the owner, each such code becomes two slots — `FP04A` for the lane north
   of the aisle, `FP04B` for the one south of it — 44 codes, 88 slots. A back position's
   reference chain says which of the two lanes it belongs to.
+- **16G is drawn the other way round.** Its aisles run north–south: the labels sit in
+  columns and every rack faces east or west, in two rack blocks either side of a wide
+  cross-aisle. The same reading applies with rows and columns exchanged (below).
+- **Some areas are marked as not accessible.** "Lithium" (10H) is a merged cell over the
+  area; "TRAIN" (12B, 14J, 15K) and "ZONE MU" (10H) are drawn text boxes, which openpyxl
+  doesn't load, so they are read from the sheet's drawing XML, their anchors turned into
+  cells (an edge cell counts once the shape covers 40% of it). A "TRAIN" box is the area
+  itself; "ZONE MU" only labels the medium-bordered box drawn around it, which is the area.
+  Per the owner these become inaccessible zones (below). "LOCAL BATTERIE" (06F) and "ZONE DE
+  PREPARATION" (15K) are named the same way but weren't flagged, so they stay plain floor.
 
 #### Turning it into a layout
 
@@ -1526,49 +1540,95 @@ instead picks the clear floor along a wall, and every aisle then gets dragged st
 through the blocks in between. An aisle is extended to meet a trunk or service corridor
 only when its own rows are clear of racking all the way there. Pillars don't count: a
 corridor already runs past them within its own span, and one standing at the mouth of
-06F's aisle D had cut that aisle off from the trunk.
+06F's aisle D had cut that aisle off from the trunk. Zones, unlike pillars, do count: no
+corridor is extended through one.
 
-The lift station and delivery spaces are **not** in the spreadsheet. Each building gets a
-dock corridor on the clear floor just south of its last rack, and a delivery space beside
-it (DS01 in 13A through DS05 in 06F); the first building also gets the lift station the
-forklift starts from (CL01). Where the drawn strip is too shallow for both, the building
-grows south rather than a pad poking through the wall (07D, by 1.0 m).
+One aisle letter can label two separate aisles: 10H's aisle A has a short east end whose
+rack stands behind the main aisle's racking. Label rows of one letter form one aisle unless
+racking or a zone stands between them, across the columns their labels span, in which case
+each run is its own corridor (`aisle-HA-1`, `aisle-HA-2`). An aisle that can't reach the
+trunk along its own line gets a spur across clear floor to the nearest aisle that does
+(`spur-aisle-HA-2`), which is extended to meet it. HA76, at that corner, then sat a few
+centimetres nearer the short aisle behind it than its own aisle in front, so a slot now
+joins the nearest corridor **in front of** its entry — in the router (§5.3) and in the
+checker alike.
+
+16G is imported transposed. Its aisles are vertical corridors, one per code prefix and
+cluster of label columns (its aisle GA appears once in each rack block, so it is two). An
+aisle's label columns, and anything drawn between them, share one aisle's 3.5 m, while a
+column that carries racking in the other block — whose aisles don't line up with these —
+keeps a position's pitch. The trunk is the widest fully empty *row* band with racking above
+and below: the cross-aisle, drawn nine rows tall, sharing 5 m. Each aisle joins it, and the
+dock corridor along the south strip, where its columns are clear.
+
+The lift stations and delivery spaces are **not** in the spreadsheet. Each building gets a
+dock corridor on the clear floor just south of its last rack, with a lift station and a
+delivery space beside it (CL01/DS01 in 13A through CL09/DS09 in 16G) — the owner asked for
+every building to have its own, as 13A had; CL01 stays where the forklift starts. Where the
+drawn strip is too shallow for both, the building grows south rather than a pad poking
+through the wall (07D, by 1.0 m).
+
+#### Inaccessible zones
+
+A new plan element, `inaccessibleZones` (`schema/warehouse.schema.json`, optional): an
+axis-aligned rectangle — centre, width, depth — with the plan's name for it and its
+building. The importer sizes a zone from its cells like everything else and treats those
+cells as occupied: a trunk band avoids them, blank aisle rows beside them aren't widened
+into them (before that rule, 10H's Lithium store and Zone MU were squashed to an aisle's
+share of height and Lithium spilled over the racks beside it), and no corridor is extended
+through one. In the app (`InaccessibleZones.tsx`, in the Facilities layer) a zone is a
+grey, 45°-hatched floor marking with its name — written along its length when it is long
+and narrow, like a train strip — and hovering it shows the facility tooltip "Not accessible
+to forklifts". The checker fails a zone outside its building, over a slot or pad, or
+crossed by a corridor or by a slot's way out to its corridor.
 
 #### From buildings to a plant
 
 The workbook draws every building in the same template and says nothing about where they
 stand. Per the plant owner they are **stacked north to south in sheet order** — 13A
-furthest north, then 12B, 08C, 07D and 06F — west walls aligned, 10 m apart. 13A keeps its
-coordinates (south wall on y = 0); the others run into negative y.
+furthest north, then 12B, 08C, 07D, 06F, 10H, 14J, 15K and 16G — west walls aligned, 10 m
+apart. 13A keeps its coordinates (south wall on y = 0); the others run into negative y.
 
-They are joined by **one shared outdoor road**, also the owner's choice. Each building's
-dock corridor carries on west to a door in its west wall, and the road runs 5 m west of
-the walls, door to door: one cross-building connector per pair of neighbours
-(`road-13A-12B`, `road-12B-08C`, …, each with `endpointBuildingIds`), the shape the
-building focus already draws as a stub and arrow. Their ends are the doors' own points,
-where the dock corridors start, so the network joins under the exact-coincident-point
-rule. A single-building import makes no door and no road. Corridor ids every building has
-carry its name (`trunk-13A`, `dock-13A`); aisle ids already differ (`aisle-AA`, `aisle-BA`).
+They are **linked along their central aisles**, per the owner's review of the first five
+(which had been joined by a road along their west walls). Each trunk carries on through a
+door in its building's south wall (`Door-13A-S`), and a connector crosses the gap to a door
+in the north wall of the building below (`Door-12B-N`), where that building's trunk starts:
+one cross-building connector per pair of neighbours (`link-13A-12B`, …, each with
+`endpointBuildingIds`), the shape the building focus already draws as a stub and arrow.
+Their ends are the doors' own points, so the network joins under the exact-coincident-point
+rule. The trunks line up at x = 28 m from 13A to 14J, where the links are straight. 15K's
+central band sits one column further east, narrowed by a train strip on each side, so the
+link into it jogs halfway across the gap; 16G, with no north–south trunk, is entered down
+the aisle that opens onto its north wall nearest the door above. A single-building import
+makes no door and no link. Corridor ids every building has carry its name (`trunk-13A`,
+`dock-13A`); aisle ids already differ (`aisle-AA`, `aisle-BA`).
 
 #### Result
 
-| Building | Slots | Lane positions | Blocked | Envelope |
-|---|---|---|---|---|
-| 13A | 453 | 910 | 14 | 97.9 × 54.8 m |
-| 12B | 548 | 1,403 | 33 | 84.8 × 56.9 m |
-| 08C | 650 | 1,274 | 22 | 86.0 × 49.8 m |
-| 07D | 758 | 1,081 | 25 | 87.2 × 55.5 m |
-| 06F | 791 | 891 | 16 | 78.8 × 57.9 m |
+| Building | Slots | Lane positions | Blocked | Zones | Envelope |
+|---|---|---|---|---|---|
+| 13A | 453 | 910 | 14 | — | 97.9 × 54.8 m |
+| 12B | 548 | 1,403 | 33 | 3 × Train | 84.8 × 56.9 m |
+| 08C | 650 | 1,274 | 22 | — | 86.0 × 49.8 m |
+| 07D | 758 | 1,081 | 25 | — | 87.2 × 55.5 m |
+| 06F | 791 | 891 | 16 | — | 78.8 × 57.9 m |
+| 10H | 262 | 814 | 16 | Lithium, Zone MU | 92.0 × 59.8 m |
+| 14J | 558 | 1,353 | 12 | 2 × Train | 84.8 × 56.7 m |
+| 15K | 445 | 1,267 | 1 | 2 × Train | 89.6 × 66.6 m |
+| 16G | 445 | 1,442 | 31 | — | 136.5 × 50.2 m |
 
-3,200 slots, 5,559 lane positions (16,677 pallet places at 3 tiers), 74 corridors.
-`scripts/check_plan.py` passes: unique ids; every slot inside exactly one building and
-overlapping none; no corridor centreline through a slot; every slot's nearest corridor lies
-in front of it, and the way out to it crosses no other racking (2.5 m at most); pads inside
-their building, clear of racking and corridors; doors on their walls and on the network;
-the network in one piece. One warning, older than this import: the drawn 2.2 m width of
-13A's aisle K grazes 14 of its slots (its centreline is clear). In the app, with zero
-console errors, the four new buildings' receiving lists and a pick across the plant (12B,
-08C, 07D and 06F, back to DS01 over the road) all complete without a skipped stop.
+4,910 slots, 10,435 lane positions (31,305 pallet places at 3 tiers), 138 corridors, 9
+zones. 15K's walls aren't drawn as the others' are, so its block's whole row range is its
+floor. `scripts/check_plan.py` passes: unique ids; every slot inside exactly one building
+and overlapping none; no corridor centreline through a slot or a zone; every slot has a
+corridor in front of it, and the way out to the nearest one crosses no racking or zone
+(4.1 m at most, KA02); pads inside their building, clear of racking, corridors and zones;
+doors on their walls and on the network; the network in one piece. Three warnings, where a
+corridor's drawn 2.2 m width grazes the racks along an aisle drawn one row wide: 13A's
+aisle K (14 slots, older than these imports), 10H's short east end of aisle A (5) and 15K's
+aisle R (11). The first five buildings' 3,200 slots didn't move; only their trunks and
+docks changed. In the app, with zero console errors, all 16 CML lists run in one go without
+a skipped stop — among them a pick from 10H, 14J, 15K and 16G back to 13A along the links.
 
 #### Rendering a plant this size
 
@@ -1583,12 +1643,15 @@ resolves the slot from the instance hit, so hover, click-to-focus and edit-mode
 select/drag behave as before. Racks, interactive per sub-slot and pallet, stay one group
 per *stocked* slot and pass events they don't consume to the same slot handlers. Measured:
 401 draw calls at 60 fps (the display's cap) for the whole CML plant, 89 inside 06F, 523 in
-edit mode, hover frames at 17 ms; the Test plant went from 178 draw calls to 69.
+edit mode, hover frames at 17 ms; the Test plant went from 178 draw calls to 69. At nine
+buildings and 4,910 slots the whole plant takes 907 draw calls and still runs at 60 fps;
+10H alone, 400.
 
 Picking lists are authored separately from the import, as the plant's third file
 (`schema/CML.picking-lists.json`, §5.6) — the workbook's plan says nothing about orders.
 Besides 13A's six, there is one receiving list per new building from its own delivery
-space (06F's fills both FP04 lanes), and a pick across the plant back to 13A.
+space (06F's fills both FP04 lanes; 10H's includes HA76), and two picks back to 13A, one
+from 12B–06F and one from 10H–16G — 16 lists in all.
 
 ## 6. Core Features / Visualizations
 
@@ -1728,6 +1791,20 @@ space (06F's fills both FP04 lanes), and a pick across the plant back to 13A.
 ## 10. Decision Log
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
+
+- 2026-09-13 — CML completed to all nine buildings (§5.7): 10H, 14J, 15K and 16G join, still
+  stacked in sheet order. On the plant owner's review of the five-building plant, buildings
+  are now linked along their central aisles — each trunk runs through a south door to the
+  north door of the building below — instead of by a road along the west walls, and every
+  building has its own lift station and delivery space (CL01–CL09, DS01–DS09). Areas the
+  owner flagged as not accessible (Lithium, Zone MU, the Train strips) became a new plan
+  element, `inaccessibleZones`: axis-aligned rectangles drawn grey and hatched in the
+  Facilities layer and kept clear of corridors, read from merged cells and from the sheet's
+  drawn text boxes, which openpyxl doesn't load. 16G, drawn with north–south aisles, is
+  imported transposed around its cross-aisle. Two routing rules came out of the new
+  buildings: an aisle letter labelling two separate aisles becomes two corridors joined by a
+  spur, and a slot joins the nearest corridor *in front* of it — router and checker alike —
+  since 10H's HA76 had one behind it a few centimetres nearer.
 
 - 2026-09-13 — CML grows from one building to five (§5.7): 12B, 08C, 07D and 06F join 13A
   from the same workbook. The plant owner chose how the plan's gaps are filled: buildings
