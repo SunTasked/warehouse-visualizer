@@ -77,6 +77,8 @@ interface Connection {
 // How close a projection has to be to an edge's own endpoint to just reuse
 // that node instead of inserting a new one a hair's width away.
 const SNAP_EPSILON = 0.01;
+// A corridor exactly level with a slot's entry edge still counts as in front.
+const FACING_EPSILON = 1e-6;
 
 /**
  * Projects an arbitrary point (a slot's entry, a facility's center) onto the
@@ -85,9 +87,17 @@ const SNAP_EPSILON = 0.01;
  * instead of the nearest aisle *point*, which would send every slot along a
  * long aisle through the same corner. Point-to-segment projection, clamped
  * to the segment's own span, checked against every edge.
+ *
+ * With `facing` (a slot's outward direction), only corridors in front of the
+ * point count, when there are any: a slot is entered from the aisle it opens
+ * onto, never through its own back. Where two aisles run close on either side
+ * of a rack (10H's short east end of aisle A, right behind HA76), the one
+ * behind can be the nearer by a few centimetres.
  */
-function connectPoint(graph: PathGraph, point: Point): Connection {
-  let best: { a: string; b: string; t: number; distToLine: number } | null = null;
+function connectPoint(graph: PathGraph, point: Point, facing?: Point): Connection {
+  type Candidate = { a: string; b: string; t: number; distToLine: number };
+  let best: Candidate | null = null;
+  let bestInFront: Candidate | null = null;
 
   for (const [a, edges] of graph.adjacency) {
     const pa = graph.nodes.get(a)!;
@@ -104,8 +114,13 @@ function connectPoint(graph: PathGraph, point: Point): Connection {
       if (!best || distToLine < best.distToLine) {
         best = { a, b, t, distToLine };
       }
+      const inFront = !facing || (projX - point.x) * facing.x + (projY - point.y) * facing.y >= -FACING_EPSILON;
+      if (inFront && (!bestInFront || distToLine < bestInFront.distToLine)) {
+        bestInFront = { a, b, t, distToLine };
+      }
     }
   }
+  best = bestInFront ?? best;
 
   if (!best) {
     // No paths at all in the graph — degenerate, but don't crash.
@@ -208,9 +223,9 @@ export interface Route {
  * position, the returned polyline naturally includes a short notch off the
  * aisle into the slot, with no separate mechanism needed for that.
  */
-export function routeBetween(graph: PathGraph, from: Point, to: Point): Route {
-  const fromConn = connectPoint(graph, from);
-  const toConn = connectPoint(graph, to);
+export function routeBetween(graph: PathGraph, from: Point, to: Point, fromFacing?: Point, toFacing?: Point): Route {
+  const fromConn = connectPoint(graph, from, fromFacing);
+  const toConn = connectPoint(graph, to, toFacing);
 
   const adjacency = new Map(graph.adjacency);
   for (const [nodeId, edge] of [...fromConn.extraEdges, ...toConn.extraEdges]) {

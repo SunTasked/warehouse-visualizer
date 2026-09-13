@@ -116,6 +116,23 @@ export interface DeliverySpace {
   buildingId: string;
 }
 
+/**
+ * A floor area forklifts can't enter — a lithium store, a tugger-train lane,
+ * a "Zone MU" — marked on the plan but holding no slots (specs.md §5.7).
+ * Axis-aligned: (x, y) is its centre, `width` runs along X and `depth` along Y.
+ * Corridors are laid out around it, so no route ever crosses it.
+ */
+export interface InaccessibleZone {
+  id: string;
+  /** What the plan calls it ("Lithium", "Zone MU", "Train"). */
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  depth: number;
+  buildingId: string;
+}
+
 export interface SlotConfig {
   id: string;
   /**
@@ -145,6 +162,8 @@ export interface WarehouseConfig {
   paths?: Path[];
   liftStations?: LiftStation[];
   deliverySpaces?: DeliverySpace[];
+  /** Optional — absent in files predating this addition, treated as empty. */
+  inaccessibleZones?: InaccessibleZone[];
   slotDefaults: SlotSize;
   slots: SlotConfig[];
 }
@@ -207,6 +226,7 @@ export interface Warehouse {
   paths: Path[];
   liftStations: LiftStation[];
   deliverySpaces: DeliverySpace[];
+  inaccessibleZones: InaccessibleZone[];
   slotDefaults: SlotSize;
   slots: Slot[];
 }

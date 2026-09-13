@@ -45,6 +45,11 @@
       "description": "Delivery spaces (fixed 6x2m footprint, same as liftStation, for now). Optional — absent in files predating this field, treated as empty.",
       "items": { "$ref": "#/definitions/deliverySpace" }
     },
+    "inaccessibleZones": {
+      "type": "array",
+      "description": "Floor areas forklifts can't enter (a lithium store, a tugger-train lane...), drawn hatched. Corridors are laid out around them. Optional — absent in files predating this field, treated as empty.",
+      "items": { "$ref": "#/definitions/inaccessibleZone" }
+    },
     "slotDefaults": {
       "$ref": "#/definitions/slotSize",
       "description": "Default footprint applied to every slot for now (all slots are the same size: 4m x 2m)."
@@ -162,6 +167,20 @@
         "x": { "type": "number" },
         "y": { "type": "number" },
         "rotationDeg": { "type": "number", "default": 0 },
+        "buildingId": { "type": "string" }
+      }
+    },
+    "inaccessibleZone": {
+      "type": "object",
+      "required": ["id", "label", "x", "y", "width", "depth", "buildingId"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string", "description": "What the plan calls the area, e.g. \"Lithium\", \"Zone MU\", \"Train\"." },
+        "x": { "type": "number", "description": "Centre X, in meters." },
+        "y": { "type": "number", "description": "Centre Y, in meters." },
+        "width": { "type": "number", "exclusiveMinimum": 0, "description": "Extent along X, in meters (axis-aligned)." },
+        "depth": { "type": "number", "exclusiveMinimum": 0, "description": "Extent along Y, in meters (axis-aligned)." },
         "buildingId": { "type": "string" }
       }
     },

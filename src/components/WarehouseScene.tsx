@@ -19,6 +19,7 @@ import { Doors } from "./Doors";
 import { Paths } from "./Paths";
 import { LiftStations } from "./LiftStations";
 import { DeliverySpaces } from "./DeliverySpaces";
+import { InaccessibleZones } from "./InaccessibleZones";
 import { Slots } from "./Slots";
 import { DragPlane } from "./DragPlane";
 import { Forklift } from "./Forklift";
@@ -160,6 +161,7 @@ export function WarehouseScene() {
         <>
           <LiftStations stations={warehouse.liftStations} />
           <DeliverySpaces spaces={warehouse.deliverySpaces} />
+          <InaccessibleZones zones={warehouse.inaccessibleZones} />
         </>
       )}
       {/* Slots gates the pads/markers/ids here; the racks and pallets inside

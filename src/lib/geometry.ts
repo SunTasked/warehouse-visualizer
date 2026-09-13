@@ -103,3 +103,9 @@ export function slotEntryPoint(slot: Slot, defaults: SlotSize): Point {
     y: slot.y + halfCellDepth * Math.cos(rotationRad),
   };
 }
+
+/** The way a slot opens, as a unit vector in warehouse (x,y) space: out of its entry edge, towards its aisle. */
+export function slotFacing(slot: Slot): Point {
+  const rotationRad = THREE.MathUtils.degToRad(slot.rotationDeg ?? 0);
+  return { x: -Math.sin(rotationRad), y: Math.cos(rotationRad) };
+}

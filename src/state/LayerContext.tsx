@@ -31,7 +31,7 @@ export const LAYER_LABELS: Record<LayerId, { label: string; hint: string }> = {
   // a clear floor to read the slot heatmap on, and empty rack frames left
   // standing would defeat that.
   pallets: { label: "Pallets", hint: "Racks and the pallets stored in them" },
-  facilities: { label: "Facilities", hint: "Lift station, delivery spaces" },
+  facilities: { label: "Facilities", hint: "Lift stations, delivery spaces, no-access zones" },
   paths: { label: "Paths", hint: "The corridor network" },
   route: { label: "Route", hint: "Active picking run and forklift" },
   pathHeatmap: { label: "Path heatmap", hint: "Captured traffic, per direction" },

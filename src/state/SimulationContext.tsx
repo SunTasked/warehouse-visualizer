@@ -11,7 +11,7 @@ import {
 import type { Point, Warehouse } from "../types/warehouse";
 import type { PickingList, PickingStop } from "../types/simulation";
 import { buildPathGraph, routeBetween, type PathGraph, type RouteEdge } from "../lib/pathGraph";
-import { slotEntryPoint } from "../lib/geometry";
+import { slotEntryPoint, slotFacing } from "../lib/geometry";
 import type { LegProfile, StopHandling } from "../lib/timeModel";
 import { useEditor } from "./EditorContext";
 import { useViewFocus } from "./ViewFocusContext";
@@ -333,6 +333,13 @@ function stopPoint(stop: PickingStop, warehouse: Warehouse): Point | null {
   return null;
 }
 
+/** A slot stop's facing, so its leg joins the aisle the slot opens onto (see pathGraph's connectPoint); facilities have none. */
+function stopFacing(stop: PickingStop, warehouse: Warehouse): Point | undefined {
+  if (stop.kind !== "slot") return undefined;
+  const slot = warehouse.slots.find((s) => s.id === stop.id);
+  return slot ? slotFacing(slot) : undefined;
+}
+
 function buildLegs(stops: PickingStop[], warehouse: Warehouse, graph: PathGraph): Leg[] {
   const legs: Leg[] = [];
   for (let i = 0; i < stops.length - 1; i++) {
@@ -344,7 +351,7 @@ function buildLegs(stops: PickingStop[], warehouse: Warehouse, graph: PathGraph)
       console.warn(`SimulationContext: unresolved stop (${from.id} -> ${to.id})`);
       continue;
     }
-    const route = routeBetween(graph, fromPoint, toPoint);
+    const route = routeBetween(graph, fromPoint, toPoint, stopFacing(from, warehouse), stopFacing(to, warehouse));
     legs.push({ from, to, points: route.points, length: totalLength(route.points), edges: route.edges });
   }
   return legs;

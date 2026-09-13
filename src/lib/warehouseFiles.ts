@@ -43,6 +43,7 @@ export function mergeWarehouse(config: WarehouseConfig, content: WarehouseConten
     paths: config.paths ?? [],
     liftStations: config.liftStations ?? [],
     deliverySpaces: config.deliverySpaces ?? [],
+    inaccessibleZones: config.inaccessibleZones ?? [],
     slotDefaults: config.slotDefaults,
     slots,
   };
@@ -67,6 +68,8 @@ export function splitWarehouse(warehouse: Warehouse): {
     paths: warehouse.paths,
     liftStations: warehouse.liftStations,
     deliverySpaces: warehouse.deliverySpaces,
+    // Only written when there are any, so plans without zones save unchanged.
+    ...(warehouse.inaccessibleZones.length ? { inaccessibleZones: warehouse.inaccessibleZones } : {}),
     slotDefaults: warehouse.slotDefaults,
     slots: warehouse.slots.map((s) => {
       const depth = s.subSlots?.length;
