@@ -30,8 +30,9 @@ test-results/
 
 # source plant data — real operational records (picking history with operator
 # initials), kept local and never published. The layouts imported *from* it
-# under schema/ carry only location codes and geometry.
-data/
+# under schema/ carry only location codes and geometry. Root-anchored: a bare
+# `data/` also matched src/data/ and silently kept new source files out.
+/data/
 __pycache__/
 
 # editor / OS
