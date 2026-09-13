@@ -1,7 +1,7 @@
-import { Text } from "@react-three/drei";
 import type { ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
-import { useMemo } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { BatchedText, Text as TroikaText } from "troika-three-text";
 import type { Slot, SlotSize } from "../types/warehouse";
 import { useEditor } from "../state/EditorContext";
 import { useViewFocus } from "../state/ViewFocusContext";
@@ -47,195 +47,175 @@ const ENTRY_MARKER_HEIGHT = 0.14;
 // Label clearance above the entry marker's own top surface.
 const LABEL_CLEARANCE = 0.03;
 const LABEL_COLOR = "#000000";
+const LABEL_SIZE = 0.5;
 
-// Draws the boundary between two adjacent sub-slots (depth subdivision),
-// running across the slot's width at local Z = z.
-function DepthDivider({ z, width }: { z: number; width: number }) {
-  const geometry = useMemo(() => new THREE.BoxGeometry(width * 0.96, 0.01, 0.02), [width]);
-  return (
-    <mesh geometry={geometry} position={[0, SLOT_HEIGHT / 2 + 0.005, z]}>
-      <meshStandardMaterial color={DIVIDER_COLOR} />
-    </mesh>
-  );
-}
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
 
-// Shared by EntryMarker and the id label (Text) below, so the label always
-// sits centered on the marker regardless of ENTRY_MARKER_DEPTH.
+// Shared by the entry markers and the id labels, so a label always sits
+// centered on its marker regardless of ENTRY_MARKER_DEPTH.
 function entryMarkerCenterZ(cellDepth: number): number {
   return -cellDepth / 2 + ENTRY_MARKER_DEPTH / 2;
 }
 
-// A painted strip on the pad surface at the slot's fixed entry edge —
-// materializes where an operator accesses the slot, and doubles as the
-// label's background (see the id Text below, positioned on top of it).
-function EntryMarker({ cellDepth, width }: { cellDepth: number; width: number }) {
-  const geometry = useMemo(
-    () => new THREE.BoxGeometry(width * 0.96, ENTRY_MARKER_HEIGHT, ENTRY_MARKER_DEPTH),
-    [width],
-  );
-  const z = entryMarkerCenterZ(cellDepth);
-  return (
-    <mesh geometry={geometry} position={[0, SLOT_HEIGHT / 2 + ENTRY_MARKER_HEIGHT / 2, z]}>
-      <meshStandardMaterial color={ENTRY_COLOR} />
-    </mesh>
-  );
+/**
+ * A point given in a slot's own frame — origin at the front sub-slot's
+ * centre, mid-height of the pad, +z running back into the rack, turned by the
+ * slot's rotation — in world space. Every batched part below is placed with
+ * it, so they all agree with the racks, which still render inside a real
+ * rotated group (SlotRacks).
+ */
+function toWorld(slot: Slot, lx: number, ly: number, lz: number, out: THREE.Vector3): THREE.Vector3 {
+  const rotationRad = THREE.MathUtils.degToRad(slot.rotationDeg ?? 0);
+  const cos = Math.cos(rotationRad);
+  const sin = Math.sin(rotationRad);
+  return out.set(slot.x + lx * cos + lz * sin, SLOT_HEIGHT / 2 + ly, -slot.y - lx * sin + lz * cos);
 }
 
-function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
-  const {
-    mode,
-    addSlotMode,
-    warehouse,
-    selectedSlotIds,
-    toggleSlotSelection,
-    selectOnly,
-    dragRef,
-    orbitRef,
-  } = useEditor();
-  const { focus, hover, setHover, focusSlot, focusSlotSpace } = useViewFocus();
-  // Racks and their pallets are their own layer — hiding them is what clears
-  // the floor so the slot heatmap can be read on the slot pads themselves.
-  const showPallets = useLayers().isVisible("pallets");
-  const buildingId = useMemo(() => findBuildingForSlot(slot, warehouse.walls), [slot, warehouse.walls]);
-  // Each sub-slot is a full slotDefaults footprint (not a fraction of one) —
-  // a depth-3 slot occupies 3x the standard 4x2 space, not the same 4x2
-  // split three ways. Sub-slot 0 always sits exactly where a depth-1 slot's
-  // footprint would (local Z centered on 0, matching legacy geometry
-  // unchanged); each further sub-slot i is appended at local Z = i * cellDepth,
-  // so slot.x/y — the group's own position — stays anchored to sub-slot 0
-  // regardless of depth, and added depth only extends the far side.
-  const { depth, cellDepth, totalDepth, footprintCenterZ } = slotFootprint(slot, defaults);
-  const geometry = useMemo(
-    () => new THREE.BoxGeometry(defaults.width, SLOT_HEIGHT, totalDepth),
-    [defaults.width, totalDepth],
-  );
-  const edges = useMemo(() => new THREE.EdgesGeometry(geometry), [geometry]);
+// A box's 12 edges as corner pairs; corner index bits: x = 4, y = 2, z = 1.
+const BOX_EDGES: [number, number][] = [];
+for (let a = 0; a < 8; a++) {
+  for (const bit of [4, 2, 1]) if (!(a & bit)) BOX_EDGES.push([a, a | bit]);
+}
 
-  // All hooks above run unconditionally every render (rules of hooks) — the
-  // visibility check itself is a plain early return, below them.
-  if (mode === "view" && !isSlotVisible(focus, slot.id, buildingId)) return null;
+/** Every slot's outline in one line geometry — one draw call instead of one per slot. */
+function buildOutlines(slots: Slot[], defaults: SlotSize): THREE.BufferGeometry {
+  const positions = new Float32Array(slots.length * BOX_EDGES.length * 2 * 3);
+  const corners = Array.from({ length: 8 }, () => new THREE.Vector3());
+  let offset = 0;
+  for (const slot of slots) {
+    const { depth, cellDepth } = slotFootprint(slot, defaults);
+    const xs = [-defaults.width / 2, defaults.width / 2];
+    const ys = [-SLOT_HEIGHT / 2, SLOT_HEIGHT / 2];
+    const zs = [-cellDepth / 2, (depth - 1) * cellDepth + cellDepth / 2];
+    for (let i = 0; i < 8; i++) toWorld(slot, xs[(i >> 2) & 1], ys[(i >> 1) & 1], zs[i & 1], corners[i]);
+    for (const [a, b] of BOX_EDGES) {
+      corners[a].toArray(positions, offset);
+      corners[b].toArray(positions, offset + 3);
+      offset += 6;
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  return geometry;
+}
 
-  const selected = selectedSlotIds.has(slot.id);
-  // Only a "pure" slot-level hover (no deeper target) lights up the pad —
-  // hovering one of its sub-slot racks highlights that rack instead (see
-  // the sub-slot group below / Rack.tsx), not the whole slot.
-  const hovered = mode === "view" && hover?.slotId === slot.id && hover.subSlotIndex === undefined;
-  const padColor = hovered ? SLOT_HOVER_COLOR : selected ? SLOT_SELECTED_COLOR : SLOT_COLOR;
+/**
+ * The slot ids, as one BatchedText: a single draw call for every label,
+ * where one drei <Text> per slot cost a draw call each — at 3,200 slots that
+ * alone held a whole-plant view to single-digit frame rates. Labels are kept
+ * per slot id across focus changes (dropped from the batch, not destroyed),
+ * so drilling in and back out doesn't re-typeset thousands of them.
+ */
+function useSlotLabels(allSlots: Slot[], visible: Slot[], defaults: SlotSize): BatchedText {
+  const batch = useMemo(() => {
+    const text = new BatchedText();
+    // depthTest off and drawn last: a tall multi-tier rack standing right
+    // behind the entry marker would otherwise hide its label from most
+    // camera angles — it should always read as sitting above the scene.
+    text.renderOrder = 999;
+    text.frustumCulled = false;
+    (text.material as THREE.Material).depthTest = false;
+    return text;
+  }, []);
+  const members = useRef(new Map<string, { text: TroikaText; inBatch: boolean }>());
+
+  useLayoutEffect(() => {
+    const existing = new Set(allSlots.map((s) => s.id));
+    const shown = new Set(visible.map((s) => s.id));
+    for (const slot of visible) {
+      let member = members.current.get(slot.id);
+      if (!member) {
+        const text = new TroikaText();
+        text.text = slot.id;
+        text.fontSize = LABEL_SIZE;
+        text.color = LABEL_COLOR;
+        text.anchorX = "center";
+        text.anchorY = "middle";
+        member = { text, inBatch: false };
+        members.current.set(slot.id, member);
+      }
+      const { cellDepth } = slotFootprint(slot, defaults);
+      toWorld(slot, 0, SLOT_HEIGHT / 2 + ENTRY_MARKER_HEIGHT + LABEL_CLEARANCE, entryMarkerCenterZ(cellDepth), member.text.position);
+      // Flat on the marker, then turned with the slot — the same orientation
+      // the label had as a child of the slot's rotated group.
+      member.text.rotation.set(-Math.PI / 2, THREE.MathUtils.degToRad(slot.rotationDeg ?? 0), 0, "YXZ");
+      if (!member.inBatch) {
+        batch.addText(member.text);
+        member.inBatch = true;
+      }
+    }
+    for (const [id, member] of members.current) {
+      if (shown.has(id)) continue;
+      if (member.inBatch) {
+        batch.removeText(member.text);
+        member.inBatch = false;
+      }
+      if (!existing.has(id)) {
+        member.text.dispose();
+        members.current.delete(id);
+      }
+    }
+    batch.sync();
+  }, [batch, allSlots, visible, defaults]);
+
+  useEffect(() => {
+    const owned = members.current;
+    return () => {
+      owned.forEach(({ text }) => text.dispose());
+      owned.clear();
+      batch.dispose();
+    };
+  }, [batch]);
+
+  return batch;
+}
+
+type SlotPointerEvent = ThreeEvent<PointerEvent>;
+
+interface SlotHandlers {
+  pointerOver: (e: SlotPointerEvent, slot: Slot) => void;
+  pointerOut: () => void;
+  click: (e: ThreeEvent<MouseEvent>, slot: Slot) => void;
+  pointerDown: (e: SlotPointerEvent, slot: Slot) => void;
+}
+
+/**
+ * One slot's racks and pallets. Still a real rotated group per slot, and only
+ * for slots that hold stock: each rack is interactive in its own right
+ * (sub-slot and pallet drill-down, see Rack.tsx). Events its racks don't
+ * consume carry on to the slot's own handlers, as they did when the racks sat
+ * inside each slot's group.
+ */
+function SlotRacks({
+  slot,
+  defaults,
+  buildingId,
+  handlers,
+}: {
+  slot: Slot;
+  defaults: SlotSize;
+  buildingId: string | undefined;
+  handlers: SlotHandlers;
+}) {
+  const { mode } = useEditor();
+  const { focus, setHover, focusSlotSpace } = useViewFocus();
+  const { cellDepth } = slotFootprint(slot, defaults);
   const rotationRad = THREE.MathUtils.degToRad(slot.rotationDeg ?? 0);
-
-  const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {
-    if (mode !== "view") return;
-    // Without this, the event keeps propagating to whatever's beneath (at
-    // "plant" level, the building floor click-catcher — see Walls.tsx's
-    // BuildingFloor), whose own setHover(buildingId) call would immediately
-    // overwrite this one since both fire within the same event dispatch.
-    e.stopPropagation();
-    setHover({ slotId: slot.id, x: e.nativeEvent.clientX, y: e.nativeEvent.clientY });
-  };
-
-  const handlePointerMove = (e: ThreeEvent<PointerEvent>) => {
-    if (mode !== "view") return;
-    e.stopPropagation();
-    setHover({ slotId: slot.id, x: e.nativeEvent.clientX, y: e.nativeEvent.clientY });
-  };
-
-  const handlePointerOut = () => {
-    if (mode !== "view") return;
-    setHover(null);
-  };
-
-  // View-mode "select this slot" fires on onClick, not onPointerDown — see
-  // handlePointerDown's comment below for why mixing the two event types
-  // for competing handlers (this slot vs. the building floor beneath it)
-  // caused a real bug: whichever fired later always won, regardless of which
-  // object the raycast actually preferred.
-  const handleClick = (e: ThreeEvent<MouseEvent>) => {
-    if (mode !== "view" || e.nativeEvent.button !== 0) return;
-    e.stopPropagation();
-    focusSlot(slot.id, buildingId);
-  };
-
-  const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
-    if (mode !== "edit" || addSlotMode) return; // let the event fall through to the drag plane
-    if (e.nativeEvent.button !== 0) return; // right button is for box-select
-    e.stopPropagation();
-
-    const additive = e.nativeEvent.ctrlKey || e.nativeEvent.metaKey;
-    if (additive) {
-      toggleSlotSelection(slot.id);
-      return; // Ctrl+click only builds the selection, it doesn't start a drag
-    }
-
-    // Dragging a slot that's already part of a multi-selection moves the
-    // whole group; otherwise this click selects just this one slot.
-    const dragIds =
-      selectedSlotIds.has(slot.id) && selectedSlotIds.size > 1 ? Array.from(selectedSlotIds) : [slot.id];
-    if (dragIds.length === 1) selectOnly(slot.id);
-
-    const anchor = fromSceneXZ(e.point.x, e.point.z);
-    const origins: Record<string, { x: number; y: number }> = {};
-    for (const id of dragIds) {
-      const s = warehouse.slots.find((s) => s.id === id);
-      if (s) origins[id] = { x: s.x, y: s.y };
-    }
-    const label = dragIds.length === 1 ? `Move slot ${dragIds[0]}` : `Move ${dragIds.length} slots`;
-    dragRef.current = { type: "slots", ids: dragIds, anchor, origins, label, moved: false };
-    if (orbitRef.current) orbitRef.current.enabled = false;
-  };
 
   return (
     <group
       position={[slot.x, SLOT_HEIGHT / 2, -slot.y]}
       rotation={[0, rotationRad, 0]}
-      onClick={handleClick}
-      onPointerDown={handlePointerDown}
-      onPointerOver={handlePointerOver}
-      onPointerMove={handlePointerMove}
-      onPointerOut={handlePointerOut}
+      onClick={(e) => handlers.click(e, slot)}
+      onPointerDown={(e) => handlers.pointerDown(e, slot)}
+      onPointerOver={(e) => handlers.pointerOver(e, slot)}
+      onPointerMove={(e) => handlers.pointerOver(e, slot)}
+      onPointerOut={handlers.pointerOut}
     >
-      <group position={[0, 0, footprintCenterZ]}>
-        <mesh geometry={geometry}>
-          <meshStandardMaterial color={padColor} />
-        </mesh>
-        {/* Purely decorative — Three.js's default line-raycast threshold (1
-            world unit) makes an un-opted-out LineSegments a near-universal
-            click-blocker once zoomed in close (a whole focused slot may only
-            be a few meters across), stealing clicks meant for the rack
-            behind/above it. raycast={() => null} opts it out entirely. */}
-        <lineSegments geometry={edges} raycast={() => null}>
-          <lineBasicMaterial color={SLOT_EDGE_COLOR} />
-        </lineSegments>
-      </group>
-      <EntryMarker cellDepth={cellDepth} width={defaults.width} />
-      {/* depthTest disabled: a tall multi-tier rack standing right behind
-          the entry marker (see Rack.tsx) would otherwise hide this label
-          from most camera angles — it should always read as sitting above
-          the scene, not be occluded by whatever's stacked on the slot. */}
-      <Text
-        position={[
-          0,
-          SLOT_HEIGHT / 2 + ENTRY_MARKER_HEIGHT + LABEL_CLEARANCE,
-          entryMarkerCenterZ(cellDepth),
-        ]}
-        rotation={[-Math.PI / 2, 0, 0]}
-        fontSize={0.5}
-        color={LABEL_COLOR}
-        anchorX="center"
-        anchorY="middle"
-        renderOrder={999}
-        material-depthTest={false}
-      >
-        {slot.id}
-      </Text>
-      {depth > 1 &&
-        Array.from({ length: depth - 1 }).map((_, i) => (
-          <DepthDivider key={i} z={(i + 1) * cellDepth - cellDepth / 2} width={defaults.width} />
-        ))}
-      {showPallets &&
-        slot.subSlots?.map((subSlot, i) => {
+      {slot.subSlots?.map((subSlot, i) => {
         if (subSlot.pallets.length === 0) return null;
         if (mode === "view" && !isSlotSpaceVisible(focus, slot.id, i)) return null;
-        // onClick, not onPointerDown — see SlotMesh's handleClick comment.
+        // onClick, not onPointerDown — see the slot click handler in Slots.
         const handleSubSlotClick = (e: ThreeEvent<MouseEvent>) => {
           // Reachable once this slot is focused at any drill-down level —
           // mirrors "select a slot space only if pallets are on it" (empty
@@ -247,7 +227,7 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
         // Hovering a sub-slot's rack highlights *it* (Rack.tsx) rather than
         // the whole slot pad — only meaningful while browsing this slot's
         // sub-slots (i.e. exactly at "slot" level for this slot).
-        const handleSubSlotPointerOver = (e: ThreeEvent<PointerEvent>) => {
+        const handleSubSlotPointerOver = (e: SlotPointerEvent) => {
           if (mode !== "view" || focus.level !== "slot" || focus.slotId !== slot.id) return;
           e.stopPropagation();
           setHover({ slotId: slot.id, subSlotIndex: i, x: e.nativeEvent.clientX, y: e.nativeEvent.clientY });
@@ -280,12 +260,240 @@ function SlotMesh({ slot, defaults }: { slot: Slot; defaults: SlotSize }) {
   );
 }
 
+/**
+ * Every slot in the warehouse. The parts every slot has — pad, outline,
+ * entry marker, depth dividers, id label — are batched: one instanced mesh
+ * (or merged geometry) each for the whole warehouse, so the draw-call count
+ * no longer grows with the number of slots. A plant of 3,200 slots drawn one
+ * group per slot took ~15,500 draw calls and ran at 8 fps on a desktop GPU,
+ * and every hover re-rendered all 3,200 components. The pad mesh takes the
+ * pointer and resolves the slot from the instance hit.
+ */
 export function Slots({ slots, defaults }: { slots: Slot[]; defaults: SlotSize }) {
+  const {
+    mode,
+    addSlotMode,
+    warehouse,
+    selectedSlotIds,
+    toggleSlotSelection,
+    selectOnly,
+    dragRef,
+    orbitRef,
+  } = useEditor();
+  const { focus, hover, setHover, focusSlot } = useViewFocus();
+  // Racks and their pallets are their own layer — hiding them is what clears
+  // the floor so the slot heatmap can be read on the slot pads themselves.
+  const showPallets = useLayers().isVisible("pallets");
+
+  const buildingOf = useMemo(
+    () => new Map(slots.map((slot) => [slot.id, findBuildingForSlot(slot, warehouse.walls)])),
+    [slots, warehouse.walls],
+  );
+  const visible = useMemo(
+    () => (mode === "view" ? slots.filter((slot) => isSlotVisible(focus, slot.id, buildingOf.get(slot.id))) : slots),
+    [slots, mode, focus, buildingOf],
+  );
+
+  // Instance capacity follows the whole warehouse, so drilling in and out
+  // only changes how many instances are drawn, never reallocates the meshes.
+  const capacity = Math.max(1, slots.length);
+  const dividerCapacity = Math.max(1, slots.reduce((sum, slot) => sum + slotFootprint(slot, defaults).depth - 1, 0));
+
+  const unitBox = useMemo(() => new THREE.BoxGeometry(1, 1, 1), []);
+  const markerGeometry = useMemo(
+    () => new THREE.BoxGeometry(defaults.width * 0.96, ENTRY_MARKER_HEIGHT, ENTRY_MARKER_DEPTH),
+    [defaults.width],
+  );
+  const dividerGeometry = useMemo(() => new THREE.BoxGeometry(defaults.width * 0.96, 0.01, 0.02), [defaults.width]);
+  // White, so each pad's instance colour is its colour.
+  const padMaterial = useMemo(() => new THREE.MeshStandardMaterial({ color: "#ffffff" }), []);
+  const markerMaterial = useMemo(() => new THREE.MeshStandardMaterial({ color: ENTRY_COLOR }), []);
+  const dividerMaterial = useMemo(() => new THREE.MeshStandardMaterial({ color: DIVIDER_COLOR }), []);
+  const outlines = useMemo(() => buildOutlines(visible, defaults), [visible, defaults]);
+  useEffect(() => () => outlines.dispose(), [outlines]);
+  const labels = useSlotLabels(slots, visible, defaults);
+
+  const padRef = useRef<THREE.InstancedMesh>(null);
+  const markerRef = useRef<THREE.InstancedMesh>(null);
+  const dividerRef = useRef<THREE.InstancedMesh>(null);
+
+  useLayoutEffect(() => {
+    const pads = padRef.current;
+    const markers = markerRef.current;
+    const dividers = dividerRef.current;
+    if (!pads || !markers || !dividers) return;
+    const matrix = new THREE.Matrix4();
+    const rotation = new THREE.Quaternion();
+    const position = new THREE.Vector3();
+    const scale = new THREE.Vector3();
+    const one = new THREE.Vector3(1, 1, 1);
+    let dividerCount = 0;
+    visible.forEach((slot, i) => {
+      // Each sub-slot is a full slotDefaults footprint (not a fraction of
+      // one): sub-slot 0 sits where a depth-1 slot's footprint would, and
+      // each further one is appended behind it, so slot.x/y stays anchored
+      // to the front sub-slot and added depth only extends the far side.
+      const { depth, cellDepth, totalDepth, footprintCenterZ } = slotFootprint(slot, defaults);
+      rotation.setFromAxisAngle(Y_AXIS, THREE.MathUtils.degToRad(slot.rotationDeg ?? 0));
+      toWorld(slot, 0, 0, footprintCenterZ, position);
+      pads.setMatrixAt(i, matrix.compose(position, rotation, scale.set(defaults.width, SLOT_HEIGHT, totalDepth)));
+      toWorld(slot, 0, SLOT_HEIGHT / 2 + ENTRY_MARKER_HEIGHT / 2, entryMarkerCenterZ(cellDepth), position);
+      markers.setMatrixAt(i, matrix.compose(position, rotation, one));
+      for (let k = 1; k < depth; k++) {
+        toWorld(slot, 0, SLOT_HEIGHT / 2 + 0.005, k * cellDepth - cellDepth / 2, position);
+        dividers.setMatrixAt(dividerCount++, matrix.compose(position, rotation, one));
+      }
+    });
+    pads.count = visible.length;
+    markers.count = visible.length;
+    dividers.count = dividerCount;
+    for (const mesh of [pads, markers, dividers]) {
+      mesh.instanceMatrix.needsUpdate = true;
+      // Raycasting tests this sphere first; left stale, pointer events would
+      // miss slots outside wherever the instances first stood.
+      mesh.computeBoundingSphere();
+    }
+  }, [visible, defaults, capacity, dividerCapacity]);
+
+  // Only a "pure" slot-level hover (no deeper target) lights up the pad —
+  // hovering one of its sub-slot racks highlights that rack instead.
+  const hoveredSlotId = mode === "view" && hover?.slotId && hover.subSlotIndex === undefined ? hover.slotId : null;
+  const colors = useMemo(
+    () => ({
+      base: new THREE.Color(SLOT_COLOR),
+      selected: new THREE.Color(SLOT_SELECTED_COLOR),
+      hovered: new THREE.Color(SLOT_HOVER_COLOR),
+    }),
+    [],
+  );
+  useLayoutEffect(() => {
+    const pads = padRef.current;
+    if (!pads) return;
+    const hadColors = pads.instanceColor !== null;
+    visible.forEach((slot, i) => {
+      const color = slot.id === hoveredSlotId ? colors.hovered : selectedSlotIds.has(slot.id) ? colors.selected : colors.base;
+      pads.setColorAt(i, color);
+    });
+    if (pads.instanceColor) pads.instanceColor.needsUpdate = true;
+    // The shader is compiled with or without per-instance colour; the first
+    // setColorAt adds it, so the material must recompile once.
+    if (!hadColors && pads.instanceColor) padMaterial.needsUpdate = true;
+  }, [visible, hoveredSlotId, selectedSlotIds, colors, padMaterial, capacity]);
+
+  const handlers: SlotHandlers = {
+    pointerOver: (e, slot) => {
+      if (mode !== "view") return;
+      // Without this, the event keeps propagating to whatever's beneath (at
+      // "plant" level, the building floor click-catcher — see Walls.tsx's
+      // BuildingFloor), whose own setHover(buildingId) call would immediately
+      // overwrite this one since both fire within the same event dispatch.
+      e.stopPropagation();
+      setHover({ slotId: slot.id, x: e.nativeEvent.clientX, y: e.nativeEvent.clientY });
+    },
+    pointerOut: () => {
+      if (mode !== "view") return;
+      setHover(null);
+    },
+    // View-mode "select this slot" fires on onClick, not onPointerDown —
+    // mixing the two event types for competing handlers (this slot vs. the
+    // building floor beneath it) caused a real bug: whichever fired later
+    // always won, regardless of which object the raycast actually preferred.
+    click: (e, slot) => {
+      if (mode !== "view" || e.nativeEvent.button !== 0) return;
+      e.stopPropagation();
+      focusSlot(slot.id, buildingOf.get(slot.id));
+    },
+    pointerDown: (e, slot) => {
+      if (mode !== "edit" || addSlotMode) return; // let the event fall through to the drag plane
+      if (e.nativeEvent.button !== 0) return; // right button is for box-select
+      e.stopPropagation();
+
+      const additive = e.nativeEvent.ctrlKey || e.nativeEvent.metaKey;
+      if (additive) {
+        toggleSlotSelection(slot.id);
+        return; // Ctrl+click only builds the selection, it doesn't start a drag
+      }
+
+      // Dragging a slot that's already part of a multi-selection moves the
+      // whole group; otherwise this click selects just this one slot.
+      const dragIds =
+        selectedSlotIds.has(slot.id) && selectedSlotIds.size > 1 ? Array.from(selectedSlotIds) : [slot.id];
+      if (dragIds.length === 1) selectOnly(slot.id);
+
+      const anchor = fromSceneXZ(e.point.x, e.point.z);
+      const origins: Record<string, { x: number; y: number }> = {};
+      for (const id of dragIds) {
+        const s = warehouse.slots.find((s) => s.id === id);
+        if (s) origins[id] = { x: s.x, y: s.y };
+      }
+      const label = dragIds.length === 1 ? `Move slot ${dragIds[0]}` : `Move ${dragIds.length} slots`;
+      dragRef.current = { type: "slots", ids: dragIds, anchor, origins, label, moved: false };
+      if (orbitRef.current) orbitRef.current.enabled = false;
+    },
+  };
+
+  // The pad mesh is hit per instance; instanceId indexes `visible`.
+  const slotHit = (e: { instanceId?: number }) => (e.instanceId === undefined ? undefined : visible[e.instanceId]);
+
   return (
     <group>
-      {slots.map((slot) => (
-        <SlotMesh key={slot.id} slot={slot} defaults={defaults} />
-      ))}
+      <instancedMesh
+        key={`pads-${capacity}`}
+        ref={padRef}
+        args={[unitBox, padMaterial, capacity]}
+        frustumCulled={false}
+        onClick={(e) => {
+          const slot = slotHit(e);
+          if (slot) handlers.click(e, slot);
+        }}
+        onPointerDown={(e) => {
+          const slot = slotHit(e);
+          if (slot) handlers.pointerDown(e, slot);
+        }}
+        onPointerOver={(e) => {
+          const slot = slotHit(e);
+          if (slot) handlers.pointerOver(e, slot);
+        }}
+        onPointerMove={(e) => {
+          const slot = slotHit(e);
+          if (slot) handlers.pointerOver(e, slot);
+        }}
+        onPointerOut={handlers.pointerOut}
+      />
+      {/* Decorative parts opt out of raycasting: Three.js's default
+          line-raycast threshold (1 world unit) makes an un-opted-out
+          LineSegments a near-universal click-blocker once zoomed in close,
+          stealing clicks meant for the rack behind/above it. */}
+      <lineSegments geometry={outlines} raycast={() => null} frustumCulled={false}>
+        <lineBasicMaterial color={SLOT_EDGE_COLOR} />
+      </lineSegments>
+      <instancedMesh
+        key={`markers-${capacity}`}
+        ref={markerRef}
+        args={[markerGeometry, markerMaterial, capacity]}
+        raycast={() => null}
+        frustumCulled={false}
+      />
+      <instancedMesh
+        key={`dividers-${dividerCapacity}`}
+        ref={dividerRef}
+        args={[dividerGeometry, dividerMaterial, dividerCapacity]}
+        raycast={() => null}
+        frustumCulled={false}
+      />
+      <primitive object={labels} raycast={() => null} />
+      {showPallets &&
+        visible
+          .filter((slot) => slot.subSlots?.some((subSlot) => subSlot.pallets.length > 0))
+          .map((slot) => (
+            <SlotRacks
+              key={slot.id}
+              slot={slot}
+              defaults={defaults}
+              buildingId={buildingOf.get(slot.id)}
+              handlers={handlers}
+            />
+          ))}
     </group>
   );
 }
