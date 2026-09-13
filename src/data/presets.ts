@@ -48,7 +48,7 @@ export const WAREHOUSE_PRESETS: WarehousePreset[] = [
   {
     warehouseId: "cml",
     label: "CML",
-    description: "Building 13A from the plant plan: 453 locations, 6 picking lists",
+    description: "Buildings 13A, 12B, 08C, 07D and 06F from the plant plan: 3,200 locations, 11 picking lists",
     load: () =>
       assemble(
         import("../../schema/CML.plan.json"),

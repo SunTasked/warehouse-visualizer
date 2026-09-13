@@ -67,6 +67,63 @@
         { "kind": "slot", "id": "AL01" },
         { "kind": "slot", "id": "AK01" }
       ]
+    },
+    {
+      "id": "receive-12b",
+      "label": "Receive into 12B",
+      "mode": "storing",
+      "stops": [
+        { "kind": "depot", "id": "DS02" },
+        { "kind": "slot", "id": "BA03" },
+        { "kind": "slot", "id": "BA05" },
+        { "kind": "slot", "id": "BA07" }
+      ]
+    },
+    {
+      "id": "receive-08c",
+      "label": "Receive into 08C",
+      "mode": "storing",
+      "stops": [
+        { "kind": "depot", "id": "DS03" },
+        { "kind": "slot", "id": "CA01" },
+        { "kind": "slot", "id": "CA02" },
+        { "kind": "slot", "id": "CA04" }
+      ]
+    },
+    {
+      "id": "receive-07d",
+      "label": "Receive into 07D",
+      "mode": "storing",
+      "stops": [
+        { "kind": "depot", "id": "DS04" },
+        { "kind": "slot", "id": "DA01" },
+        { "kind": "slot", "id": "DA03" },
+        { "kind": "slot", "id": "DA05" }
+      ]
+    },
+    {
+      "id": "receive-06f",
+      "label": "Receive into 06F (both FP04 lanes)",
+      "mode": "storing",
+      "stops": [
+        { "kind": "depot", "id": "DS05" },
+        { "kind": "slot", "id": "FP04A" },
+        { "kind": "slot", "id": "FP04B" },
+        { "kind": "slot", "id": "FA01" }
+      ]
+    },
+    {
+      "id": "pick-across-plant",
+      "label": "Pick across the plant",
+      "mode": "picking",
+      "stops": [
+        { "kind": "slot", "id": "BA03" },
+        { "kind": "slot", "id": "CA01" },
+        { "kind": "slot", "id": "DA01" },
+        { "kind": "depot", "id": "DS01" },
+        { "kind": "slot", "id": "FP04A" },
+        { "kind": "depot", "id": "DS01" }
+      ]
     }
   ]
 }

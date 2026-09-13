@@ -4,6 +4,41 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-13 (cont'd) — CML plant: buildings 12B, 08C, 07D, 06F; batched slot rendering
+
+- Design in specs.md §5.7 (new "From buildings to a plant", "Result", "Rendering a plant this
+  size"), a §5.1 touch-up, and one decision log entry.
+- Owner decisions (asked): buildings stacked north → south in sheet order; one shared road
+  with a door per building; 06F's codes naming two facing lanes → `A`/`B` slots; the two
+  blank-label lanes (would-be DM02, FP12, absent from the picking history) left out.
+- Importer (`scripts/import_plan_xlsx.py`): `--building` takes several blocks (default the
+  five); buildings stacked 10 m apart; west doors plus `road-<north>-<south>` connectors; DS01–DS05,
+  CL01 in 13A only; dock corridor just clear of the last rack, building grown south when
+  the pads don't fit (07D +1.0 m); A/B split by each back cell's front box; blank labels →
+  blocked; rack-free aisle rows share the aisle width (`MIN_FREE_ROW`); pillars no longer
+  block trunk joins; `trunk-<b>`/`dock-<b>` ids.
+- New `scripts/check_plan.py` (ids, containment, overlaps, corridors through slots, each
+  slot's way out to its corridor, pads, doors, connectivity; errors grouped by kind).
+  Validated first on the committed 13A plan. It caught 07D's DH lanes being served from
+  behind (cross-aisle H drawn nine rows → 10.8 m) and 06F's aisle D cut off by a pillar;
+  both fixed in the importer.
+- CML regenerated: 3,200 slots, 74 paths. 13A: 243 slots moved 0.1–0.2 m south (two
+  cross-aisles 0.1 m narrower), no corridor rerouted. `CML.picking-lists.json` gained five
+  lists (a receive into each new building, a pick across the plant); preset text updated.
+- Rendering: at 3,200 slots the per-slot renderer measured 15,555 draw calls / 8 fps and
+  ~270 ms hover frames (Playwright on the local RTX 4070 SUPER). `Slots.tsx` rewritten
+  around instanced pads/markers/dividers, merged outlines and a troika `BatchedText` for
+  labels; racks stay per stocked slot. `troika-three-text` added as a direct dependency with
+  `src/types/troika-three-text.d.ts`. After: 401 draw calls / 60 fps, hover frames 17 ms,
+  06F 89 draw calls, edit mode 523; Test plant 178 → 69.
+- Verified: `tsc --noEmit` clean; Playwright zero console errors — CML preset with 11
+  lists, breadcrumb into 06F, hover card and click into a slot, the four receives then the
+  plant-wide pick with no skipped stops, edit mode on the whole plant; Test plant slot →
+  rack → pallet drill-down, edit-mode click-select and drag recorded in History. A
+  single-building import still passes the checker, with no door or road.
+- Close-ups of a slot show large black shapes at the frame edge: the aisle corridors beside
+  it (gone with the Paths layer off), not an artifact; the grey band is the wall.
+
 ## 2026-09-13 (cont'd) — plant files: Load submenu, per-plant picking lists, building names, unsaved indicator
 
 - Design in specs.md §5.6 ("Plant files: the Load submenu, picking lists, building names,

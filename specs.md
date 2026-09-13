@@ -151,7 +151,7 @@ sub-slots (no pallets) render only a thin divider line, no rack — matching the
 reference screenshot's "#N/A" cells. The outer edge of a whole slot's footprint renders
 in solid black (vs. the pale sub-slot dividers), for a clear "these cells belong
 together, that's a different slot" contrast. The entry is marked *on* the slot: a
-raised green threshold bar (`EntryMarker` in `Slots.tsx`) sits right at the fixed entry
+raised green threshold bar (instanced in `Slots.tsx`, §5.7) sits right at the fixed entry
 edge, on the pad surface — tall enough to still read clearly even where a rack's corner
 posts stand on it, distinct from every other color already in use (slot fill, black
 edge, pale divider, orange selection, gray dimming). The id label sits *on top of* this
@@ -1442,17 +1442,21 @@ and counting dark (rack, corridor, wall, name) pixels: none under the left (398 
 
 The plant's real layout exists only as an Excel floor plan (`data/CML_warehouse.xlsx`,
 sheet `PLAN_Sortie`, one block per building down column A: 13A, 12B, 08C, 07D, 06F, 10H,
-14J, 15K, 16G). `scripts/import_plan_xlsx.py` converts one building into a config file —
-a script rather than a one-off hand-built JSON, so a re-export can simply be re-imported:
+14J, 15K, 16G). `scripts/import_plan_xlsx.py` converts buildings into one plant config
+file — a script rather than a one-off hand-built JSON, so a re-export can simply be
+re-imported — and `scripts/check_plan.py` checks the result the way the app will use it:
 
 ```
-python scripts/import_plan_xlsx.py --building "BATIMENT 13A"
+python scripts/import_plan_xlsx.py                                # 13A, 12B, 08C, 07D, 06F
+python scripts/import_plan_xlsx.py --building "BATIMENT 13A"      # any blocks, north to south
+python scripts/check_plan.py schema/CML.plan.json
 ```
 
 It writes `schema/CML.plan.json` (layout) and `schema/CML.content.json` (empty stock), both
 paths explicit flags rather than one derived from the other. The plant is the warehouse
-(`--id cml`, `--name CML`); the sheet's block becomes its building, named without the
-"BATIMENT" prefix (`13A`), which every corridor and facility belongs to. It superseded `scripts/generate-batiment-13a.js`,
+(`--id cml`, `--name CML`); each sheet block becomes one of its buildings, named without
+the "BATIMENT" prefix (`13A`, `12B`, …), which that building's corridors and facilities
+belong to. It superseded `scripts/generate-batiment-13a.js`,
 an eyeballed approximation with arbitrary ids, which was removed along with its npm script.
 
 **The workbook itself is deliberately not committed** (`.gitignore`): it carries real
@@ -1483,6 +1487,15 @@ needed, which is what makes the import trustworthy rather than approximate:
   (pillars). 14 of them in 13A; they become holes in the racking.
 - **38 boxes carry a broken `=VLOOKUP(,…)`** (the reference was deleted at some point).
   Their code is recovered from the adjacent label cell.
+- **A blank label names nothing.** Two drawn lanes look up an empty label cell — where
+  DM02 (07D) and FP12 (06F) would be — and neither code appears in the plant's picking
+  history. Per the plant owner they are left out, as blocked positions.
+- **One code can name two lanes.** 06F's aisles P and D are drawn one row tall with a
+  single line of even codes, and the lanes on *both* sides look up the same label: FP04 is
+  one address covering two facing one-deep lanes (the history only ever uses the plain
+  even codes). Per the owner, each such code becomes two slots — `FP04A` for the lane north
+  of the aisle, `FP04B` for the one south of it — 44 codes, 88 slots. A back position's
+  reference chain says which of the two lanes it belongs to.
 
 #### Turning it into a layout
 
@@ -1494,10 +1507,16 @@ The drawing is schematic, not to scale — a one-deep lane is often drawn two ce
 while a three-deep lane gets three. Cell *extents* are therefore never used as distances.
 Instead each column gets a fixed pitch (1.2 m, one lane wide) and each row a pitch by role
 (1.2 m for a rack row, an aisle's share of 3.5 m — 5 m for a main cross-aisle drawn four
-rows tall), and each slot is anchored at the aisle-facing edge of its front box. Relative
+or more rows tall), and each slot is anchored at the aisle-facing edge of its front box. Relative
 position, the thing the plan actually encodes, is preserved exactly. A row that carries an
 aisle's labels *and* racking elsewhere along its length keeps at least one position of
-depth, or that rack would overflow its band into the one behind it.
+depth, or that rack would overflow its band into the one behind it. Rows with no racking
+anywhere along them share what is left of the aisle's width, however many there are:
+07D's cross-aisle H is drawn nine rows tall, and with each such row held to a position's
+pitch it came out 10.8 m wide — wide enough that the DH racks south of it sat nearer the
+dock corridor behind them than their own aisle, and would have been routed from behind.
+The same rule narrowed two of 13A's cross-aisles by 0.1 m each, moving 243 of its slots
+0.1–0.2 m south and shortening the building to 54.8 m; no corridor was rerouted.
 
 Corridors come from the same label rows: aisle A's centreline is the line its `AA..`
 labels are written on, spanning the columns they cover. Those are joined by a vertical
@@ -1505,21 +1524,71 @@ trunk placed in the plan's own circulation route — **the widest fully empty co
 with racking on both sides** (in 13A, columns 23–25). Taking merely the widest empty band
 instead picks the clear floor along a wall, and every aisle then gets dragged straight
 through the blocks in between. An aisle is extended to meet a trunk or service corridor
-only when its own rows are genuinely clear all the way there.
+only when its own rows are clear of racking all the way there. Pillars don't count: a
+corridor already runs past them within its own span, and one standing at the mouth of
+06F's aisle D had cut that aisle off from the trunk.
 
-The lift station and delivery space are **not** in the spreadsheet; they are placed on the
-clear floor south of the last rack so runs have somewhere to start and deliver to.
+The lift station and delivery spaces are **not** in the spreadsheet. Each building gets a
+dock corridor on the clear floor just south of its last rack, and a delivery space beside
+it (DS01 in 13A through DS05 in 06F); the first building also gets the lift station the
+forklift starts from (CL01). Where the drawn strip is too shallow for both, the building
+grows south rather than a pad poking through the wall (07D, by 1.0 m).
 
-#### Result for BATIMENT 13A
+#### From buildings to a plant
 
-453 locations / 910 lane positions / 2,730 pallet places, in a 97.9 × 55.0 m envelope,
-with 12 corridors. Verified: every box resolves (zero unresolved, zero ambiguous fronts);
-the corridor graph is fully connected under the app's own exact-coincident-point rule; no
-slot footprint overlaps another; none pokes outside the envelope; no corridor centreline
-runs through a slot; the layout renders in the app with zero console errors.
+The workbook draws every building in the same template and says nothing about where they
+stand. Per the plant owner they are **stacked north to south in sheet order** — 13A
+furthest north, then 12B, 08C, 07D and 06F — west walls aligned, 10 m apart. 13A keeps its
+coordinates (south wall on y = 0); the others run into negative y.
+
+They are joined by **one shared outdoor road**, also the owner's choice. Each building's
+dock corridor carries on west to a door in its west wall, and the road runs 5 m west of
+the walls, door to door: one cross-building connector per pair of neighbours
+(`road-13A-12B`, `road-12B-08C`, …, each with `endpointBuildingIds`), the shape the
+building focus already draws as a stub and arrow. Their ends are the doors' own points,
+where the dock corridors start, so the network joins under the exact-coincident-point
+rule. A single-building import makes no door and no road. Corridor ids every building has
+carry its name (`trunk-13A`, `dock-13A`); aisle ids already differ (`aisle-AA`, `aisle-BA`).
+
+#### Result
+
+| Building | Slots | Lane positions | Blocked | Envelope |
+|---|---|---|---|---|
+| 13A | 453 | 910 | 14 | 97.9 × 54.8 m |
+| 12B | 548 | 1,403 | 33 | 84.8 × 56.9 m |
+| 08C | 650 | 1,274 | 22 | 86.0 × 49.8 m |
+| 07D | 758 | 1,081 | 25 | 87.2 × 55.5 m |
+| 06F | 791 | 891 | 16 | 78.8 × 57.9 m |
+
+3,200 slots, 5,559 lane positions (16,677 pallet places at 3 tiers), 74 corridors.
+`scripts/check_plan.py` passes: unique ids; every slot inside exactly one building and
+overlapping none; no corridor centreline through a slot; every slot's nearest corridor lies
+in front of it, and the way out to it crosses no other racking (2.5 m at most); pads inside
+their building, clear of racking and corridors; doors on their walls and on the network;
+the network in one piece. One warning, older than this import: the drawn 2.2 m width of
+13A's aisle K grazes 14 of its slots (its centreline is clear). In the app, with zero
+console errors, the four new buildings' receiving lists and a pick across the plant (12B,
+08C, 07D and 06F, back to DS01 over the road) all complete without a skipped stop.
+
+#### Rendering a plant this size
+
+Drawn one group per slot — pad, outline, entry marker, id label and depth dividers each a
+separate mesh — the 3,200-slot plant took about 15,500 draw calls and ran at 8 fps on a
+desktop GPU (RTX 4070 SUPER), and every hover re-rendered all 3,200 slot components,
+stalling frames for ~270 ms. `Slots.tsx` now batches every part a slot always has: one
+instanced mesh each for the pads, entry markers and dividers, one merged line geometry for
+the outlines, and one troika `BatchedText` for the id labels (`troika-three-text` is now a
+direct dependency, with a small declaration file). The pad mesh takes the pointer and
+resolves the slot from the instance hit, so hover, click-to-focus and edit-mode
+select/drag behave as before. Racks, interactive per sub-slot and pallet, stay one group
+per *stocked* slot and pass events they don't consume to the same slot handlers. Measured:
+401 draw calls at 60 fps (the display's cap) for the whole CML plant, 89 inside 06F, 523 in
+edit mode, hover frames at 17 ms; the Test plant went from 178 draw calls to 69.
 
 Picking lists are authored separately from the import, as the plant's third file
 (`schema/CML.picking-lists.json`, §5.6) — the workbook's plan says nothing about orders.
+Besides 13A's six, there is one receiving list per new building from its own delivery
+space (06F's fills both FP04 lanes), and a pick across the plant back to 13A.
 
 ## 6. Core Features / Visualizations
 
@@ -1659,6 +1728,19 @@ Picking lists are authored separately from the import, as the plant's third file
 ## 10. Decision Log
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
+
+- 2026-09-13 — CML grows from one building to five (§5.7): 12B, 08C, 07D and 06F join 13A
+  from the same workbook. The plant owner chose how the plan's gaps are filled: buildings
+  stacked north to south in sheet order and joined by one shared outdoor road (door to
+  door along the west side, so a list can cross buildings from 13A's lift station); the 44
+  codes in 06F that each name two facing lanes become A/B slots (`FP04A`/`FP04B`); the two
+  drawn lanes with blank labels are left out. Two import rules changed, both caught by the
+  new `scripts/check_plan.py`: rack-free aisle rows share the aisle's width with no
+  one-position floor (07D's nine-row cross-aisle had put its racks nearer the dock corridor
+  behind them than their own aisle — this also moved 243 of 13A's slots by 0.1–0.2 m), and
+  pillars no longer stop an aisle reaching the trunk (06F's aisle D had been cut off). At
+  3,200 slots the per-slot renderer fell to 8 fps, so slots are now batched into instanced
+  meshes and one `BatchedText` for the labels (60 fps, ~400 draw calls).
 
 - 2026-09-13 — A plant is three files, and the app now treats it that way (§5.6). Picking
   lists moved out of a hardcoded module into a per-plant JSON file with its own schema
