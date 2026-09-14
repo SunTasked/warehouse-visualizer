@@ -454,6 +454,15 @@ export function RunConsole() {
               <span>
                 {formatCount(lastBatch.lists)} list{lastBatch.lists === 1 ? "" : "s"} computed in{" "}
                 {lastBatch.seconds < 10 ? lastBatch.seconds.toFixed(1) : Math.round(lastBatch.seconds)} s
+                {lastBatch.emptyPicks + lastBatch.fullStores > 0 && (
+                  <span
+                    className="run-console__skipped"
+                    title={`${formatCount(lastBatch.emptyPicks)} picks found their slot empty, ${formatCount(lastBatch.fullStores)} stores found it full`}
+                  >
+                    {" "}
+                    · {formatCount(lastBatch.emptyPicks + lastBatch.fullStores)} skipped
+                  </span>
+                )}
               </span>
             ) : (
               <span>Nothing running</span>

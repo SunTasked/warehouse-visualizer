@@ -8,7 +8,7 @@ import { DecileChart, Splits, TimePie, type SplitSort } from "./Charts";
 
 const GROUPS = ["Travel", "Pick / put", "Depot", "Tour"] as const;
 
-function Score({ label, value, hint }: { label: string; value: string; hint?: string }) {
+export function Score({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="score" title={hint}>
       <div className="score__value">{value}</div>

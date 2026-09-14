@@ -2,14 +2,28 @@ import type { ThreeEvent } from "@react-three/fiber";
 import * as THREE from "three";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { BatchedText, Text as TroikaText } from "troika-three-text";
+import { RoundedBoxGeometry } from "three-stdlib";
 import type { Slot, SlotSize } from "../types/warehouse";
 import { useEditor } from "../state/EditorContext";
 import { useViewFocus } from "../state/ViewFocusContext";
 import { fromSceneXZ, slotFootprint } from "../lib/geometry";
 import { isSlotVisible, isSlotSpaceVisible } from "../lib/visibility";
 import { findBuildingForSlot } from "../lib/buildings";
+import { PALLET_FULL_ITEMS } from "../lib/stock";
 import { useLayers } from "../state/LayerContext";
-import { Rack } from "./Rack";
+import {
+  LEVEL_HEIGHT,
+  PALLET_BLOCK_BEVEL_FACTOR,
+  PALLET_BLOCK_HEIGHT_FACTOR,
+  PALLET_BLOCK_INSET,
+  PALLET_FULL_COLOR,
+  PALLET_PARTIAL_COLOR,
+  POST_SIZE,
+  RACK_COLOR,
+  RACK_MARGIN_FACTOR,
+  RAIL_THICKNESS,
+  Rack,
+} from "./Rack";
 
 export const SLOT_HEIGHT = 0.06;
 const SLOT_COLOR = "#4d7cfe";
@@ -260,6 +274,162 @@ function SlotRacks({
   );
 }
 
+/** Instance buffers grow in steps, so a batch moving a few pallets doesn't reallocate them. */
+const RACK_BATCH_STEP = 1024;
+const batchCapacity = (needed: number) => Math.max(RACK_BATCH_STEP, Math.ceil(needed / RACK_BATCH_STEP) * RACK_BATCH_STEP);
+
+/**
+ * Every rack and pallet of `slots` as four instanced meshes — posts, the rails
+ * along and across, pallet crates — for whenever more than one slot is on
+ * screen: plant and building zoom, and edit mode. One Rack component per
+ * sub-slot, as for a focused slot, gave CML's 8,817 pallets some 70,000 meshes:
+ * 4 fps, and 7 s to switch the layer on. Nothing at those zooms reacts to a
+ * rack itself, only to its slot, so a crate hit resolves to its slot and goes
+ * to the slot's handlers. Every pallet shows as its block here; tires are for
+ * the one pallet drilled into (Rack.tsx).
+ */
+function RackBatch({ slots, defaults, handlers }: { slots: Slot[]; defaults: SlotSize; handlers: SlotHandlers }) {
+  const halfWidth = (defaults.width / 2) * RACK_MARGIN_FACTOR;
+  const halfDepth = (defaults.height / 2) * RACK_MARGIN_FACTOR;
+
+  const capacity = useMemo(() => {
+    let subSlots = 0;
+    let pallets = 0;
+    for (const slot of slots) {
+      for (const subSlot of slot.subSlots ?? []) {
+        if (subSlot.pallets.length === 0) continue;
+        subSlots += 1;
+        pallets += subSlot.pallets.length;
+      }
+    }
+    // Four posts per rack; two rails each way per level boundary.
+    return { posts: batchCapacity(subSlots * 4), rails: batchCapacity((pallets + subSlots) * 2), crates: batchCapacity(pallets) };
+  }, [slots]);
+
+  const geometries = useMemo(() => {
+    const width = halfWidth * 2 * PALLET_BLOCK_INSET;
+    const depth = halfDepth * 2 * PALLET_BLOCK_INSET;
+    const height = LEVEL_HEIGHT * PALLET_BLOCK_HEIGHT_FACTOR;
+    return {
+      post: new THREE.BoxGeometry(POST_SIZE, 1, POST_SIZE),
+      along: new THREE.BoxGeometry(halfWidth * 2, RAIL_THICKNESS, RAIL_THICKNESS),
+      across: new THREE.BoxGeometry(RAIL_THICKNESS, RAIL_THICKNESS, halfDepth * 2),
+      crate: new RoundedBoxGeometry(width, height, depth, 2, Math.min(width, depth, height) * PALLET_BLOCK_BEVEL_FACTOR),
+    };
+  }, [halfWidth, halfDepth]);
+  useEffect(() => () => Object.values(geometries).forEach((geometry) => geometry.dispose()), [geometries]);
+  const frameMaterial = useMemo(() => new THREE.MeshStandardMaterial({ color: RACK_COLOR }), []);
+  // White, so each crate's instance colour is its colour.
+  const crateMaterial = useMemo(() => new THREE.MeshStandardMaterial({ color: "#ffffff" }), []);
+
+  const postRef = useRef<THREE.InstancedMesh>(null);
+  const alongRef = useRef<THREE.InstancedMesh>(null);
+  const acrossRef = useRef<THREE.InstancedMesh>(null);
+  const crateRef = useRef<THREE.InstancedMesh>(null);
+  /** The slot each crate instance belongs to, for pointer events. */
+  const crateSlots = useRef<Slot[]>([]);
+
+  useLayoutEffect(() => {
+    const posts = postRef.current;
+    const along = alongRef.current;
+    const across = acrossRef.current;
+    const crates = crateRef.current;
+    if (!posts || !along || !across || !crates) return;
+    const matrix = new THREE.Matrix4();
+    const rotation = new THREE.Quaternion();
+    const position = new THREE.Vector3();
+    const scale = new THREE.Vector3();
+    const one = new THREE.Vector3(1, 1, 1);
+    const full = new THREE.Color(PALLET_FULL_COLOR);
+    const partial = new THREE.Color(PALLET_PARTIAL_COLOR);
+    const hadColors = crates.instanceColor !== null;
+    // Each Rack stands in a group lifted SLOT_HEIGHT / 2 above its slot's.
+    const base = SLOT_HEIGHT / 2;
+    const crateHeight = LEVEL_HEIGHT * PALLET_BLOCK_HEIGHT_FACTOR;
+    const owners: Slot[] = [];
+    let postCount = 0;
+    let alongCount = 0;
+    let acrossCount = 0;
+    let crateCount = 0;
+
+    for (const slot of slots) {
+      rotation.setFromAxisAngle(Y_AXIS, THREE.MathUtils.degToRad(slot.rotationDeg ?? 0));
+      slot.subSlots?.forEach((subSlot, i) => {
+        const levels = subSlot.pallets.length;
+        if (levels === 0) return;
+        const z = i * defaults.height;
+        const height = levels * LEVEL_HEIGHT;
+        for (const x of [-halfWidth, halfWidth]) {
+          for (const dz of [-halfDepth, halfDepth]) {
+            toWorld(slot, x, base + height / 2, z + dz, position);
+            posts.setMatrixAt(postCount++, matrix.compose(position, rotation, scale.set(1, height, 1)));
+          }
+        }
+        for (let level = 0; level <= levels; level++) {
+          const y = base + level * LEVEL_HEIGHT;
+          for (const side of [-1, 1]) {
+            toWorld(slot, 0, y, z + side * halfDepth, position);
+            along.setMatrixAt(alongCount++, matrix.compose(position, rotation, one));
+            toWorld(slot, side * halfWidth, y, z, position);
+            across.setMatrixAt(acrossCount++, matrix.compose(position, rotation, one));
+          }
+        }
+        subSlot.pallets.forEach((pallet, level) => {
+          toWorld(slot, 0, base + level * LEVEL_HEIGHT + crateHeight / 2 + 0.02, z, position);
+          crates.setMatrixAt(crateCount, matrix.compose(position, rotation, one));
+          crates.setColorAt(crateCount, pallet.items.length >= PALLET_FULL_ITEMS ? full : partial);
+          owners[crateCount++] = slot;
+        });
+      });
+    }
+
+    posts.count = postCount;
+    along.count = alongCount;
+    across.count = acrossCount;
+    crates.count = crateCount;
+    for (const mesh of [posts, along, across, crates]) {
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.computeBoundingSphere();
+    }
+    if (crates.instanceColor) crates.instanceColor.needsUpdate = true;
+    if (!hadColors && crates.instanceColor) crateMaterial.needsUpdate = true;
+    crateSlots.current = owners;
+  }, [slots, defaults, halfWidth, halfDepth, capacity, crateMaterial]);
+
+  const owner = (e: { instanceId?: number }) => (e.instanceId === undefined ? undefined : crateSlots.current[e.instanceId]);
+
+  return (
+    <group>
+      <instancedMesh key={`posts-${capacity.posts}`} ref={postRef} args={[geometries.post, frameMaterial, capacity.posts]} raycast={() => null} frustumCulled={false} />
+      <instancedMesh key={`along-${capacity.rails}`} ref={alongRef} args={[geometries.along, frameMaterial, capacity.rails]} raycast={() => null} frustumCulled={false} />
+      <instancedMesh key={`across-${capacity.rails}`} ref={acrossRef} args={[geometries.across, frameMaterial, capacity.rails]} raycast={() => null} frustumCulled={false} />
+      <instancedMesh
+        key={`crates-${capacity.crates}`}
+        ref={crateRef}
+        args={[geometries.crate, crateMaterial, capacity.crates]}
+        frustumCulled={false}
+        onClick={(e) => {
+          const slot = owner(e);
+          if (slot) handlers.click(e, slot);
+        }}
+        onPointerDown={(e) => {
+          const slot = owner(e);
+          if (slot) handlers.pointerDown(e, slot);
+        }}
+        onPointerOver={(e) => {
+          const slot = owner(e);
+          if (slot) handlers.pointerOver(e, slot);
+        }}
+        onPointerMove={(e) => {
+          const slot = owner(e);
+          if (slot) handlers.pointerOver(e, slot);
+        }}
+        onPointerOut={handlers.pointerOut}
+      />
+    </group>
+  );
+}
+
 /**
  * Every slot in the warehouse. The parts every slot has — pad, outline,
  * entry marker, depth dividers, id label — are batched: one instanced mesh
@@ -435,6 +605,15 @@ export function Slots({ slots, defaults }: { slots: Slot[]; defaults: SlotSize }
   // The pad mesh is hit per instance; instanceId indexes `visible`.
   const slotHit = (e: { instanceId?: number }) => (e.instanceId === undefined ? undefined : visible[e.instanceId]);
 
+  // Memoised, not filtered per render: a new array on every hover would have
+  // RackBatch lay out every rack again.
+  const stocked = useMemo(
+    () => (showPallets ? visible.filter((slot) => slot.subSlots?.some((subSlot) => subSlot.pallets.length > 0)) : []),
+    [showPallets, visible],
+  );
+  // A focused slot keeps its real, interactive racks; any wider view batches them.
+  const batchRacks = mode !== "view" || focus.level === "plant" || focus.level === "warehouse";
+
   return (
     <group>
       <instancedMesh
@@ -482,18 +661,19 @@ export function Slots({ slots, defaults }: { slots: Slot[]; defaults: SlotSize }
         frustumCulled={false}
       />
       <primitive object={labels} raycast={() => null} />
-      {showPallets &&
-        visible
-          .filter((slot) => slot.subSlots?.some((subSlot) => subSlot.pallets.length > 0))
-          .map((slot) => (
-            <SlotRacks
-              key={slot.id}
-              slot={slot}
-              defaults={defaults}
-              buildingId={buildingOf.get(slot.id)}
-              handlers={handlers}
-            />
-          ))}
+      {batchRacks ? (
+        stocked.length > 0 && <RackBatch slots={stocked} defaults={defaults} handlers={handlers} />
+      ) : (
+        stocked.map((slot) => (
+          <SlotRacks
+            key={slot.id}
+            slot={slot}
+            defaults={defaults}
+            buildingId={buildingOf.get(slot.id)}
+            handlers={handlers}
+          />
+        ))
+      )}
     </group>
   );
 }

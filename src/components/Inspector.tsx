@@ -1,6 +1,7 @@
 import type { FocusEvent } from "react";
 import { useEditor } from "../state/EditorContext";
 import { useSimulation } from "../state/SimulationContext";
+import { levelsOf, storeTarget } from "../lib/stock";
 
 export function Inspector() {
   const {
@@ -97,13 +98,31 @@ export function Inspector() {
           />
         </label>
 
-        <button
-          className="inspector__small-btn inspector__add-pallet"
-          onClick={() => addPalletAuto(slot.id)}
-          title="Adds a pallet to whichever sub-slot needs it, deepest first"
-        >
-          + Pallet (deepest-first)
-        </button>
+        {(() => {
+          const levels = levelsOf(warehouse.slotDefaults);
+          const subSlots = slot.subSlots ?? [{ pallets: [] }];
+          const pallets = subSlots.reduce((sum, subSlot) => sum + subSlot.pallets.length, 0);
+          const full = storeTarget(subSlots, levels) === -1;
+          return (
+            <>
+              <p className="inspector__hint">
+                {pallets} of {subSlots.length * levels} pallets (depth × {levels} levels)
+              </p>
+              <button
+                className="inspector__small-btn inspector__add-pallet"
+                onClick={() => addPalletAuto(slot.id)}
+                disabled={full}
+                title={
+                  full
+                    ? "Full: every depth position is stacked to the plan's levels"
+                    : "Adds a pallet to whichever sub-slot needs it, deepest first"
+                }
+              >
+                + Pallet (deepest-first)
+              </button>
+            </>
+          );
+        })()}
 
         {(slot.subSlots?.length ?? 0) > 0 && (
           <div className="inspector__subslots">

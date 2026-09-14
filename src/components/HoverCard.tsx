@@ -1,6 +1,7 @@
 import { useEditor } from "../state/EditorContext";
 import { useViewFocus } from "../state/ViewFocusContext";
 import { useSimulation } from "../state/SimulationContext";
+import { levelsOf } from "../lib/stock";
 
 /** Small HTML tooltip shown in view mode while hovering a slot (browsing at
  * plant/warehouse level — no card once a specific slot is already focused). */
@@ -16,9 +17,10 @@ export function HoverCard() {
 
   const subSlots = slot.subSlots ?? [];
   const depth = subSlots.length || 1;
+  const levels = levelsOf(warehouse.slotDefaults);
   // Tallest sub-slot's pallet-tier count — the informal "height" convention
   // (e.g. "depth 3, height 2") already used in the generator script's
-  // comments and specs.md, made visible here rather than only in code/docs.
+  // comments and specs.md — against the stack height the plan allows.
   const height = Math.max(0, ...subSlots.map((ss) => ss.pallets.length));
   const stocked = subSlots.filter((ss) => ss.pallets.length > 0).length;
   const palletCount = subSlots.reduce((sum, ss) => sum + ss.pallets.length, 0);
@@ -50,7 +52,9 @@ export function HoverCard() {
       </div>
       <div className="hover-card__row">
         <span>Height</span>
-        <span>{height}</span>
+        <span>
+          {height} of {levels} levels
+        </span>
       </div>
       <div className="hover-card__row">
         <span>Stocked</span>
@@ -58,10 +62,10 @@ export function HoverCard() {
           {stocked}/{depth} sub-slots
         </span>
       </div>
-      <div className="hover-card__row">
+      <div className="hover-card__row" title="Pallets against the slot's capacity (depth × levels), and the items on them">
         <span>Pallets · items</span>
         <span>
-          {palletCount} · {itemCount}
+          {palletCount}/{depth * levels} · {itemCount}
         </span>
       </div>
       <div className="hover-card__hint">Click to zoom in</div>

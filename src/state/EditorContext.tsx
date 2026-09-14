@@ -15,6 +15,7 @@ import type { Point, Slot, SubSlot, Warehouse, WarehouseConfig, WarehouseContent
 import type { PickingList } from "../types/simulation";
 import { saveWarehouseFiles, type FileHandle, type WarehouseFileHandles } from "../lib/file";
 import { mergeWarehouse, splitWarehouse } from "../lib/warehouseFiles";
+import { PALLET_FULL_ITEMS, levelsOf, storeTarget } from "../lib/stock";
 
 export type Mode = "view" | "edit";
 
@@ -38,7 +39,6 @@ const snapRotation = (deg: number): number => Math.round(deg / 90) * 90;
 const snapPoint = (p: Point): Point => ({ x: snapCoord(p.x), y: snapCoord(p.y) });
 
 const MAX_DEPTH = 12;
-const MAX_ITEMS_PER_PALLET = 10;
 
 function mapSubSlot(slot: Slot, subSlotIndex: number, fn: (subSlot: SubSlot) => SubSlot): Slot {
   if (!slot.subSlots) return slot;
@@ -353,28 +353,23 @@ export function EditorProvider({
     [mutateWarehouse],
   );
 
-  // Adds a new pallet (one item) to a slot, enforcing "fill deepest-first":
-  // targets whichever sub-slot currently has the fewest pallets, breaking
-  // ties toward the deepest (highest-index) one. Repeated calls fill tier 1
-  // of every sub-slot from the back forward, then tier 2, and so on — never
-  // piling a second tier onto one sub-slot while a deeper one is still
-  // completely empty. A discrete click, like addSlot/deleteSlots — commits
-  // immediately.
+  // Adds a new pallet (one item) to a slot, enforcing "fill deepest-first"
+  // (storeTarget, src/lib/stock.ts): whichever sub-slot with room has the
+  // fewest pallets, ties toward the deepest. Repeated calls fill tier 1 of
+  // every sub-slot from the back forward, then tier 2, and so on, up to the
+  // plan's levels — a full slot takes nothing and records no entry. A
+  // discrete click, like addSlot/deleteSlots — commits immediately.
   const addPalletAuto = useCallback(
     (slotId: string) => {
+      const slot = warehouse.slots.find((s) => s.id === slotId);
+      if (!slot || storeTarget(slot.subSlots ?? [{ pallets: [] }], levelsOf(warehouse.slotDefaults)) === -1) return;
       mutateWarehouse((current) => ({
         ...current,
         slots: current.slots.map((s) => {
           if (s.id !== slotId) return s;
           const subSlots = s.subSlots ?? [{ id: `${s.id}.1`, pallets: [] }];
-          let targetIndex = 0;
-          let fewest = Infinity;
-          subSlots.forEach((ss, i) => {
-            if (ss.pallets.length <= fewest) {
-              fewest = ss.pallets.length;
-              targetIndex = i; // later (deeper) indices win ties
-            }
-          });
+          const targetIndex = storeTarget(subSlots, levelsOf(current.slotDefaults));
+          if (targetIndex === -1) return s;
           const nextSubSlots = subSlots.map((ss, i) => {
             if (i !== targetIndex) return ss;
             const palletId = `${ss.id}-P${ss.pallets.length + 1}`;
@@ -385,7 +380,7 @@ export function EditorProvider({
       }));
       commit(`Add pallet to ${slotId}`);
     },
-    [mutateWarehouse, commit],
+    [warehouse, mutateWarehouse, commit],
   );
 
   const removePallet = useCallback(
@@ -409,7 +404,7 @@ export function EditorProvider({
   // Resizes one pallet's item count (1-10). Live-mutate only — caller commits on blur.
   const setPalletItemCount = useCallback(
     (slotId: string, subSlotIndex: number, palletIndex: number, count: number) => {
-      const clamped = Math.max(1, Math.min(MAX_ITEMS_PER_PALLET, Math.round(count)));
+      const clamped = Math.max(1, Math.min(PALLET_FULL_ITEMS, Math.round(count)));
       mutateWarehouse((current) => ({
         ...current,
         slots: current.slots.map((s) =>

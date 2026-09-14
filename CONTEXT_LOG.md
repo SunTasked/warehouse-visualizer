@@ -4,6 +4,62 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-14 (cont'd) — Slot search, stock extract loading, Statistics tab
+
+- **Request:**
+  1. A slot search at the top centre, with suggestions after one letter.
+  2. Load the plant's SQL stock extract (`data/NB_PAL_CML.csv`) directly, and use it in the
+     CML preset. Pallets are full; warn in a modal about unknown slots; cap slots at depth ×
+     height and warn.
+  3. A Statistics tab between Overview and Performances: capacity, fill rate, incomplete
+     pallets, for the plant and per building. Further suggestions to be listed for approval.
+- **Specs:** §5.1 (capacity paragraph; racks batched), §5.3 (stores stop at capacity), §5.6
+  (new "Slot search, stock extracts and the Statistics tab" subsection; Load content bullet;
+  CML's stock), §5.7 (importer no longer writes content), decision log. README: search,
+  Statistics, extract loading, the CML bullet.
+- **The extract:** `WAREHOUSE;SLOT;PALLET_COUNT`, 6,361 rows over 29 warehouse codes; 1,550
+  rows are CML. Every CML code carries a trailing `Z` the plan ids don't (`AA26Z` for AA26;
+  the workbook's own history uses plain codes). With it stripped, 1,540 match; 10 don't
+  (HP01Z, KB66Z, DM01Z, XA10Z, KB22Z, DP01Z, KB46Z, KB34Z, KB54Z, KB10Z). No duplicates.
+- **Capacity:** the plan had no stack height; the importer assumed 3 tiers without the app
+  using it. `slotDefaults.levels` (schema, default 3) now caps every way a pallet enters a
+  slot (`src/lib/stock.ts`: `storeTarget`, `stackFullPallets`). At 3 levels, 554 CML slots
+  are over capacity (2,303 pallets left out: 11,120 → 8,817). Over-capacity count by height:
+  4 → 165, 5 → 121, 6 → 66, 8 → 3.
+- **Loader** (`src/lib/stockExtract.ts`): delimiter from the header (`;`, tab, `,`), columns
+  by name, quotes stripped. The warehouse code is the one named like the plan (`cml` → CML),
+  else the user picks. Rows naming one slot add up; pallets are full (10 items), stacked by
+  `storeTarget`. `ContentLoadDialog` (JSON content too) lists unknown locations, over-capacity
+  slots, unreadable lines, rows for other warehouses and stock about to be replaced, with a
+  warehouse selector; it loads without asking when there's nothing to say. An extract never
+  becomes the content file handle, so Save can't overwrite it with JSON.
+- **CML preset:** `schema/CML.stock.csv` holds the extract's CML rows only (the other 28
+  warehouses' rows aren't this plant's); `schema/CML.content.json` (empty) is gone, and the
+  importer no longer writes it. 8 stores in the demo lists hit full slots, so they moved to
+  the nearest slot with room on the same corridor (FA01→FA03, HA76→HA66, HK20→HK16,
+  JI28→JI26, KE26→KE28, GA01→GA05, GB01→GB03, GE24→GE22).
+- **Engine:** a store into a full slot is skipped and counted (`BatchResult.fullStores`,
+  "· N skipped" in the console's status). The 16 demo lists skip nothing; the 5,000 generated
+  lists (made against empty stock) skip 777 stores.
+- **Search** (`SlotSearch.tsx`, header centre): prefix matches then substring, 8 shown with a
+  count of the rest, building and pallets/capacity per row, `Z`-suffixed codes accepted.
+  Arrows, Enter, Escape (kept from the view's reset), `/` to focus. View mode focuses the
+  slot; edit mode selects it and slides the orbit over it.
+- **Statistics** (`StatisticsBoard.tsx`, `stockStatistics`): capacity, pallets, fill rate,
+  incomplete pallets, empty and full slots, for the plant and each building. CML at load:
+  31,305 places, 8,817 pallets, 28.2 % fill, 68.6 % empty slots, 14.1 % full; 08C holds none
+  (the extract has no C-aisle rows), 16G is 74.3 % full.
+- **Rack batching:** with CML stocked, the Pallets layer ran at 4 fps (6 fps in 16G) and took
+  7 s to switch on — one Rack component per sub-slot. `RackBatch` (Slots.tsx) draws posts,
+  rails and crates instanced whenever more than one slot is on screen and in edit mode; a
+  focused slot keeps real Rack components. Now 60 fps at plant and building zoom, no long
+  tasks on toggling. Edit mode shows blocks, not tires.
+- **Offered, awaiting the owner's approval (not built):** stack height per aisle or slot; a
+  fill layer on the plan; per-aisle statistics; trapped capacity in deep lanes; fill by lane
+  depth; exporting the load report; comparing two extracts; stock near the docks; stores
+  bringing full pallets (a simulated store still adds a 1-item pallet, so it counts as
+  incomplete).
+
 ## 2026-09-14 (cont'd) — Named corridor network, stated slot access, fewest-turns tie-break
 
 - **Request:** implement three of the performance round's suggestions.

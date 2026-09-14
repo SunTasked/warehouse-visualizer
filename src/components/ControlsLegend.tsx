@@ -14,6 +14,14 @@ const VIEW_CONTROLS: Control[] = [
   { action: "Move around", how: "Right-drag" },
   { action: "Rotate", how: "Left-drag" },
   { action: "Details", how: "Hover anything" },
+  {
+    action: "Find a slot",
+    how: (
+      <>
+        <kbd>/</kbd> or the search box
+      </>
+    ),
+  },
   { action: "Zoom into", how: "Click a building, slot or pallet" },
   { action: "Back out", how: "Click empty floor" },
   {
@@ -44,6 +52,14 @@ const EDIT_CONTROLS: Control[] = [
     how: (
       <>
         Click a slot · <kbd>Ctrl</kbd>+click to add
+      </>
+    ),
+  },
+  {
+    action: "Find a slot",
+    how: (
+      <>
+        <kbd>/</kbd> or the search box
       </>
     ),
   },

@@ -3,6 +3,7 @@ import type { PickingList, PickingStop } from "../types/simulation";
 import type { LegProfile, StopHandling } from "./timeModel";
 import { PathGraph, TURN_COS_THRESHOLD, connectPoint, routeBetween, type Connection, type Route } from "./pathGraph";
 import { slotEntryPoint, slotFacing } from "./geometry";
+import { levelsOf, storeTarget } from "./stock";
 
 /**
  * The picking-list simulation's engine (specs.md §5.3): plain data in, plain
@@ -262,6 +263,8 @@ export interface BatchResult {
   slotUsage: Record<string, number>;
   /** Picks that reached a slot with nothing in it. */
   emptyPicks: number;
+  /** Stores that reached a slot with no room left: every depth position stacked to the plan's levels. */
+  fullStores: number;
   /** Stop ids the plan doesn't have. */
   unknownStops: string[];
 }
@@ -287,7 +290,10 @@ export class Batch {
   private readonly edgeCounts = new Map<number, number>();
   private readonly slotCounts = new Map<string, number>();
   private emptyPicks = 0;
+  private fullStores = 0;
   private readonly unknownStops = new Set<string>();
+  /** How high each depth position stacks — a store never goes past it. */
+  private readonly levels: number;
 
   constructor(layout: WarehouseLayout, lists: PickingList[], capture: boolean) {
     this.lists = lists;
@@ -295,6 +301,7 @@ export class Batch {
     this.capture = capture;
     this.planner = new RoutePlanner(layout);
     this.homeId = layout.liftStations[0]?.id;
+    this.levels = levelsOf(layout.slotDefaults);
   }
 
   /** Works lists until they're all done (true) or the clock passes `deadline` (a performance.now() time). */
@@ -319,6 +326,7 @@ export class Batch {
       edgeUsage,
       slotUsage: Object.fromEntries(this.slotCounts),
       emptyPicks: this.emptyPicks,
+      fullStores: this.fullStores,
       unknownStops: [...this.unknownStops],
     };
   }
@@ -371,9 +379,10 @@ export class Batch {
   /**
    * Applies each stop to the stock and says what it cost to work. Picks take
    * the front-most non-empty sub-slot's top pallet; stores go to the sub-slot
-   * with the fewest pallets, ties toward the deepest — the rules the editor's
-   * own "add pallet" fills by, so a stocked slot looks the same whichever way
-   * it was filled.
+   * with room that has the fewest pallets, ties toward the deepest — the rule
+   * the editor's own "add pallet" and a loaded stock extract fill by
+   * (storeTarget), so a stocked slot looks the same whichever way it was
+   * filled. A slot stacked to the plan's levels everywhere takes nothing.
    */
   private handle(stops: PickingStop[], events: StopEvent[]): StopHandling[] {
     let held = 0;
@@ -392,17 +401,14 @@ export class Batch {
       }
 
       if (event.type === "store") {
-        const subSlots = this.subSlots(event.slotId, true);
-        if (!subSlots) return { kind: "none" };
-        let target = 0;
-        let fewest = Infinity;
-        subSlots.forEach((subSlot, i) => {
-          if (subSlot.pallets.length <= fewest) {
-            fewest = subSlot.pallets.length;
-            target = i; // later (deeper) indices win ties
-          }
-        });
-        const subSlot = subSlots[target];
+        const current = this.subSlots(event.slotId, false);
+        if (!current) return { kind: "none" };
+        const target = storeTarget(current, this.levels);
+        if (target === -1) {
+          this.fullStores += 1;
+          return { kind: "none" };
+        }
+        const subSlot = this.subSlots(event.slotId, true)![target];
         const tierIndex = subSlot.pallets.length;
         const palletId = `${subSlot.id}-P${tierIndex + 1}`;
         subSlot.pallets.push({ id: palletId, items: [{ id: `${palletId}-I1` }] });

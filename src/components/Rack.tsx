@@ -14,9 +14,11 @@ export const LEVEL_HEIGHT = 1;
 // sub-slots' racks never touch — reused by focusBounds.ts to frame a
 // sub-slot/pallet tightly around what's actually drawn.
 export const RACK_MARGIN_FACTOR = 0.85;
-const POST_SIZE = 0.06;
-const RAIL_THICKNESS = 0.05;
-const RACK_COLOR = "#2a52c9";
+// Shared with Slots.tsx's RackBatch, which draws the same racks and crates
+// instanced whenever more than one slot is on screen.
+export const POST_SIZE = 0.06;
+export const RAIL_THICKNESS = 0.05;
+export const RACK_COLOR = "#2a52c9";
 // Lighter blend of RACK_COLOR — "surbrillance" when hovering this sub-slot's
 // rack at "slot" level (see Slots.tsx), mirroring SLOT_HOVER_COLOR's
 // treatment of the slot pad itself.
@@ -32,11 +34,11 @@ function lighten(hex: string, amount: number): string {
 // a chamfered crate standing in for the real content, colored by fill rate.
 // Schema caps items at 10 (warehouse.content.schema.json) — that's "full".
 const PALLET_MAX_ITEMS = 10;
-const PALLET_FULL_COLOR = "#dc2626";
-const PALLET_PARTIAL_COLOR = "#f59e0b";
-const PALLET_BLOCK_HEIGHT_FACTOR = 0.7;
-const PALLET_BLOCK_INSET = 0.92;
-const PALLET_BLOCK_BEVEL_FACTOR = 0.12;
+export const PALLET_FULL_COLOR = "#dc2626";
+export const PALLET_PARTIAL_COLOR = "#f59e0b";
+export const PALLET_BLOCK_HEIGHT_FACTOR = 0.7;
+export const PALLET_BLOCK_INSET = 0.92;
+export const PALLET_BLOCK_BEVEL_FACTOR = 0.12;
 
 // A closed rectangle of rails at one level boundary, connecting all four
 // corner posts — reads as one physical, operable shelf rather than two
@@ -152,8 +154,10 @@ function PalletBlock({
  * shows its real content (a row of tires) only once *that exact pallet* is
  * the deepest focus target (view mode) — every other tier renders as a
  * simplified fill-rate-colored block instead of being hidden, so the rest
- * of the sub-slot's stock stays visible for context; edit mode always shows
- * real content. `slotId`/`subSlotIndex`/`buildingId` identify this rack for
+ * of the sub-slot's stock stays visible for context. Only a focused slot's
+ * racks render this way: with more than one slot on screen (and in edit
+ * mode) Slots.tsx draws them all instanced, as blocks.
+ * `slotId`/`subSlotIndex`/`buildingId` identify this rack for
  * the view-mode focus drill-down (click a tier to select that pallet, only
  * reachable once this sub-slot itself is focused).
  */

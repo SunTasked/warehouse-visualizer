@@ -19,8 +19,21 @@ export interface WarehouseFileHandles {
   contentHandle: FileHandle | null;
 }
 
-const JSON_PICKER_TYPES = [
+interface PickerType {
+  description: string;
+  accept: Record<string, string[]>;
+}
+
+const JSON_PICKER_TYPES: PickerType[] = [
   { description: "Warehouse JSON", accept: { "application/json": [".json"] } },
+];
+
+/** Content is a JSON file, or a stock extract from the WMS (src/lib/stockExtract.ts). */
+const CONTENT_PICKER_TYPES: PickerType[] = [
+  {
+    description: "Warehouse content or stock extract",
+    accept: { "application/json": [".json"], "text/csv": [".csv"], "text/plain": [".txt"] },
+  },
 ];
 
 function isAbort(err: unknown): boolean {
@@ -37,11 +50,11 @@ function downloadJson(data: unknown, filename: string): void {
   URL.revokeObjectURL(url);
 }
 
-function pickJsonFile(): Promise<File | null> {
+function pickFile(accept: string): Promise<File | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = "application/json,.json";
+    input.accept = accept;
     input.onchange = () => resolve(input.files?.[0] ?? null);
     input.click();
   });
@@ -65,29 +78,51 @@ async function saveJson(data: unknown, handle: FileHandle | null, suggestedName:
   }
 }
 
+/** An opened file's text and name, and — through the File System Access API — a handle a later save can write back to. */
+export interface OpenedFile {
+  text: string;
+  name: string;
+  handle: FileHandle | null;
+}
+
 /**
- * Opens exactly one JSON file — through the File System Access API when
+ * Opens exactly one file — through the File System Access API when
  * available, so a later save can write back in place; `<input type=file>`
  * otherwise. A plant's plan, content and picking lists are separate files
  * loaded independently (Overview → Load), so interpreting what was opened is
  * left to the caller.
  *
- * Resolves null if the picker was cancelled; throws if the file isn't JSON.
+ * Resolves null if the picker was cancelled.
  */
-export async function openJsonFile<T>(): Promise<{ data: T; handle: FileHandle | null } | null> {
+async function openFile(types: PickerType[]): Promise<OpenedFile | null> {
   if (window.showOpenFilePicker) {
     try {
-      const [handle] = await window.showOpenFilePicker({ types: JSON_PICKER_TYPES, multiple: false });
+      const [handle] = await window.showOpenFilePicker({ types, multiple: false });
       const file = await handle.getFile();
-      return { data: JSON.parse(await file.text()) as T, handle };
+      return { text: await file.text(), name: file.name, handle };
     } catch (err) {
       if (isAbort(err)) return null;
       throw err;
     }
   }
-  const file = await pickJsonFile();
+  const accept = types
+    .flatMap((type) => Object.entries(type.accept).flatMap(([mime, extensions]) => [mime, ...extensions]))
+    .join(",");
+  const file = await pickFile(accept);
   if (!file) return null;
-  return { data: JSON.parse(await file.text()) as T, handle: null };
+  return { text: await file.text(), name: file.name, handle: null };
+}
+
+/** One JSON file, parsed. Resolves null if the picker was cancelled; throws if the file isn't JSON. */
+export async function openJsonFile<T>(): Promise<{ data: T; handle: FileHandle | null } | null> {
+  const opened = await openFile(JSON_PICKER_TYPES);
+  if (!opened) return null;
+  return { data: JSON.parse(opened.text) as T, handle: opened.handle };
+}
+
+/** One content file — content JSON or a stock extract — as text, for the caller to tell which. */
+export function openContentFile(): Promise<OpenedFile | null> {
+  return openFile(CONTENT_PICKER_TYPES);
 }
 
 /**

@@ -60,8 +60,9 @@ guessing from geometry, because the drawing is self-describing:
 How it becomes a warehouse
 --------------------------------------------------------------------------
 One Excel location -> one Slot; its depth cells -> that slot's sub-slots;
-LEVELS -> pallet tiers per sub-slot (content, not config, so it is only a
-capacity here).
+LEVELS -> the plan's slotDefaults.levels, pallet tiers per sub-slot, so a
+slot holds depth x LEVELS pallets. The stock itself isn't in the workbook:
+it is the WMS's pallet count extract, schema/CML.stock.csv.
 
 The drawing is schematic, not to scale: a one-deep lane is often drawn two
 cells tall while a three-deep lane gets three cells. So cell *extents* are
@@ -1088,7 +1089,6 @@ def main():
     ap.add_argument("--id", default="cml")
     ap.add_argument("--name", default="CML")
     ap.add_argument("--out", default="schema/CML.plan.json")
-    ap.add_argument("--content-out", default="schema/CML.content.json")
     args = ap.parse_args()
 
     root = Path(__file__).resolve().parent.parent
@@ -1211,7 +1211,7 @@ def main():
              "depth": r3(z["depth"]), "buildingId": z["buildingId"]}
             for z in zones
         ],
-        "slotDefaults": {"width": LANE_W, "height": POS_D},
+        "slotDefaults": {"width": LANE_W, "height": POS_D, "levels": LEVELS},
         "slots": [{**s, "x": r3(s["x"]), "y": r3(s["y"])} for s in sorted(slots, key=lambda s: s["id"])],
     }
     if not config["inaccessibleZones"]:
@@ -1225,15 +1225,9 @@ def main():
     out.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {args.out}  ({len(buildings)} buildings, {len(slots)} slots, "
           f"{len(junctions)} junctions, {len(corridors)} corridors, {len(zones)} zones; "
-          f"{len(labelled)} slots worked from their labelled aisle)")
-
-    # Explicit rather than derived from the plan's filename: deriving it once
-    # silently pointed the empty content file at the plan itself.
-    content_path = root / args.content_out
-    content_path.write_text(
-        json.dumps({"warehouseId": args.id, "slots": []}, indent=2) + "\n", encoding="utf-8"
-    )
-    print(f"wrote {args.content_out}  (empty stock; capacity is depth x {LEVELS} tiers)")
+          f"{len(labelled)} slots worked from their labelled aisle; capacity is depth x {LEVELS} levels)")
+    # The plant's stock isn't in the workbook: it comes from the WMS's pallet
+    # count extract (schema/CML.stock.csv), which the app reads as it is.
 
 
 if __name__ == "__main__":

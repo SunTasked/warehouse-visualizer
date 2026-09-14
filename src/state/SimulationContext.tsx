@@ -82,6 +82,7 @@ export interface BatchSummary {
   lists: number;
   seconds: number;
   emptyPicks: number;
+  fullStores: number;
   unknownStops: string[];
   error?: string;
 }
@@ -321,6 +322,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     }
     // One line for the whole batch, rather than one warning per stop.
     if (result.emptyPicks > 0) console.warn(`${result.emptyPicks} pick(s) found their slot empty and were skipped`);
+    if (result.fullStores > 0) console.warn(`${result.fullStores} store(s) found their slot full and were skipped`);
     if (result.unknownStops.length > 0) console.warn(`Stops not in this plan, skipped: ${result.unknownStops.join(", ")}`);
 
     setLastBatch({
@@ -328,6 +330,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       lists: records.length,
       seconds: (performance.now() - pending.startedAt) / 1000,
       emptyPicks: result.emptyPicks,
+      fullStores: result.fullStores,
       unknownStops: result.unknownStops,
     });
     if (pending.show && records.length > 0) showRun(records[0], first);
@@ -351,6 +354,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
         lists: pending.lists.length,
         seconds: (performance.now() - pending.startedAt) / 1000,
         emptyPicks: 0,
+        fullStores: 0,
         unknownStops: [],
         error: reply.message,
       });

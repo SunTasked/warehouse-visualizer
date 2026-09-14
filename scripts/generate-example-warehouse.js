@@ -53,6 +53,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const WIDTH = 4; // slotDefaults.width
 const CELL_DEPTH = 2; // slotDefaults.height (one sub-slot's own depth-axis extent)
 const PALLET_MAX_ITEMS = 10; // schema cap — a pallet at this count is "full"
+const LEVELS = 3; // slotDefaults.levels: pallet tiers per depth position
 
 // rotationDeg -> facing, per Slots.tsx's actual rotation math (verified
 // against the entry-marker/sub-slot position formulas, not assumed):
@@ -363,7 +364,7 @@ const config = {
   corridors,
   liftStations,
   deliverySpaces,
-  slotDefaults: { width: WIDTH, height: CELL_DEPTH },
+  slotDefaults: { width: WIDTH, height: CELL_DEPTH, levels: LEVELS },
   slots: allSlots,
 };
 

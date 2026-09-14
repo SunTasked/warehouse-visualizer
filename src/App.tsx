@@ -24,6 +24,7 @@ import { LayerPanel } from "./components/LayerPanel";
 import { LayerProvider } from "./state/LayerContext";
 import { AnalyticsProvider } from "./state/AnalyticsContext";
 import { AnalyticsBoard } from "./components/analytics/AnalyticsBoard";
+import { StatisticsBoard } from "./components/statistics/StatisticsBoard";
 import { AppHeader } from "./components/AppHeader";
 import { useAnalytics } from "./state/AnalyticsContext";
 import "./App.css";
@@ -43,15 +44,16 @@ function AppShell() {
   const { tab } = useAnalytics();
   const sceneRef = useRef<HTMLDivElement>(null);
 
-  // The scene stays mounted while the Performances tab is up, just hidden:
-  // remounting it would throw away the camera and re-frame the warehouse
-  // every time you glance at the numbers and come back.
+  // The scene stays mounted while the Statistics or Performances tab is up,
+  // just hidden: remounting it would throw away the camera and re-frame the
+  // warehouse every time you glance at the numbers and come back.
   return (
     <div className="app">
       <AppHeader />
       <Toolbar />
+      <StatisticsBoard />
       <AnalyticsBoard />
-      <div className="app__scene" ref={sceneRef} hidden={tab === "performances"}>
+      <div className="app__scene" ref={sceneRef} hidden={tab !== "overview"}>
         {/* Keyed on id so loading a different building remounts the scene
             (fresh camera framing); editing the current one does not. */}
         <WarehouseScene key={warehouse.id} />

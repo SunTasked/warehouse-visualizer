@@ -3466,7 +3466,8 @@
   ],
   "slotDefaults": {
     "width": 1.2,
-    "height": 1.2
+    "height": 1.2,
+    "levels": 3
   },
   "slots": [
     {

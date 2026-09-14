@@ -4,6 +4,9 @@ import { DEFAULT_TIME_MODEL, type TimeModelSettings } from "../lib/timeModel";
 
 const STORAGE_KEY = "warehouse-opti.analytics.v1";
 
+/** The app's top-level tabs (specs.md §5.6): the warehouse itself, its stock statistics, and the recorded session's performances. */
+export type AppTab = "overview" | "statistics" | "performances";
+
 /**
  * A capture frozen for comparison (specs.md §5.5). Stores the runs in their
  * scorable form rather than the metrics themselves, so a snapshot taken
@@ -50,8 +53,8 @@ interface AnalyticsContextValue {
   saveSnapshot: (snapshot: Omit<AnalyticsSnapshot, "id" | "at">) => void;
   removeSnapshot: (id: string) => void;
   /** Which top-level tab is showing (specs.md §5.6) — the board is a view of the app, not an overlay on the scene. */
-  tab: "overview" | "performances";
-  setTab: (value: "overview" | "performances") => void;
+  tab: AppTab;
+  setTab: (value: AppTab) => void;
   /** Drops snapshots along with everything else — entering edit mode invalidates them, since their runs were routed over a layout that is about to change. */
   clearAll: () => void;
 }
@@ -60,7 +63,7 @@ const AnalyticsContext = createContext<AnalyticsContextValue | null>(null);
 
 export function AnalyticsProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<StoredState>(load);
-  const [tab, setTab] = useState<"overview" | "performances">("overview");
+  const [tab, setTab] = useState<AppTab>("overview");
 
   // Settings and snapshots outlive a reload on purpose: comparing
   // configurations often means loading a different warehouse file, which

@@ -181,6 +181,15 @@ pallets onto one sub-slot while a deeper one sits empty. Removal stays manual/pe
 (picking which tier to remove isn't automated). See `setSlotDepth`/`addPalletAuto`/
 `removePallet`/`setPalletItemCount` in `src/state/EditorContext.tsx`.
 
+**Capacity** (2026-09-14): each depth position stacks at most `slotDefaults.levels` pallets
+(plan schema, default 3), so a slot holds depth × levels. One rule, `storeTarget` in
+`src/lib/stock.ts`, places every pallet that enters a slot: the sub-slot *with room* that has
+the fewest pallets, ties toward the deepest. The editor's "+ Pallet", a simulated store
+(§5.3) and a loaded stock extract (§5.6) all use it, so none of them fills a slot past what
+the others think it holds. The Inspector shows "N of M pallets (depth × levels)" and
+disables "+ Pallet" on a full slot; the hover card shows height and pallets against the same
+numbers. Both plants state `levels: 3`, what the CML importer always assumed.
+
 #### View mode: 5-level focus hierarchy, hover card + click-to-zoom drill-down
 
 View mode (the toolbar's default, non-editing state) has its own interaction model,
@@ -250,8 +259,13 @@ block (`RoundedBox` from drei) instead, color-coded by fill rate against the sch
 10-item-per-pallet cap: red if full (10/10 items), orange otherwise (`PalletBlock` in
 `src/components/Rack.tsx`). This keeps the rest of a sub-slot's (or the whole plant's)
 stock legible at a glance without the render cost of full tire detail everywhere at
-once, and edit mode always shows real content regardless of focus (so it's still
-authoritative for inspecting/changing actual counts).
+once. Whenever more than one slot is on screen — plant and building zoom, and edit mode —
+the racks and blocks are drawn instanced (`RackBatch` in `Slots.tsx`: posts, rails along,
+rails across, crates, four draw calls in all), with a crate hit resolving to its slot's own
+handlers. One Rack component per sub-slot held CML's stocked plant (8,817 pallets) at 4 fps
+with the Pallets layer on, and took 7 s to switch the layer on. Only a focused slot's racks
+are real, interactive Rack components. Edit mode therefore shows blocks too, not tires; the
+Inspector lists each pallet's item count.
 
 A **left-side breadcrumb widget** (`src/components/FocusBreadcrumb.tsx`) always shows
 the current path (e.g. "Warehouse: Main warehouse / Slot: A02") — every crumb except the
@@ -635,11 +649,14 @@ direction is the same regardless of mode — only what each stop *does* changes
   `min(3, consecutive slot stops before the next depot stop or end of list)`, so the
   forklift never visibly carries more than it needs (a delivery space carries no
   tracked inventory of its own to remove them from); a `slot` stop stores one held
-  pallet there (the existing `addPalletAuto`, unchanged) and decrements held load.
+  pallet there (by `storeTarget`, the rule `addPalletAuto` fills by, §5.1 "Capacity") and
+  decrements held load.
 
-No validation UI — an authored list is trusted to respect the hard-3 capacity; a pick
-that finds its slot empty, or a stop the plan doesn't have, is skipped — reported in one
-`console.warn` per batch — not a crash.
+No validation UI — an authored list is trusted to respect the hard-3 capacity. A pick that
+finds its slot empty, a store that finds its slot full (every depth position stacked to the
+plan's levels), or a stop the plan doesn't have is skipped, not a crash. Each is reported
+in one `console.warn` per batch, and the run console's status adds "· N skipped" (empty
+picks and full stores, broken down in its tooltip).
 
 **Pathfinding** (`src/lib/pathGraph.ts`).
 
@@ -1487,9 +1504,11 @@ same three files bundled (`src/data/presets.ts`).
   plant's orders name locations the new plan doesn't have. Like a preset it discards the
   session and resets focus, behind a confirm naming what goes (unsaved changes, the stock in
   the racks, the lists, the session), asked only when something would be lost.
-- **Content** lands on the plan already on screen. It asks first only when the file names a
-  different `warehouseId`, references slots the plan doesn't have (those are ignored), or
-  would replace stock already in the racks.
+- **Content** lands on the plan already on screen. It is content JSON or, since 2026-09-14,
+  a stock extract (see "Slot search, stock extracts and the Statistics tab" below). It asks
+  first, in a dialog, only when there is something to say: the file names a different
+  `warehouseId`, references slots the plan doesn't have (those are left out), or would
+  replace stock already in the racks.
 - **Picking lists** replace the plant's lists. It asks first when the file was written for
   another plant, or visits locations the plan lacks (naming up to four), since routing
   skips those stops.
@@ -1500,8 +1519,8 @@ became `schema/warehouse.picking-lists.example.json`, with a JSON Schema at
 content file). They live in `EditorContext` beside the warehouse, and
 `SimulationContext.pickingLists` reads them from there. CML ships
 `schema/CML.picking-lists.json`: six lists over real 13A locations, **ordered storing
-first**. CML's content is empty, so a pick only finds a pallet once a receiving list has
-stored one — run the batch in order, or the two "Receive…" lists first. The panel clears
+first**. CML's content was empty then, so a pick only found a pallet once a receiving list
+had stored one. CML is now stocked from the plant's pallet count extract (below). The panel clears
 its ticks when the lists change, and says how to load some when a plant has none.
 
 **Building names on the plan.** Each building's name sits outside its north-west corner
@@ -1638,6 +1657,105 @@ matrix uploaded to the GPU:
   - Run and capture measured the run, and a second list in the same capture didn't ask.
 - **Lists:** all 16 CML lists run with no warnings.
 
+#### Slot search, stock extracts and the Statistics tab (2026-09-14)
+
+From the plant owner's next review, three requests.
+
+**Finding a slot.** A search box sits at the header's centre (`SlotSearch.tsx`; the header
+is now a three-column grid, stacking below 820 px). From the first character typed it lists
+matching slot codes: codes starting with the text first, then codes containing it, in
+natural order. It shows eight at a time with a count of the rest, each with its building and
+its pallets against capacity. A code as the stock extract writes it (`AA26Z`) finds AA26.
+- **Keys:** arrows and Enter pick. Escape closes the list, then clears the box. The box's
+  keys never reach the view's shortcuts (Escape's plant reset, Ctrl+Z's undo). `/` anywhere
+  but a field puts the cursor in the box, and the controls legend says so.
+- **Choosing a slot** returns to Overview from another tab. In view mode it zooms onto the
+  slot, the same focus as clicking it. In edit mode it selects the slot and slides the orbit
+  over it without changing angle or distance.
+
+**Loading a stock extract.** Overview → Load → *Warehouse content…* opens either content
+JSON or a pallet count extract straight from the WMS, with no conversion step
+(`src/lib/stockExtract.ts`). The extract has one row per location:
+`WAREHOUSE;SLOT;PALLET_COUNT`. The two are told apart by extension, else by whether the text
+starts like JSON. The delimiter is whichever of `;`, tab or `,` splits the header most;
+columns are found by name, with quotes and a BOM tolerated. A row without a location or a
+whole count is skipped and counted.
+- **Which rows:** an extract can cover several warehouse codes; the plant's covers 29. The
+  loader takes the code named like the plan (`cml` → CML). When no code is, the dialog asks.
+  Rows naming the same slot add up.
+- **Which slot:** a location code matches a slot id exactly or, the way the CML extract
+  writes them, without a trailing `Z`. Anything else is an unknown location, left out and
+  listed.
+- **Full pallets:** a count says nothing about contents, so every pallet loads with 10
+  items. They stack by the rule every store follows (§5.1 "Capacity").
+- **Over capacity:** a slot given more pallets than depth × levels is filled to capacity.
+  The rest are left out, and the slot is listed with its count and its places.
+
+`ContentLoadDialog` is used for content JSON too, replacing its `window.confirm`.
+- It states what loads ("1,550 rows for CML: 8,817 full pallets into 1,540 slots"), and
+  offers a warehouse selector when the file has several codes.
+- It lists each issue in full: unknown locations, over-capacity slots (most excess first),
+  unreadable lines, rows for other warehouses, and stock about to be replaced.
+- With nothing to say, the file loads straight away; with nothing to load, Load is disabled.
+- An extract never becomes the content file's handle, so Save asks where to write the JSON
+  rather than overwriting the CSV.
+
+**CML is stocked from the extract.** `schema/CML.stock.csv` holds the extract's 1,550 CML
+rows as they were exported; the other 28 warehouses' rows belong to other plants. The preset
+reads it through the same loader (`contentExtract` in `presets.ts`), without the dialog, and
+`schema/CML.content.json` (empty) is gone. Against the plan:
+- 10 locations don't exist: HP01Z, KB66Z, DM01Z, XA10Z, KB22Z, DP01Z, KB46Z, KB34Z, KB54Z,
+  KB10Z.
+- 554 slots are over capacity at 3 levels, leaving 8,817 of 11,120 pallets. The count falls
+  fast with height: 165 slots at 4 levels, 121 at 5, 66 at 6, 3 at 8. The plant's real
+  stack height is worth confirming.
+- Eight demo stores landed in slots the extract fills. Each moved to the nearest slot with
+  room on the same corridor: FA01→FA03, HA76→HA66, HK20→HK16, JI28→JI26, KE26→KE28,
+  GA01→GA05, GB01→GB03, GE24→GE22. The 16 lists now run without a skipped stop.
+
+**Statistics tab.** It sits between Overview and Performances (`AppTab` in
+`AnalyticsContext`); the scene stays mounted but hidden, as for Performances.
+`stockStatistics` (`src/lib/stockStats.ts`) reads the warehouse on screen, so it follows
+edits, loads and simulated batches. It is computed only while the tab shows.
+- **Whole plant:** capacity (depth × levels, summed), pallets stored, fill rate, incomplete
+  pallets (fewer than 10 items), empty slots, and full slots (no room for another pallet).
+- **By building:** a table of the same figures, with a fill bar and a whole-plant row. A slot
+  counts towards the building its centre stands in. The table notes slots standing in no
+  building, and slots holding more than capacity.
+- **CML at load:** 31,305 places, 8,817 pallets, 28.2 % fill, 0 % incomplete, 68.6 % of
+  slots empty and 14.1 % full. 16G is the fullest (74.3 %); 08C holds nothing, since the
+  extract has no rows for its aisles.
+
+**Racks are batched.** Stocked CML made the Pallets layer unusable: 4 fps, and 7 s to
+switch it on. The racks are now instanced whenever more than one slot is on screen (§5.1),
+giving 60 fps at plant and building zoom.
+
+Verified:
+- **Node, against the real files:**
+  - The extract reads 6,361 rows with none skipped, picks CML, and gives the figures above.
+    The committed CSV gives identical content.
+  - No slot breaks its levels or holds a non-full pallet. A save round trip keeps stock and
+    levels. Per-building figures add up to the plant.
+  - The Test plant reads 72 of 153 places, 9.7 % incomplete.
+  - The 16 CML lists skip nothing on the stocked plant. The 5,000 generated lists, made
+    against empty stock, skip 777 stores.
+  - The parser handles comma-delimited and quoted files, a missing warehouse column and bad
+    counts, and rejects a wrong header with a message.
+- **Playwright, zero console errors:**
+  - The tabs read Overview / Statistics / Performances, with the box centred.
+  - `/` then "a" lists 8 codes and "1,004 more". "ac1", ↓↓, Enter from the Statistics tab
+    lands on Overview at CML › 13A › AC13. Escape in the box leaves the crumbs alone.
+    "AA26Z" suggests AA26.
+  - Loading `NB_PAL_CML.csv` shows the dialog with 10 and 554 entries and the replace note.
+    Choosing BT4 reads "Nothing to load" with Load disabled. Loading CML gives the same
+    statistics.
+  - The Test plant's content JSON goes through the dialog with only the replace note. A
+    README picked as content is refused with the column message.
+  - In edit mode, searching B04 selects it with "6 of 6 pallets" and "+ Pallet" disabled.
+    A03 reads 5 of 9, and Ctrl+Z typed in the box undoes nothing.
+  - With Pallets on, hovering a batched crate shows its slot's card and clicking it focuses
+    the slot. Inside the slot, rack and tier clicks still reach slot-space and pallet.
+
 ### 5.7 Importing a real plant from the CML workbook (decided, v1)
 
 The plant's real layout exists only as an Excel floor plan (`data/CML_warehouse.xlsx`,
@@ -1652,8 +1770,9 @@ python scripts/import_plan_xlsx.py --building "BATIMENT 13A"      # any blocks, 
 python scripts/check_plan.py schema/CML.plan.json
 ```
 
-It writes `schema/CML.plan.json` (layout) and `schema/CML.content.json` (empty stock), both
-paths explicit flags rather than one derived from the other. The plant is the warehouse
+It writes `schema/CML.plan.json` (the layout, with `slotDefaults.levels` 3). It used to
+write an empty `schema/CML.content.json` too. The plant's stock now comes from its pallet
+count extract, `schema/CML.stock.csv` (§5.6). The plant is the warehouse
 (`--id cml`, `--name CML`); each sheet block becomes one of its buildings, named without
 the "BATIMENT" prefix (`13A`, `12B`, …), which that building's corridors and facilities
 belong to. It superseded `scripts/generate-batiment-13a.js`,
@@ -1891,7 +2010,7 @@ In Playwright, with zero console errors:
 | 15K | 445 | 1,267 | 1 | 2 × Train | 89.6 × 66.6 m |
 | 16G | 445 | 1,442 | 31 | — | 136.5 × 50.2 m |
 
-4,910 slots, 10,435 lane positions (31,305 pallet places at 3 tiers), 271 junctions, 138
+4,910 slots, 10,435 lane positions (31,305 pallet places at the plan's 3 levels), 271 junctions, 138
 corridors, 9 zones. 15K's walls aren't drawn as the others' are, so its block's whole row
 range is its floor.
 
@@ -2074,6 +2193,22 @@ from 12B–06F and one from 10H–16G — 16 lists in all.
 ## 10. Decision Log
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
+
+- 2026-09-14 — Per the plant owner (§5.1, §5.3, §5.6):
+  - **Stock extract:** content can be loaded straight from the WMS's pallet count extract
+    (`WAREHOUSE;SLOT;PALLET_COUNT`). Every pallet is taken as full. Unknown locations and
+    over-capacity slots are listed in a dialog, and over-capacity slots are filled to
+    capacity.
+  - **CML stock:** the CML preset is stocked from the extract's CML rows
+    (`schema/CML.stock.csv`), and its demo stores moved out of the slots the extract fills.
+  - **Capacity:** plans state a stack height (`slotDefaults.levels`, 3 for both plants). The
+    editor, simulated stores and loaded stock all stop at depth × levels. A store into a
+    full slot is skipped and counted.
+  - **Search and Statistics:** a slot search sits in the header. A Statistics tab between
+    Overview and Performances shows capacity, fill rate, incomplete pallets, and empty and
+    full slots, for the plant and each building.
+  - **Racks:** they are drawn instanced whenever more than one slot is on screen, so edit
+    mode shows pallet blocks rather than tires.
 
 - 2026-09-14 — Per the plant owner (§5.1, §5.3, §5.7):
   - **Corridor format:** the corridor network is stored as named junctions and corridors

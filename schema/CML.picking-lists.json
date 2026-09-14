@@ -109,7 +109,7 @@
         { "kind": "depot", "id": "DS05" },
         { "kind": "slot", "id": "FP04A" },
         { "kind": "slot", "id": "FP04B" },
-        { "kind": "slot", "id": "FA01" }
+        { "kind": "slot", "id": "FA03" }
       ]
     },
     {
@@ -131,9 +131,9 @@
       "mode": "storing",
       "stops": [
         { "kind": "depot", "id": "DS06" },
-        { "kind": "slot", "id": "HA76" },
+        { "kind": "slot", "id": "HA66" },
         { "kind": "slot", "id": "HA78" },
-        { "kind": "slot", "id": "HK20" }
+        { "kind": "slot", "id": "HK16" }
       ]
     },
     {
@@ -144,7 +144,7 @@
         { "kind": "depot", "id": "DS07" },
         { "kind": "slot", "id": "JB01" },
         { "kind": "slot", "id": "JB03" },
-        { "kind": "slot", "id": "JI28" }
+        { "kind": "slot", "id": "JI26" }
       ]
     },
     {
@@ -155,7 +155,7 @@
         { "kind": "depot", "id": "DS08" },
         { "kind": "slot", "id": "KA02" },
         { "kind": "slot", "id": "KA04" },
-        { "kind": "slot", "id": "KE26" }
+        { "kind": "slot", "id": "KE28" }
       ]
     },
     {
@@ -164,9 +164,9 @@
       "mode": "storing",
       "stops": [
         { "kind": "depot", "id": "DS09" },
-        { "kind": "slot", "id": "GA01" },
-        { "kind": "slot", "id": "GB01" },
-        { "kind": "slot", "id": "GE24" }
+        { "kind": "slot", "id": "GA05" },
+        { "kind": "slot", "id": "GB03" },
+        { "kind": "slot", "id": "GE22" }
       ]
     },
     {

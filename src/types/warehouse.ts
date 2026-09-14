@@ -21,6 +21,12 @@ export interface SlotSize {
   height: number;
 }
 
+/** Every slot's footprint, and how high each of its depth positions stacks. */
+export interface SlotDefaults extends SlotSize {
+  /** Pallet tiers per depth position, so a slot holds depth × levels pallets. Default DEFAULT_LEVELS (src/lib/stock.ts). */
+  levels?: number;
+}
+
 /**
  * Storage hierarchy within a slot (see specs.md §5.1 "Storage subdivision"):
  *   Slot → Sub-slot → Pallet → Item
@@ -217,7 +223,7 @@ export interface WarehouseConfig {
   deliverySpaces?: DeliverySpace[];
   /** Optional — absent in files predating this addition, treated as empty. */
   inaccessibleZones?: InaccessibleZone[];
-  slotDefaults: SlotSize;
+  slotDefaults: SlotDefaults;
   slots: SlotConfig[];
 }
 
@@ -284,6 +290,6 @@ export interface Warehouse {
   liftStations: LiftStation[];
   deliverySpaces: DeliverySpace[];
   inaccessibleZones: InaccessibleZone[];
-  slotDefaults: SlotSize;
+  slotDefaults: SlotDefaults;
   slots: Slot[];
 }

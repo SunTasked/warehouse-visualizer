@@ -61,8 +61,8 @@
       "items": { "$ref": "#/definitions/inaccessibleZone" }
     },
     "slotDefaults": {
-      "$ref": "#/definitions/slotSize",
-      "description": "Default footprint applied to every slot for now (all slots are the same size: 4m x 2m)."
+      "$ref": "#/definitions/slotDefaults",
+      "description": "Applied to every slot for now: its footprint (all slots are the same size) and how high each depth position stacks."
     },
     "slots": {
       "type": "array",
@@ -253,6 +253,28 @@
           "type": "number",
           "exclusiveMinimum": 0,
           "description": "Footprint size along the slot's local Y axis (before rotation), in meters."
+        }
+      }
+    },
+    "slotDefaults": {
+      "type": "object",
+      "required": ["width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Footprint size along the slot's local X axis (before rotation), in meters."
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Footprint size along the slot's local Y axis (before rotation), in meters — one depth position's."
+        },
+        "levels": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Pallet tiers per depth position, so a slot holds depth x levels pallets: stores, the editor's + Pallet and a loaded stock extract all stop there. Default 3."
         }
       }
     },
