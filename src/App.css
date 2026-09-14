@@ -784,20 +784,26 @@ body,
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
   min-height: 0;
   overflow-y: auto;
 }
 
+/* A fixed height, so the catalogue can render only the rows in view
+   (PickingListPanel's LIST_ROW_PITCH: this height plus the margin). */
 .picking-panel__row {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
+  box-sizing: border-box;
+  height: 52px;
+  margin-bottom: 6px;
   padding: 0.4rem;
   border: 1px solid #eef1f6;
   border-radius: 6px;
+}
+
+.picking-panel__spacer {
+  margin: 0;
 }
 
 .picking-panel__info {
@@ -808,6 +814,9 @@ body,
 .picking-panel__label {
   font-weight: 600;
   color: #1a2233;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .picking-panel__meta {
@@ -816,7 +825,13 @@ body,
   gap: 0.4rem;
   color: #5a6270;
   font-size: 0.72rem;
-  flex-wrap: wrap;
+  white-space: nowrap;
+}
+
+.picking-panel__stops {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .picking-panel__badge {
@@ -873,6 +888,57 @@ body,
   font-size: 0.75rem;
   color: #5a6270;
   padding: 0.2rem 0.4rem;
+}
+
+/* In place of the catalogue while a batch is routed (PickingListPanel's
+   RunProgress). */
+.run-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.1rem 0.1rem 0.2rem;
+}
+
+.run-progress__head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.run-progress__pct {
+  font-weight: 500;
+  color: #5a6270;
+  font-variant-numeric: tabular-nums;
+}
+
+.run-progress__track {
+  height: 8px;
+  border-radius: 999px;
+  background: #eef1f6;
+  overflow: hidden;
+}
+
+.run-progress__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: #4d7cfe;
+  transition: width 0.15s linear;
+}
+
+.run-progress__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: #5a6270;
+  font-variant-numeric: tabular-nums;
+}
+
+.picking-panel__btn.run-progress__cancel {
+  flex: none;
 }
 
 .picking-panel__btn {
@@ -2011,10 +2077,13 @@ body,
   overflow-y: auto;
 }
 
+/* Fixed height, border included: the chart renders only the rows in view
+   (Charts.tsx's SPLIT_ROW_HEIGHT). */
 .splits__row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  box-sizing: border-box;
   height: 32px;
   font-size: 0.78rem;
   font-variant-numeric: tabular-nums;

@@ -1,5 +1,8 @@
-import * as THREE from "three";
 import type { Point, Slot, SlotSize, Warehouse } from "../types/warehouse";
+
+// Plain maths, no three.js: the run worker imports this file, and pulling in
+// three there would load the whole library into the worker for one constant.
+const DEG_TO_RAD = Math.PI / 180;
 
 /**
  * Warehouse coordinates are 2D: meters, origin bottom-left, +X right, +Y up
@@ -97,7 +100,7 @@ export function slotFootprint(slot: Slot, defaults: SlotSize): SlotFootprint {
 export function slotEntryPoint(slot: Slot, defaults: SlotSize): Point {
   const { cellDepth } = slotFootprint(slot, defaults);
   const halfCellDepth = cellDepth / 2;
-  const rotationRad = THREE.MathUtils.degToRad(slot.rotationDeg ?? 0);
+  const rotationRad = (slot.rotationDeg ?? 0) * DEG_TO_RAD;
   return {
     x: slot.x - halfCellDepth * Math.sin(rotationRad),
     y: slot.y + halfCellDepth * Math.cos(rotationRad),
@@ -106,6 +109,6 @@ export function slotEntryPoint(slot: Slot, defaults: SlotSize): Point {
 
 /** The way a slot opens, as a unit vector in warehouse (x,y) space: out of its entry edge, towards its aisle. */
 export function slotFacing(slot: Slot): Point {
-  const rotationRad = THREE.MathUtils.degToRad(slot.rotationDeg ?? 0);
+  const rotationRad = (slot.rotationDeg ?? 0) * DEG_TO_RAD;
   return { x: -Math.sin(rotationRad), y: Math.cos(rotationRad) };
 }

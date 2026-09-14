@@ -1,4 +1,6 @@
+import { useMemo } from "react";
 import { formatDuration } from "../../lib/metrics";
+import { useVirtualRows } from "../../lib/useVirtualRows";
 
 /**
  * Hand-rolled SVG charts (specs.md §5.5). Deliberately no charting library:
@@ -251,7 +253,10 @@ export interface SplitRow {
 
 export type SplitSort = "index" | "time" | "steps";
 
-/** Run splits laid out like the km splits on a running activity: one row each, bar length proportional to the slowest. Scrolls past five rows so a long session can't push the rest of the board off screen. */
+/** Matches `.splits__row`'s height, border included. */
+const SPLIT_ROW_HEIGHT = 32;
+
+/** Run splits laid out like the km splits on a running activity: one row each, bar length proportional to the slowest. Scrolls past five rows so a long session can't push the rest of the board off screen, and renders only the rows in view, since a capture can hold thousands. */
 export function Splits({
   rows,
   sort,
@@ -261,14 +266,19 @@ export function Splits({
   sort: SplitSort;
   onSortChange: (sort: SplitSort) => void;
 }) {
-  if (rows.length === 0) return <div className="chart__empty">No runs recorded yet.</div>;
+  const sorted = useMemo(
+    () =>
+      [...rows].sort((a, b) => {
+        if (sort === "time") return b.perPallet - a.perPallet;
+        if (sort === "steps") return b.steps - a.steps;
+        return a.index - b.index;
+      }),
+    [rows, sort],
+  );
+  const max = useMemo(() => rows.reduce((top, row) => Math.max(top, row.perPallet), 1), [rows]);
+  const view = useVirtualRows<HTMLDivElement>(sorted.length, SPLIT_ROW_HEIGHT);
 
-  const sorted = [...rows].sort((a, b) => {
-    if (sort === "time") return b.perPallet - a.perPallet;
-    if (sort === "steps") return b.steps - a.steps;
-    return a.index - b.index;
-  });
-  const max = Math.max(...rows.map((row) => row.perPallet), 1);
+  if (rows.length === 0) return <div className="chart__empty">No runs recorded yet.</div>;
 
   const header = (key: SplitSort, label: string) => (
     <button
@@ -288,8 +298,9 @@ export function Splits({
         <span className="splits__spacer" />
         {header("steps", "Steps")}
       </div>
-      <div className="splits__scroll">
-        {sorted.map((row) => (
+      <div className="splits__scroll" ref={view.ref} onScroll={view.onScroll}>
+        <div style={{ height: view.before }} />
+        {sorted.slice(view.first, view.last).map((row) => (
           <div className="splits__row" key={row.index} title={`${row.label} — ${formatDuration(row.totalTime)} total`}>
             <span className="splits__index">{row.index + 1}</span>
             <span className="splits__time">{formatDuration(row.perPallet)}</span>
@@ -306,6 +317,7 @@ export function Splits({
             <span className="splits__steps">{row.steps}</span>
           </div>
         ))}
+        <div style={{ height: view.after }} />
       </div>
     </div>
   );

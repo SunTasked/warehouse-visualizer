@@ -59,6 +59,10 @@ Both are listed under **Overview → Presets** and load in one click.
   and checked by `python scripts/check_plan.py schema/CML.plan.json`. The workbook itself
   lives in `data/`, which is gitignored — it carries real operational records. See
   specs.md §5.7 for how the plan is read.
+- **Thousands of lists** — `node scripts/generate_picking_lists.mjs --plan schema/CML.plan.json
+  --count 5000` writes 5,000 valid lists for a plan into `data/` (gitignored); load them with
+  **Overview → Load → Picking lists** and run them all. Lists are computed first, off the main
+  thread, behind a progress bar, then listed in the run console (specs.md §5.3).
 
 ## Planned stack
 

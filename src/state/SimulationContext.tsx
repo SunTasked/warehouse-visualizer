@@ -2,77 +2,61 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
   type MutableRefObject,
   type ReactNode,
 } from "react";
-import type { Point, Warehouse } from "../types/warehouse";
+import type { Point } from "../types/warehouse";
 import type { PickingList, PickingStop } from "../types/simulation";
-import { buildPathGraph, routeBetween, type PathGraph, type RouteEdge } from "../lib/pathGraph";
-import { slotEntryPoint, slotFacing } from "../lib/geometry";
-import type { LegProfile, StopHandling } from "../lib/timeModel";
+import {
+  RoutePlanner,
+  runRecord,
+  type BatchResult,
+  type Leg,
+  type RunRecord,
+  type StopEvent,
+  type WorkerReply,
+  type WorkerRequest,
+} from "../lib/runEngine";
 import { useEditor } from "./EditorContext";
 import { useViewFocus } from "./ViewFocusContext";
+
+export { heldPalletsAt } from "../lib/runEngine";
+export type { Leg, StopEvent } from "../lib/runEngine";
 
 export type PlaybackMode = "animated" | "static";
 
 /** How long a Next-step fast-forward takes to finish the leg it's on — short enough to click through a list quickly, long enough to still read as the forklift *driving* there. */
 export const FAST_FORWARD_SECONDS = 0.5;
 
-export interface Leg {
-  from: PickingStop;
-  to: PickingStop;
-  /** Route polyline for this leg, riding the path network (see src/lib/pathGraph.ts). */
-  points: Point[];
-  length: number;
-  /** Real-node-to-real-node hops this leg's route actually rides, in order — used to tally directed per-segment usage counts once the leg is traveled for real (see edgeUsage below). */
-  edges: RouteEdge[];
-}
-
-export type StopEvent =
-  | { type: "pick"; slotId: string }
-  | { type: "store"; slotId: string }
-  | { type: "deliver" }
-  | { type: "load" };
-
 /**
- * The step the operations list is currently hovered over (PickingListPanel).
+ * The step the operations list is currently hovered over (RunConsole).
  * The scene blinks both the stop's own slot/facility and the route leg that
  * arrives there, so a row, a place and a path all read as the same thing.
- *
- * The stop is stored resolved (rather than as a list+index pair) so a queued
- * list's declared stops blink too — those have no computed route yet, which
- * is exactly when `legIndex` is null.
  */
 export interface HoveredStep {
   stop: PickingStop;
-  /** Index into the active run's `legs` of the leg arriving at this stop — leg i runs stop i -> stop i+1, so arriving at stop k is leg k-1. Null for the first stop (nothing leads to it) and for not-yet-routed queued lists. */
+  /** Index into the active run's `legs` of the leg arriving at this stop — leg i runs stop i -> stop i+1, so arriving at stop k is leg k-1. Null for the first stop, and for a step of a run that isn't the one on screen. */
   legIndex: number | null;
 }
 
-/** One executed run kept in the capture's history — enough to re-display its route without re-running (or re-counting) it, and to score it (§5.5). */
-export interface CapturedRun {
+/** One run computed this session: what was worked and what it cost (§5.5). Its route isn't kept — see RunRecord. */
+export interface CapturedRun extends RunRecord {
   id: string;
-  list: PickingList;
-  stops: PickingStop[];
-  events: StopEvent[];
-  legs: Leg[];
-  /** Geometry-free per-leg profile for the time model — see LegProfile. */
-  profiles: LegProfile[];
-  /** What each stop cost to work, resolved against the inventory as it stood when this run was recorded. */
-  handling: StopHandling[];
-  /** Wall-clock time it was executed, for ordering and display. */
+  /** Wall-clock time its batch finished, for ordering and display. */
   at: number;
-  /** Whether this run fed the heatmaps. A run played with capture disarmed still belongs to the session (it is navigable, and it happened) — it just wasn't measured. */
+  /** Whether this run fed the heatmaps. A run computed with capture disarmed still belongs to the session (it is navigable, and it happened) — it just wasn't measured. */
   captured: boolean;
 }
 
+/** The run on screen: one of the session's runs, re-routed to be drawn and, with Animate on, driven. */
 export interface ActiveRun {
   list: PickingList;
   mode: PlaybackMode;
-  /** The list's own stops, with the forklift's home lift station prepended — see stopsWithDepot() below. */
+  /** The list's own stops, with the forklift's home lift station around them. */
   stops: PickingStop[];
   /** Parallel to `stops`. */
   events: StopEvent[];
@@ -82,14 +66,42 @@ export interface ActiveRun {
   currentLegIndex: number;
   /** Animated mode only — freezes the vehicle in place without losing progress. */
   isPaused: boolean;
-  /** Index into sessionRuns, so the run-navigation buttons know where they are. -1 while a run is still being set up. */
+  /** Index into sessionRuns, so the run-navigation buttons know where they are. */
   sessionIndex: number;
+}
+
+/** A batch of lists being routed in the worker. */
+export interface Computation {
+  done: number;
+  total: number;
+}
+
+/** How the last batch went — for the console's status line. */
+export interface BatchSummary {
+  id: number;
+  lists: number;
+  seconds: number;
+  emptyPicks: number;
+  unknownStops: string[];
+  error?: string;
 }
 
 interface SimulationContextValue {
   pickingLists: PickingList[];
+  /**
+   * Works lists through in the route worker: routes, stock and measurements
+   * for all of them, with `computation` reporting progress, then lands the
+   * lot at once — the session's runs, one stock change, the heatmaps if
+   * capture was armed. Resolves true once landed, false if cancelled or
+   * superseded. `show` puts the first run on screen when it lands (a single
+   * list's Play); a batch leaves the scene clear.
+   */
+  runLists: (lists: PickingList[], options?: { show?: boolean }) => Promise<boolean>;
+  computation: Computation | null;
+  cancelComputation: () => void;
+  lastBatch: BatchSummary | null;
   activeRun: ActiveRun | null;
-  /** Whether the forklift drives the route or it simply appears complete. A presentation choice on the play widget, not a property of the run: the route, the events and every metric are identical either way. */
+  /** Whether a shown run is driven by the forklift or drawn complete. A presentation choice: the route, the events and every metric are identical either way. */
   animate: boolean;
   setAnimate: (value: boolean) => void;
   /** Meters/second, animated mode only. */
@@ -100,54 +112,46 @@ interface SimulationContextValue {
   setFollow: (value: boolean) => void;
   /** Where the forklift is drawn right now, or null when there is none — written every frame by Forklift.tsx, so a ref, like progressRef. */
   vehiclePositionRef: MutableRefObject<Point | null>;
-  playList: (list: PickingList) => void;
-  playQueue: (lists: PickingList[]) => void;
+  /** Clears the scene of any route, and cancels a batch still computing. */
   stop: () => void;
   togglePause: () => void;
-  /** Jumps directly to a leg boundary (0..legs.length) — the slider's "each tick is a step". Stepping forward applies the events passed along the way; stepping backward only moves the displayed position (see the doc comment on goToStep itself for why). */
+  /** Jumps to a leg boundary (0..legs.length). Pure navigation: the run's stock changes landed with its batch. */
   goToStep: (target: number) => void;
   nextStep: () => void;
   previousStep: () => void;
-  showPanel: boolean;
-  setShowPanel: (value: boolean) => void;
   /** Distance traveled (meters) within the active run's current leg — a ref, not state, so the per-frame vehicle animation (Forklift.tsx) doesn't trigger a React re-render every frame. */
   progressRef: MutableRefObject<number>;
   /** Non-null while a Next-step fast-forward is in flight: the m/s that finishes the current leg's *remaining* distance in FAST_FORWARD_SECONDS. A ref for the same reason progressRef is. */
   fastForwardSpeedRef: MutableRefObject<number | null>;
-  /** Lists waiting behind the active run, so the operations list can show what's still coming ("list by list"). */
-  queuedLists: PickingList[];
-  /** Directed per-segment travel tallies keyed `"${nodeIdA}→${nodeIdB}"` — read by Paths.tsx for the path heatmap. Only accumulates while capture is armed. */
+  /** Directed per-segment travel tallies keyed `"${nodeKeyA}→${nodeKeyB}"` — read by Paths.tsx for the path heatmap. Only accumulates while capture is armed. */
   edgeUsage: Record<string, number>;
   /** Per-slot interaction tallies (one per pick or store) — read by SlotHeatmap.tsx. Only accumulates while capture is armed. */
   slotUsage: Record<string, number>;
-  /** While armed, every list played adds to both heatmaps; while off, runs play and animate but measure nothing. */
+  /** While armed, every batch computed adds to both heatmaps; while off, runs are computed and navigable but measure nothing. */
   captureArmed: boolean;
   setCaptureArmed: (value: boolean) => void;
-  /** Every run played this session in play order, whether or not capture was armed — what the run-navigation buttons walk. */
+  /** Every run computed this session, in order, whether or not capture was armed — what the order list and run navigation walk. */
   sessionRuns: CapturedRun[];
   /**
    * First index into `sessionRuns` the console's order list shows (§5.4).
-   * Starting a new batch or stopping resets it to "from here on", so the list
-   * is just what you last launched — *unless* capture is armed, in which case
-   * it stays put and the list accumulates as the record of the capture.
+   * A new batch or a stop resets it to "from here on", so the list is just
+   * what you last launched — *unless* capture is armed, in which case it
+   * stays put and the list accumulates as the record of the capture.
    */
   orderListStart: number;
   /** The subset of sessionRuns that fed the heatmaps — the record of what produced the current capture. */
   capturedRuns: CapturedRun[];
-  /** Re-displays a run already played this session, read-only: its route is drawn, but nothing is re-applied or re-counted. */
+  /** Puts a run of this session on screen: re-routed and drawn (driven, with Animate on), nothing re-applied or re-counted. */
   showSessionRun: (index: number) => void;
   nextRun: () => void;
   previousRun: () => void;
   canGoNextRun: boolean;
   canGoPreviousRun: boolean;
-  /** Discards the whole session — runs, heatmaps and the active run. Used when entering edit mode (see App). */
+  /** Discards the whole session — runs, heatmaps, the run on screen and any batch computing. Used when entering edit mode or loading another plant. */
   clearSession: () => void;
-  /** Which captured run is being re-displayed in the scene (read-only; it is not re-executed and does not re-count). */
-  reviewedRunId: string | null;
-  reviewRun: (id: string | null) => void;
   /** Wipes both heatmaps and the run history, leaving inventory alone. */
   clearCapture: () => void;
-  /** Reverts every simulated pallet mutation via the editor's own undo history, leaving the captured heatmaps alone — so stock can be restored mid-capture without losing the measurement. */
+  /** Reverts every simulated pallet move via the editor's own undo history, leaving the captured heatmaps alone — so stock can be restored mid-capture without losing the measurement. */
   resetWarehouse: () => void;
   hoveredStep: HoveredStep | null;
   setHoveredStep: (value: HoveredStep | null) => void;
@@ -155,236 +159,40 @@ interface SimulationContextValue {
 
 const SimulationContext = createContext<SimulationContextValue | null>(null);
 
-function totalLength(points: Point[]): number {
-  let sum = 0;
-  for (let i = 0; i < points.length - 1; i++) {
-    sum += Math.hypot(points[i + 1].x - points[i].x, points[i + 1].y - points[i].y);
-  }
-  return sum;
+/** A batch sent to the worker and not yet back. */
+interface PendingBatch {
+  jobId: number;
+  /** The lists sent, which the worker's costs are matched back to by position. */
+  lists: PickingList[];
+  /** The home lift station they were routed from. */
+  homeId: string | undefined;
+  show: boolean;
+  captured: boolean;
+  startedAt: number;
+  resolve: (completed: boolean) => void;
 }
 
-/**
- * The forklift always starts *and* ends its journey at its home lift station
- * (per user feedback) — prepended/appended as extra depot stops around
- * whatever the list itself contains. Skips the trailing append when the list
- * already ends there itself (avoids a zero-length final leg). Falls back to
- * the list's own stops unchanged if the warehouse has no lift station at all.
- */
-function stopsWithDepot(list: PickingList, warehouse: Warehouse): PickingStop[] {
-  const home = warehouse.liftStations[0];
-  if (!home) return list.stops;
-  const homeStop: PickingStop = { kind: "depot", id: home.id };
-  const last = list.stops[list.stops.length - 1];
-  const alreadyEndsAtHome = last && last.kind === "depot" && last.id === home.id;
-  return [homeStop, ...list.stops, ...(alreadyEndsAtHome ? [] : [homeStop])];
-}
-
-/**
- * What happens at each stop, in order: picking removes a real pallet at a
- * slot stop and delivers everything held at a depot stop; storing loads up
- * to 3 synthetic pallets at a depot stop (only as many as the next
- * consecutive batch of slot stops actually needs) and stores one at each
- * slot stop. See specs.md §5.3. Operates on the *effective* (depot-
- * prepended) stop list, not the list's own raw `stops` — the prepended
- * lift-station stop is just an ordinary depot stop under this same logic
- * (a picking run's first "deliver" is a no-op since nothing is held yet; a
- * storing run's prepended stop loads 0 since the very next stop is itself
- * a depot, and the *real* load happens there).
- */
-function planEvents(stops: PickingStop[], mode: PickingList["mode"]): StopEvent[] {
-  const events: StopEvent[] = [];
-  if (mode === "picking") {
-    for (const stop of stops) {
-      events.push(stop.kind === "slot" ? { type: "pick", slotId: stop.id } : { type: "deliver" });
-    }
-  } else {
-    for (const stop of stops) {
-      events.push(stop.kind === "slot" ? { type: "store", slotId: stop.id } : { type: "load" });
-    }
-  }
-  return events;
-}
-
-/** Capacity a storing run loads up to at a depot — matches the hard 3-pallet limit the lists are authored against (specs.md §5.3). */
-const FORKLIFT_CAPACITY = 3;
-
-/** A turn sharp enough to cost the forklift time — anything gentler is taken in stride. */
-const TURN_COS_THRESHOLD = Math.cos(Math.PI / 6); // 30°
-
-/** Reduces a leg's polyline to straight-run lengths and a turn count, the only geometry the time model needs (see LegProfile). */
-function legProfile(points: Point[]): LegProfile {
-  const segmentLengths: number[] = [];
-  const directions: Array<{ x: number; y: number }> = [];
-
-  for (let i = 0; i < points.length - 1; i++) {
-    const dx = points[i + 1].x - points[i].x;
-    const dy = points[i + 1].y - points[i].y;
-    const length = Math.hypot(dx, dy);
-    if (length <= 1e-6) continue;
-    segmentLengths.push(length);
-    directions.push({ x: dx / length, y: dy / length });
-  }
-
-  let turns = 0;
-  for (let i = 1; i < directions.length; i++) {
-    const dot = directions[i - 1].x * directions[i].x + directions[i - 1].y * directions[i].y;
-    if (dot < TURN_COS_THRESHOLD) turns += 1;
-  }
-
-  return { segmentLengths, turns };
-}
-
-/**
- * Works out what each stop of a run actually costs to handle, by replaying
- * the run's picks and puts against a lightweight copy of the affected slots'
- * pallet counts — mirroring EditorContext's own pickPalletAuto (front-most
- * non-empty sub-slot, topmost pallet) and addPalletAuto (fewest pallets,
- * ties toward the deepest).
- *
- * Resolved once at record time rather than read back from the live warehouse,
- * because by the time anyone opens the analytics board the inventory has
- * moved on — and a run's cost is a fact about the state it ran against.
- */
-function resolveHandling(
-  stops: PickingStop[],
-  events: StopEvent[],
-  warehouse: Warehouse,
-): StopHandling[] {
-  const counts = new Map<string, number[]>();
-  const countsFor = (slotId: string): number[] => {
-    if (!counts.has(slotId)) {
-      const slot = warehouse.slots.find((s) => s.id === slotId);
-      counts.set(slotId, (slot?.subSlots ?? [{ pallets: [] }]).map((ss) => ss.pallets.length));
-    }
-    return counts.get(slotId)!;
-  };
-
-  let held = 0;
-
-  return events.map((event, index) => {
-    if (event.type === "pick") {
-      const tiers = countsFor(event.slotId);
-      const subSlotIndex = tiers.findIndex((count) => count > 0);
-      if (subSlotIndex === -1) return { kind: "none" };
-      const tierIndex = tiers[subSlotIndex] - 1;
-      tiers[subSlotIndex] -= 1;
-      held += 1;
-      return { kind: "pick", subSlotIndex, tierIndex };
-    }
-
-    if (event.type === "store") {
-      const tiers = countsFor(event.slotId);
-      let target = 0;
-      let fewest = Infinity;
-      tiers.forEach((count, i) => {
-        if (count <= fewest) {
-          fewest = count;
-          target = i; // later (deeper) indices win ties, as addPalletAuto does
-        }
-      });
-      const tierIndex = tiers[target];
-      tiers[target] += 1;
-      held = Math.max(0, held - 1);
-      return { kind: "store", subSlotIndex: target, tierIndex };
-    }
-
-    if (event.type === "deliver") {
-      const pallets = held;
-      held = 0;
-      return { kind: "deliver", pallets };
-    }
-
-    const pallets = loadAmountAt(stops, index);
-    held = pallets;
-    return { kind: "load", pallets };
-  });
-}
-
-/** How many pallets a `load` at `stopIndex` takes on: only as many as the run's next unbroken batch of slot stops will actually consume, capped at capacity, so the forklift is never drawn carrying more than it needs. */
-function loadAmountAt(stops: PickingStop[], stopIndex: number): number {
-  let needed = 0;
-  for (let i = stopIndex + 1; i < stops.length && stops[i].kind === "slot"; i++) needed++;
-  return Math.min(FORKLIFT_CAPACITY, needed);
-}
-
-/**
- * What the forklift is carrying once it has finished everything up to and
- * including `stopIndex` — i.e. what it hauls along the leg leaving that stop.
- * Replayed from the run's own events rather than tracked as mutable state, so
- * it stays correct however the run was navigated (played, stepped, or
- * scrubbed back and forth).
- */
-export function heldPalletsAt(run: ActiveRun, stopIndex: number): number {
-  let held = 0;
-  for (let i = 0; i <= stopIndex && i < run.events.length; i++) {
-    const event = run.events[i];
-    if (event.type === "pick") held += 1;
-    else if (event.type === "store") held = Math.max(0, held - 1);
-    else if (event.type === "deliver") held = 0;
-    else if (event.type === "load") held = loadAmountAt(run.stops, i);
-  }
-  return held;
-}
-
-function stopPoint(stop: PickingStop, warehouse: Warehouse): Point | null {
-  if (stop.kind === "slot") {
-    const slot = warehouse.slots.find((s) => s.id === stop.id);
-    return slot ? slotEntryPoint(slot, warehouse.slotDefaults) : null;
-  }
-  const lift = warehouse.liftStations.find((l) => l.id === stop.id);
-  if (lift) return { x: lift.x, y: lift.y };
-  const delivery = warehouse.deliverySpaces.find((d) => d.id === stop.id);
-  if (delivery) return { x: delivery.x, y: delivery.y };
-  return null;
-}
-
-/** A slot stop's facing, so its leg joins the aisle the slot opens onto (see pathGraph's connectPoint); facilities have none. */
-function stopFacing(stop: PickingStop, warehouse: Warehouse): Point | undefined {
-  if (stop.kind !== "slot") return undefined;
-  const slot = warehouse.slots.find((s) => s.id === stop.id);
-  return slot ? slotFacing(slot) : undefined;
-}
-
-function buildLegs(stops: PickingStop[], warehouse: Warehouse, graph: PathGraph): Leg[] {
-  const legs: Leg[] = [];
-  for (let i = 0; i < stops.length - 1; i++) {
-    const from = stops[i];
-    const to = stops[i + 1];
-    const fromPoint = stopPoint(from, warehouse);
-    const toPoint = stopPoint(to, warehouse);
-    if (!fromPoint || !toPoint) {
-      console.warn(`SimulationContext: unresolved stop (${from.id} -> ${to.id})`);
-      continue;
-    }
-    const route = routeBetween(graph, fromPoint, toPoint, stopFacing(from, warehouse), stopFacing(to, warehouse));
-    legs.push({ from, to, points: route.points, length: totalLength(route.points), edges: route.edges });
-  }
-  return legs;
+function addCounts(current: Record<string, number>, extra: Record<string, number>): Record<string, number> {
+  const next = { ...current };
+  for (const key in extra) next[key] = (next[key] ?? 0) + extra[key];
+  return next;
 }
 
 export function SimulationProvider({ children }: { children: ReactNode }) {
   const editor = useEditor();
+  const { warehouse } = editor;
   const { revealPlant } = useViewFocus();
   const [activeRun, setActiveRun] = useState<ActiveRun | null>(null);
   // Off by default: showing a route complete is the quicker read, and the
-  // metrics are identical either way — animation is something you turn on to
-  // watch a particular run, not the normal way to play a batch.
+  // metrics are identical either way.
   const [animate, setAnimateState] = useState(false);
-  /**
-   * Mirrors `animate` for playNext to read. Unticking mid-run finishes the
-   * current run *synchronously*, which starts the next queued list before
-   * React has re-rendered — so the state value would still be the old one and
-   * the rest of the batch would animate after all.
-   */
+  /** Mirrors `animate` for a batch landing with `show`, which reads it outside a render. */
   const animateRef = useRef(animate);
   const [speed, setSpeed] = useState(2); // m/s — a plausible forklift travel speed
   const [follow, setFollow] = useState(false);
   const vehiclePositionRef = useRef<Point | null>(null);
-  const [showPanel, setShowPanel] = useState(false);
-  // Directed per-segment travel tallies for the path heatmap (Paths.tsx) —
-  // keyed `"${nodeIdA}→${nodeIdB}"` (RouteEdge's own ids, already the same
-  // convention pathGraph.ts's nodeKey/edgeKey use), so a corridor traveled
-  // one way and back is two independent counts, not one merged total.
+  // Directed per-segment travel tallies for the path heatmap (Paths.tsx), so
+  // a corridor traveled one way and back is two independent counts.
   const [edgeUsage, setEdgeUsage] = useState<Record<string, number>>({});
   // One tally per pick or store at a slot, for the slot heatmap
   // (SlotHeatmap.tsx) — answers "is load balanced across the racks", which
@@ -392,10 +200,10 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   const [slotUsage, setSlotUsage] = useState<Record<string, number>>({});
   const [captureArmed, setCaptureArmedState] = useState(false);
   /**
-   * Mirrors `captureArmed` for recordRun and beginOrderList, for the same
-   * reason animateRef exists: the capture prompt's "Run without capturing"
-   * disarms and launches in one click, before React re-renders, and reading
-   * the state would still find capture armed and measure the run after all.
+   * Mirrors `captureArmed` for runLists and beginOrderList: the capture
+   * prompt's "Run without capturing" disarms and launches in one click,
+   * before React re-renders, and reading the state would still find capture
+   * armed and measure the batch after all.
    */
   const captureArmedRef = useRef(captureArmed);
   const setCaptureArmed = useCallback((value: boolean) => {
@@ -404,164 +212,54 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
   }, []);
   const [sessionRuns, setSessionRuns] = useState<CapturedRun[]>([]);
   const [orderListStart, setOrderListStart] = useState(0);
-  const [reviewedRunId, setReviewedRunId] = useState<string | null>(null);
-  const [queuedLists, setQueuedLists] = useState<PickingList[]>([]);
+  const [computation, setComputation] = useState<Computation | null>(null);
+  const [lastBatch, setLastBatch] = useState<BatchSummary | null>(null);
   const [hoveredStep, setHoveredStep] = useState<HoveredStep | null>(null);
   const progressRef = useRef(0);
   const fastForwardSpeedRef = useRef<number | null>(null);
-  const queueRef = useRef<PickingList[]>([]);
-  /** Next index into sessionRuns — see recordRun for why this can't be read off the state. */
+  /** Next index into sessionRuns — known before the state catches up, so a landing batch can number its runs. */
   const sessionCountRef = useRef(0);
 
-  // queueRef stays the source of truth (it's mutated synchronously mid-run,
-  // where a state value would be a render behind); this mirrors it into state
-  // purely so the panel can render what's still coming.
-  const syncQueuedLists = useCallback(() => {
-    setQueuedLists([...queueRef.current]);
+  const workerRef = useRef<Worker | null>(null);
+  const pendingRef = useRef<PendingBatch | null>(null);
+  const jobCounterRef = useRef(0);
+  const replyHandlerRef = useRef<(reply: WorkerReply) => void>(() => {});
+
+  // Showing a run routes it again on this thread, with the same planner the
+  // worker builds: same corridors, same slot positions, so the same route.
+  const planner = useMemo(
+    () =>
+      new RoutePlanner({
+        paths: warehouse.paths,
+        slots: warehouse.slots,
+        liftStations: warehouse.liftStations,
+        deliverySpaces: warehouse.deliverySpaces,
+        slotDefaults: warehouse.slotDefaults,
+      }),
+    [warehouse.paths, warehouse.slots, warehouse.liftStations, warehouse.deliverySpaces, warehouse.slotDefaults],
+  );
+
+  const getWorker = useCallback((): Worker => {
+    if (!workerRef.current) {
+      const worker = new Worker(new URL("../workers/runWorker.ts", import.meta.url), { type: "module" });
+      worker.onmessage = (event: MessageEvent<WorkerReply>) => replyHandlerRef.current(event.data);
+      worker.onerror = (event) => {
+        event.preventDefault();
+        const jobId = pendingRef.current?.jobId ?? -1;
+        replyHandlerRef.current({ type: "error", jobId, message: event.message || "the route worker failed" });
+      };
+      workerRef.current = worker;
+    }
+    return workerRef.current;
   }, []);
 
-  const graph = useMemo(() => buildPathGraph(editor.warehouse.paths), [editor.warehouse.paths]);
-
-  const applyEvent = useCallback(
-    (event: StopEvent) => {
-      if (event.type === "pick") editor.pickPalletAuto(event.slotId);
-      else if (event.type === "store") editor.addPalletAuto(event.slotId);
-      // "deliver"/"load" have no data-model effect: delivered pallets simply
-      // leave the simulation, and loaded ones are synthetic (a delivery
-      // space carries no tracked inventory to remove them from).
+  useEffect(
+    () => () => {
+      workerRef.current?.terminate();
+      workerRef.current = null;
     },
-    [editor],
+    [],
   );
-
-  /**
-   * Commits a whole run's measurements at once, the moment its route is
-   * computed — deliberately *not* leg-by-leg as the forklift arrives.
-   * Measurement is a property of the route, which is fully known upfront;
-   * the animation is a presentation of that route, not the thing being
-   * measured. So a heatmap reads the same whether the run was played
-   * animated, played static, or stepped through by hand, and it doesn't
-   * creep upward while someone is watching the truck drive. Inventory is
-   * the opposite case and still applies on arrival (see applyEvent's
-   * callers) — watching stock change as the forklift reaches each slot is
-   * the point of the animation.
-   *
-   * Every run joins the session either way — it happened, and the run
-   * navigation walks it. Only an armed capture also feeds the heatmaps:
-   * playing a list to demo it shouldn't silently contaminate a measurement.
-   *
-   * Returns the session index the run landed at, so the active run can point
-   * back at its own record.
-   */
-  const recordRun = useCallback(
-    (list: PickingList, stops: PickingStop[], legs: Leg[], events: StopEvent[]): number => {
-      const captured = captureArmedRef.current;
-      const profiles = legs.map((leg) => legProfile(leg.points));
-      const handling = resolveHandling(stops, events, editor.warehouse);
-      // A ref, not current.length inside the updater: that updater runs
-      // during the next render, so anything it assigns is still unset by the
-      // time this function returns the index to its caller.
-      const index = sessionCountRef.current;
-      sessionCountRef.current += 1;
-      setSessionRuns((current) => {
-        return [
-          ...current,
-          {
-            id: `${list.id}-${Date.now()}-${current.length}`,
-            list,
-            stops,
-            events,
-            legs,
-            profiles,
-            handling,
-            at: Date.now(),
-            captured,
-          },
-        ];
-      });
-
-      if (!captured) return index;
-
-      setEdgeUsage((current) => {
-        const next = { ...current };
-        for (const leg of legs) {
-          for (const edge of leg.edges) {
-            const key = `${edge.a}→${edge.b}`;
-            next[key] = (next[key] ?? 0) + 1;
-          }
-        }
-        return next;
-      });
-
-      setSlotUsage((current) => {
-        const next = { ...current };
-        for (const event of events) {
-          if (event.type !== "pick" && event.type !== "store") continue;
-          next[event.slotId] = (next[event.slotId] ?? 0) + 1;
-        }
-        return next;
-      });
-
-      return index;
-    },
-    [editor.warehouse],
-  );
-
-  // playNext calls itself (directly for static-mode's immediate completion
-  // path, deferred via setTimeout for queue chaining below) — always
-  // through this ref, never the closed-over `playNext` binding, so a
-  // deferred call picks up the *current* warehouse/graph state (post the
-  // mutations this same call just applied) rather than the stale snapshot
-  // captured when the timeout was scheduled.
-  const playNextRef = useRef<() => void>(() => {});
-
-  const playNext = useCallback(() => {
-    const list = queueRef.current.shift();
-    syncQueuedLists();
-    setReviewedRunId(null); // a live run supersedes whatever was being reviewed
-    if (!list) {
-      setActiveRun(null);
-      return;
-    }
-    // Don't let a cross-building route get truncated by per-building
-    // visibility (§5.1) — but leave the camera where the user put it.
-    revealPlant();
-
-    const stops = stopsWithDepot(list, editor.warehouse);
-    const events = planEvents(stops, list.mode);
-    const legs = buildLegs(stops, editor.warehouse, graph);
-
-    // The whole run's measurement lands here, before a wheel has turned —
-    // see recordRun's doc comment.
-    const sessionIndex = recordRun(list, stops, legs, events);
-
-    if (!animateRef.current) {
-      for (const event of events) applyEvent(event);
-      setActiveRun({ list, mode: "static", stops, events, legs, currentLegIndex: legs.length, isPaused: false, sessionIndex });
-      // Static runs finish synchronously — pause briefly before the next
-      // queued list so each one is actually visible, rather than only the
-      // last one ever appearing on screen.
-      if (queueRef.current.length > 0) setTimeout(() => playNextRef.current(), 600);
-      return;
-    }
-
-    // Animated: stop 0's event applies immediately (the forklift "starts"
-    // already there — now always the home lift station); each subsequent
-    // stop's event applies on arrival, via goToStep below.
-    applyEvent(events[0]);
-    progressRef.current = 0;
-    fastForwardSpeedRef.current = null;
-    if (legs.length === 0) {
-      // A single-stop (or fully unresolved) list has nothing to animate —
-      // nothing would ever call goToStep to finish/advance the queue, so do
-      // it here instead.
-      if (queueRef.current.length > 0) playNextRef.current();
-      else setActiveRun(null);
-      return;
-    }
-    setActiveRun({ list, mode: "animated", stops, events, legs, currentLegIndex: 0, isPaused: false, sessionIndex });
-  }, [applyEvent, recordRun, editor.warehouse, graph, revealPlant, syncQueuedLists]);
-
-  playNextRef.current = playNext;
 
   /**
    * Marks where the console's order list starts. A fresh batch (or a stop)
@@ -572,38 +270,157 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     if (!captureArmedRef.current) setOrderListStart(sessionCountRef.current);
   }, []);
 
-  const playList = useCallback(
-    (list: PickingList) => {
-      beginOrderList();
-      queueRef.current = [list];
-      playNext();
+  const showRun = useCallback(
+    (record: RunRecord, sessionIndex: number) => {
+      // Don't let a cross-building route get truncated by per-building
+      // visibility (§5.1) — but leave the camera where the user put it.
+      revealPlant();
+      const legs = planner.legs(record.stops);
+      progressRef.current = 0;
+      fastForwardSpeedRef.current = null;
+      const animated = animateRef.current && legs.length > 0;
+      setActiveRun({
+        list: record.list,
+        mode: animated ? "animated" : "static",
+        stops: record.stops,
+        events: record.events,
+        legs,
+        currentLegIndex: animated ? 0 : legs.length,
+        isPaused: false,
+        sessionIndex,
+      });
     },
-    [beginOrderList, playNext],
+    [planner, revealPlant],
   );
 
-  const playQueue = useCallback(
-    (lists: PickingList[]) => {
-      beginOrderList();
-      queueRef.current = [...lists];
-      playNext();
+  /** A finished batch, landed at once: its runs join the session, its stock is one history entry, its tallies join the heatmaps. */
+  const landBatch = (pending: PendingBatch, result: BatchResult) => {
+    const at = Date.now();
+    beginOrderList();
+    const first = sessionCountRef.current;
+    const records: CapturedRun[] = result.runs.map((cost, i) => ({
+      ...runRecord(pending.lists[i], pending.homeId, cost),
+      id: `${pending.lists[i].id}-${at}-${first + i}`,
+      at,
+      captured: pending.captured,
+    }));
+    sessionCountRef.current += records.length;
+    setSessionRuns((current) => [...current, ...records]);
+
+    if (Object.keys(result.stock).length > 0) {
+      editor.applySimulatedStock(
+        result.stock,
+        records.length === 1 ? `Run ${records[0].list.label}` : `Run ${records.length.toLocaleString("en-US")} picking lists`,
+      );
+    }
+    if (pending.captured) {
+      setEdgeUsage((current) => addCounts(current, result.edgeUsage));
+      setSlotUsage((current) => addCounts(current, result.slotUsage));
+    }
+    // One line for the whole batch, rather than one warning per stop.
+    if (result.emptyPicks > 0) console.warn(`${result.emptyPicks} pick(s) found their slot empty and were skipped`);
+    if (result.unknownStops.length > 0) console.warn(`Stops not in this plan, skipped: ${result.unknownStops.join(", ")}`);
+
+    setLastBatch({
+      id: pending.jobId,
+      lists: records.length,
+      seconds: (performance.now() - pending.startedAt) / 1000,
+      emptyPicks: result.emptyPicks,
+      unknownStops: result.unknownStops,
+    });
+    if (pending.show && records.length > 0) showRun(records[0], first);
+  };
+
+  // Reassigned every render, so a reply always lands on the current warehouse
+  // and session rather than whatever was current when the worker was made.
+  replyHandlerRef.current = (reply: WorkerReply) => {
+    const pending = pendingRef.current;
+    if (!pending || reply.jobId !== pending.jobId) return; // cancelled or superseded
+    if (reply.type === "progress") {
+      setComputation({ done: reply.done, total: reply.total });
+      return;
+    }
+    pendingRef.current = null;
+    setComputation(null);
+    if (reply.type === "error") {
+      console.error(`Route computation failed: ${reply.message}`);
+      setLastBatch({
+        id: pending.jobId,
+        lists: pending.lists.length,
+        seconds: (performance.now() - pending.startedAt) / 1000,
+        emptyPicks: 0,
+        unknownStops: [],
+        error: reply.message,
+      });
+      pending.resolve(false);
+      return;
+    }
+    landBatch(pending, reply.result);
+    pending.resolve(true);
+  };
+
+  const cancelComputation = useCallback(() => {
+    const pending = pendingRef.current;
+    if (!pending) return;
+    pendingRef.current = null;
+    workerRef.current?.postMessage({ type: "cancel", jobId: pending.jobId } satisfies WorkerRequest);
+    setComputation(null);
+    pending.resolve(false);
+  }, []);
+
+  const runLists = useCallback(
+    (lists: PickingList[], options: { show?: boolean } = {}): Promise<boolean> => {
+      if (lists.length === 0) return Promise.resolve(false);
+      cancelComputation();
+      const jobId = ++jobCounterRef.current;
+      fastForwardSpeedRef.current = null;
+      setActiveRun(null);
+      setComputation({ done: 0, total: lists.length });
+      const request: WorkerRequest = {
+        type: "run",
+        jobId,
+        layout: {
+          paths: warehouse.paths,
+          slots: warehouse.slots,
+          liftStations: warehouse.liftStations,
+          deliverySpaces: warehouse.deliverySpaces,
+          slotDefaults: warehouse.slotDefaults,
+        },
+        lists,
+        capture: captureArmedRef.current,
+      };
+      return new Promise<boolean>((resolve) => {
+        const pending: PendingBatch = {
+          jobId,
+          lists,
+          homeId: warehouse.liftStations[0]?.id,
+          show: options.show ?? false,
+          captured: captureArmedRef.current,
+          startedAt: performance.now(),
+          resolve,
+        };
+        pendingRef.current = pending;
+        try {
+          getWorker().postMessage(request);
+        } catch (error) {
+          replyHandlerRef.current({ type: "error", jobId, message: error instanceof Error ? error.message : String(error) });
+        }
+      });
     },
-    [beginOrderList, playNext],
+    [warehouse, cancelComputation, getWorker],
   );
 
   /**
-   * Clears the scene of any route — the active run, the queue behind it and
-   * whatever was being reviewed. The order list follows the same armed/not
-   * rule as starting a batch: stopping mid-capture must not throw away the
-   * record of what has been measured so far.
+   * Clears the scene of any route, and cancels a batch still computing. The
+   * order list follows the same armed/not rule as starting a batch: stopping
+   * mid-capture must not throw away the record of what has been measured.
    */
   const stop = useCallback(() => {
-    queueRef.current = [];
+    cancelComputation();
     fastForwardSpeedRef.current = null;
     setActiveRun(null);
-    setQueuedLists([]);
-    setReviewedRunId(null);
     beginOrderList();
-  }, [beginOrderList]);
+  }, [cancelComputation, beginOrderList]);
 
   const togglePause = useCallback(() => {
     setActiveRun((run) => (run ? { ...run, isPaused: !run.isPaused } : run));
@@ -611,54 +428,31 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
 
   /**
    * The single function behind natural leg completion (Forklift.tsx's
-   * useFrame driver calling goToStep(current + 1) on arrival), the panel's
-   * transport buttons, and clicking a row in the operations list. Moving
-   * *forward* applies every leg's arrival event along the way, exactly as if
-   * the vehicle had actually traveled there. Moving *backward* only
-   * repositions the displayed vehicle; it does not undo any pallet mutation
-   * already applied. There's no general undo for "which exact pallet was
-   * picked" to reverse, so scrubbing back is a navigation aid for reviewing
-   * the route, not a replay/rewind of warehouse state.
-   *
-   * Heatmaps are deliberately untouched here — a run's measurement is
-   * committed once, upfront (see captureRun), so stepping back and forth
-   * through the same legs can't inflate it.
+   * useFrame driver calling goToStep(current + 1) on arrival), the transport
+   * buttons, and clicking a step in the order list. Pure navigation, in either
+   * direction: a run's picks and stores were applied when its batch landed,
+   * so driving, stepping or scrubbing through it changes nothing but where
+   * the forklift is drawn.
    */
-  const goToStep = useCallback(
-    (target: number) => {
-      if (!activeRun) return;
-      const clamped = Math.max(0, Math.min(activeRun.legs.length, target));
-      if (clamped > activeRun.currentLegIndex) {
-        for (let i = activeRun.currentLegIndex; i < clamped; i++) {
-          const arrivalEvent = activeRun.events[i + 1]; // leg i ends at stop i+1
-          if (arrivalEvent) applyEvent(arrivalEvent);
-        }
-      }
-      progressRef.current = 0;
-      fastForwardSpeedRef.current = null;
-      if (clamped >= activeRun.legs.length && queueRef.current.length > 0) {
-        playNextRef.current();
-      } else {
-        setActiveRun({ ...activeRun, currentLegIndex: clamped });
-      }
-    },
-    [activeRun, applyEvent],
-  );
+  const goToStep = useCallback((target: number) => {
+    progressRef.current = 0;
+    fastForwardSpeedRef.current = null;
+    setActiveRun((run) =>
+      run ? { ...run, currentLegIndex: Math.max(0, Math.min(run.legs.length, target)) } : run,
+    );
+  }, []);
 
   /**
    * Next *drives* to the following stop rather than teleporting to it: it
    * sets the speed that covers whatever's left of the current leg in
    * FAST_FORWARD_SECONDS, and the vehicle's own useFrame (Forklift.tsx)
    * completes the leg from there, arriving through the normal goToStep path.
-   * Keeps the forklift's movement continuous — you can see *where* it went,
-   * not just that the marker moved — while still being quick enough to click
-   * through a list. Falls back to a plain jump when there's nothing being
-   * animated (static runs, or an already-finished one).
+   * Falls back to a plain jump when nothing is being animated.
    */
   const nextStep = useCallback(() => {
     const run = activeRun;
     if (!run || run.mode !== "animated" || run.currentLegIndex >= run.legs.length) {
-      goToStep((activeRun?.currentLegIndex ?? 0) + 1);
+      goToStep((run?.currentLegIndex ?? 0) + 1);
       return;
     }
     const remaining = Math.max(0, run.legs[run.currentLegIndex].length - progressRef.current);
@@ -680,12 +474,12 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     setSessionRuns([]);
     sessionCountRef.current = 0;
     setOrderListStart(0);
-    setReviewedRunId(null);
+    setActiveRun(null);
   }, []);
 
-  /** Everything the session holds: runs, heatmaps, whatever is on screen. Entering edit mode does this — the routes were computed against a layout that's about to change, so keeping them would mean scoring runs that could no longer happen. */
+  /** Everything the session holds. Entering edit mode does this — the routes were computed against a layout that's about to change, so keeping them would mean scoring runs that could no longer happen. */
   const clearSession = useCallback(() => {
-    queueRef.current = [];
+    cancelComputation();
     fastForwardSpeedRef.current = null;
     progressRef.current = 0;
     setSessionRuns([]);
@@ -693,126 +487,76 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     setOrderListStart(0);
     setEdgeUsage({});
     setSlotUsage({});
-    setQueuedLists([]);
     setActiveRun(null);
-    setReviewedRunId(null);
+    setLastBatch(null);
     setCaptureArmed(false);
-  }, [setCaptureArmed]);
+  }, [cancelComputation, setCaptureArmed]);
 
-  /**
-   * Re-displays a run already played this session without re-executing it —
-   * reviewing what happened must not change what happened. Drawn as a
-   * finished static run: the whole route visible, nothing animating, no
-   * events applied and nothing counted.
-   */
   const showSessionRun = useCallback(
     (index: number) => {
-      const recorded = sessionRuns[index];
-      if (!recorded) return;
-      queueRef.current = [];
-      fastForwardSpeedRef.current = null;
-      progressRef.current = 0;
-      setQueuedLists([]);
-      setReviewedRunId(recorded.id);
-      setActiveRun({
-        list: recorded.list,
-        mode: "static",
-        stops: recorded.stops,
-        events: recorded.events,
-        legs: recorded.legs,
-        currentLegIndex: recorded.legs.length,
-        isPaused: false,
-        sessionIndex: index,
-      });
+      const record = sessionRuns[index];
+      if (record) showRun(record, index);
     },
-    [sessionRuns],
+    [sessionRuns, showRun],
   );
 
-  const reviewRun = useCallback(
-    (id: string | null) => {
-      if (id === null) {
-        setReviewedRunId(null);
-        return;
-      }
-      const index = sessionRuns.findIndex((entry) => entry.id === id);
-      if (index >= 0) showSessionRun(index);
-    },
-    [sessionRuns, showSessionRun],
-  );
-
-  // Run navigation walks the whole session in play order, then spills into
-  // the queue: going forward past the last played run starts the next one
-  // waiting, so ⏭ reads as "the run after this one" whether that run has
-  // happened yet or not.
   const currentRunIndex = activeRun?.sessionIndex ?? -1;
   const canGoPreviousRun = currentRunIndex > 0;
-  const canGoNextRun = currentRunIndex >= 0 && (currentRunIndex < sessionRuns.length - 1 || queueRef.current.length > 0);
+  const canGoNextRun = currentRunIndex >= 0 && currentRunIndex < sessionRuns.length - 1;
 
   const previousRun = useCallback(() => {
     if (currentRunIndex > 0) showSessionRun(currentRunIndex - 1);
   }, [currentRunIndex, showSessionRun]);
 
   const nextRun = useCallback(() => {
-    if (currentRunIndex >= 0 && currentRunIndex < sessionRuns.length - 1) {
-      showSessionRun(currentRunIndex + 1);
-      return;
-    }
-    if (queueRef.current.length > 0) playNextRef.current();
+    if (currentRunIndex >= 0 && currentRunIndex < sessionRuns.length - 1) showSessionRun(currentRunIndex + 1);
   }, [currentRunIndex, sessionRuns.length, showSessionRun]);
 
   /**
-   * Animate is a presentation choice, so flipping it never recomputes a
-   * route. Turning it off mid-run finishes the run where it stands —
-   * applying the stock changes it hadn't reached yet, because the run did
-   * happen — and everything still queued behind it plays out complete too
-   * (hence animateRef, which the queue reads before React re-renders).
-   * Turning it back on re-drives the same route from the start as pure
-   * playback: the events already applied, so nothing lands twice.
+   * Animate is a presentation choice, so flipping it never recomputes
+   * anything. Turning it off shows the run on screen complete; turning it on
+   * drives that same route from the start.
    */
-  const setAnimate = useCallback(
-    (value: boolean) => {
-      animateRef.current = value;
-      setAnimateState(value);
-      const run = activeRun;
-      if (!run) return;
-
-      if (!value) {
-        if (run.currentLegIndex < run.legs.length) goToStep(run.legs.length);
-        return;
-      }
-      progressRef.current = 0;
-      fastForwardSpeedRef.current = null;
-      setActiveRun({ ...run, mode: "animated", currentLegIndex: 0, isPaused: false });
-    },
-    [activeRun, goToStep],
-  );
+  const setAnimate = useCallback((value: boolean) => {
+    animateRef.current = value;
+    setAnimateState(value);
+    progressRef.current = 0;
+    fastForwardSpeedRef.current = null;
+    setActiveRun((run) => {
+      if (!run) return run;
+      if (!value) return { ...run, mode: "static", currentLegIndex: run.legs.length, isPaused: false };
+      return run.legs.length > 0 ? { ...run, mode: "animated", currentLegIndex: 0, isPaused: false } : run;
+    });
+  }, []);
 
   /**
-   * Discards the simulation's pallet mutations by stepping the editor's own
-   * history back over them (revertSimulation) — reusing the undo system
-   * rather than a separate snapshot, since every pick/store this simulation
-   * makes already flows through it, tagged as such. Stops at the first entry
-   * that wasn't a simulated move, so layout edits made before the runs
-   * survive a reset, and the unsaved-changes indicator stays untouched.
+   * Discards the simulation's pallet moves by stepping the editor's own
+   * history back over them (revertSimulation) — each batch landed as one
+   * entry tagged as the simulation's. Stops at the first entry that wasn't,
+   * so layout edits made before the runs survive a reset, and the
+   * unsaved-changes indicator stays untouched.
    *
    * Deliberately leaves the captured heatmaps alone (clearCapture is its own
    * action): restocking between runs is a normal thing to do *during* a
-   * capture, and coupling the two would throw away the measurement every
-   * time someone topped the warehouse back up.
+   * capture. A batch still computing is cancelled — it started from the
+   * stock being thrown away.
    */
   const resetWarehouse = useCallback(() => {
-    queueRef.current = [];
+    cancelComputation();
     fastForwardSpeedRef.current = null;
     setActiveRun(null);
-    setQueuedLists([]);
     editor.revertSimulation();
-  }, [editor]);
+  }, [cancelComputation, editor]);
 
   const value = useMemo<SimulationContextValue>(
     () => ({
       // Plant data, loaded with the plan and content (EditorContext) —
       // presets or Overview → Load → Picking lists.
       pickingLists: editor.pickingLists,
+      runLists,
+      computation,
+      cancelComputation,
+      lastBatch,
       activeRun,
       animate,
       setAnimate,
@@ -821,18 +565,13 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       follow,
       setFollow,
       vehiclePositionRef,
-      playList,
-      playQueue,
       stop,
       togglePause,
       goToStep,
       nextStep,
       previousStep,
-      showPanel,
-      setShowPanel,
       progressRef,
       fastForwardSpeedRef,
-      queuedLists,
       edgeUsage,
       slotUsage,
       captureArmed,
@@ -846,8 +585,6 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       canGoNextRun,
       canGoPreviousRun,
       clearSession,
-      reviewedRunId,
-      reviewRun,
       clearCapture,
       resetWarehouse,
       hoveredStep,
@@ -855,23 +592,24 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     }),
     [
       editor.pickingLists,
+      runLists,
+      computation,
+      cancelComputation,
+      lastBatch,
       activeRun,
       animate,
       setAnimate,
       speed,
       follow,
-      playList,
-      playQueue,
       stop,
       togglePause,
       goToStep,
       nextStep,
       previousStep,
-      showPanel,
-      queuedLists,
       edgeUsage,
       slotUsage,
       captureArmed,
+      setCaptureArmed,
       sessionRuns,
       orderListStart,
       capturedRuns,
@@ -881,8 +619,6 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       canGoNextRun,
       canGoPreviousRun,
       clearSession,
-      reviewedRunId,
-      reviewRun,
       clearCapture,
       resetWarehouse,
       hoveredStep,

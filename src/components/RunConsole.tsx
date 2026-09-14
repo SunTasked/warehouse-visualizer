@@ -1,11 +1,19 @@
-import { useRef, useState } from "react";
-import type { PickingList, PickingStop } from "../types/simulation";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { PickingList } from "../types/simulation";
 import { useEditor } from "../state/EditorContext";
-import { useSimulation, type ActiveRun, type StopEvent } from "../state/SimulationContext";
+import { useSimulation, type CapturedRun, type StopEvent } from "../state/SimulationContext";
 import { useAnalytics } from "../state/AnalyticsContext";
 import { formatDuration } from "../lib/metrics";
 import { handlingBreakdown, handlingTime, legTravelTime } from "../lib/timeModel";
 import { useDraggable } from "../lib/useDraggable";
+import { useVirtualRows } from "../lib/useVirtualRows";
+
+/** Matches `.orders__scroll`'s --order-row: every row, order or step, is this tall. */
+const ROW_HEIGHT = 26;
+/** Rows kept rendered above and below the visible ones, so scrolling and arrow keys never land on a gap. */
+const OVERSCAN = 8;
+
+const formatCount = (n: number) => n.toLocaleString("en-US");
 
 /**
  * What a given stop actually does, as a verb for the operations list — the
@@ -50,19 +58,12 @@ function ModeBadge({ list }: { list: PickingList }) {
  * components the performance board totals up, shown for one step so a slow
  * row explains itself (a deep, high pallet at the end of a long leg reads
  * very differently from a short hop to a floor-level one).
- *
- * Falls back to nothing when the run wasn't recorded (capture disarmed), as
- * there's no resolved tier/depth to price.
  */
-function StepMetrics({ run, stopIndex, anchor }: { run: ActiveRun; stopIndex: number; anchor: DOMRect | null }) {
-  const simulation = useSimulation();
+function StepMetrics({ record, stopIndex, anchor }: { record: CapturedRun; stopIndex: number; anchor: DOMRect | null }) {
   const { settings } = useAnalytics();
 
-  const recorded = simulation.sessionRuns[run.sessionIndex];
-  if (!recorded) return null;
-
-  const profile = stopIndex > 0 ? recorded.profiles[stopIndex - 1] : null;
-  const handling = recorded.handling[stopIndex];
+  const profile = stopIndex > 0 ? record.profiles[stopIndex - 1] : null;
+  const handling = record.handling[stopIndex];
   if (!handling) return null;
 
   const travel = profile ? legTravelTime(profile, settings) : 0;
@@ -72,17 +73,14 @@ function StepMetrics({ run, stopIndex, anchor }: { run: ActiveRun; stopIndex: nu
 
   let cumulative = 0;
   for (let i = 0; i <= stopIndex; i++) {
-    if (i > 0 && recorded.profiles[i - 1]) cumulative += legTravelTime(recorded.profiles[i - 1], settings);
-    if (recorded.handling[i]) cumulative += handlingTime(recorded.handling[i], settings);
+    if (i > 0 && record.profiles[i - 1]) cumulative += legTravelTime(record.profiles[i - 1], settings);
+    if (record.handling[i]) cumulative += handlingTime(record.handling[i], settings);
   }
 
   return (
     // Positioned from the hovered row's own rect: the console clips its
     // content, so the tooltip has to sit outside that box entirely.
-    <div
-      className="step-tip"
-      style={anchor ? { top: anchor.top, left: anchor.right + 8 } : undefined}
-    >
+    <div className="step-tip" style={anchor ? { top: anchor.top, left: anchor.right + 8 } : undefined}>
       <div className="step-tip__row">
         <span>Travel</span>
         <span>{formatDuration(travel)}</span>
@@ -117,100 +115,22 @@ function StepMetrics({ run, stopIndex, anchor }: { run: ActiveRun; stopIndex: nu
   );
 }
 
-/**
- * One order's operations, each row wired to blink its target (and the leg
- * reaching it) on hover, and to act on it when clicked. `live` says whether
- * these steps belong to the run the scene is currently showing: only then is
- * there a forklift to move, so for any other order a click selects the order
- * instead (see onSelect).
- */
-function RunSteps({ run, live, onSelect }: { run: ActiveRun; live: boolean; onSelect: (index: number) => void }) {
-  const simulation = useSimulation();
-  const [anchor, setAnchor] = useState<DOMRect | null>(null);
-
-  return (
-    <>
-      {run.stops.map((stop, i) => {
-        // currentLegIndex is the leg being *traveled*, so the forklift is
-        // standing at (or heading away from) stop currentLegIndex: anything
-        // before it is done, that one is where it is now.
-        const state = !live ? "queued" : i < run.currentLegIndex ? "done" : i === run.currentLegIndex ? "current" : "todo";
-        return (
-          <div className="orders__step-item" key={i}>
-            <button
-              className={`orders__step orders__step--${state}`}
-              data-row
-              // Leg i-1 is the one that arrives at stop i; the very first
-              // stop has nothing leading to it.
-              onMouseEnter={(e) => {
-                simulation.setHoveredStep({ stop, legIndex: i > 0 ? i - 1 : null });
-                setAnchor(e.currentTarget.getBoundingClientRect());
-              }}
-              onMouseLeave={() => simulation.setHoveredStep(null)}
-              onFocus={(e) => setAnchor(e.currentTarget.getBoundingClientRect())}
-              onClick={() => onSelect(i)}
-              title={live ? "Jump the forklift to this step" : "Show this order's route"}
-            >
-              <span className="orders__step-index">{i + 1}</span>
-              <span className="orders__step-verb">{stepVerb(run.events[i], i, run.stops.length)}</span>
-              <span className="orders__step-target">{stop.id}</span>
-            </button>
-            <StepMetrics run={run} stopIndex={i} anchor={anchor} />
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
-/** A list that hasn't started yet: its declared stops are known from the data, but its route (and therefore its depot bookends) isn't computed until it plays — so these rows preview the stops without pretending to be executable steps. */
-function QueuedSteps({ stops }: { stops: PickingStop[] }) {
-  const simulation = useSimulation();
-
-  return (
-    <>
-      {stops.map((stop, i) => (
-        <div
-          key={i}
-          className="orders__step orders__step--queued"
-          data-row
-          tabIndex={0}
-          onMouseEnter={() => simulation.setHoveredStep({ stop, legIndex: null })}
-          onMouseLeave={() => simulation.setHoveredStep(null)}
-        >
-          <span className="orders__step-index">{i + 1}</span>
-          <span className="orders__step-verb">{stop.kind === "slot" ? "Visit" : "Depot"}</span>
-          <span className="orders__step-target">{stop.id}</span>
-        </div>
-      ))}
-    </>
-  );
-}
-
-/** An order as the list shows it: one already played (with a route to inspect) or one still waiting behind the active run. */
-interface DisplayOrder {
-  key: string;
-  list: PickingList;
-  /** The run to draw steps from — synthesised from the record for orders that aren't the one currently on screen. Null for orders that haven't run yet. */
-  run: ActiveRun | null;
-  stops: PickingStop[];
-  state: "running" | "paused" | "done" | "queued";
-  /** Whether this order is the run the scene is currently showing. */
-  live: boolean;
-  captured: boolean;
-  sessionIndex: number | null;
-}
+/** A row of the order list: an order, or one step of an expanded order. */
+type Row =
+  | { kind: "order"; record: CapturedRun; sessionIndex: number }
+  | { kind: "step"; record: CapturedRun; sessionIndex: number; stopIndex: number };
 
 /**
  * The run console (specs.md §5.4): everything about *what is happening now* —
- * capture arming, transport, and the orders of the batch you last launched.
+ * capture arming, transport, and the orders of the batch you last computed.
  * Docked under the breadcrumb, above the scene, while the side panel stays
  * the catalogue of lists you can launch: one place to watch, one place to
  * choose.
  *
  * The bar is three fixed lines whether collapsed or not (capture + metadata,
  * transport, playback options) — collapsing hides only the order list, so
- * every control keeps its place.
+ * every control keeps its place. A batch can hold thousands of orders, so
+ * the list only renders the rows in view.
  */
 export function RunConsole() {
   const { mode } = useEditor();
@@ -219,99 +139,157 @@ export function RunConsole() {
   // constantly, the orders only when you go looking.
   const [collapsed, setCollapsed] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  /** A row the arrow keys moved to that wasn't rendered yet — focused once it is. */
+  const pendingFocusRef = useRef<number | null>(null);
   const drag = useDraggable(panelRef);
+  const { sessionRuns, orderListStart, lastBatch } = simulation;
+
+  // A finished batch opens the order list: its runs are what there is to
+  // look at now.
+  useEffect(() => {
+    if (lastBatch && !lastBatch.error) setCollapsed(false);
+  }, [lastBatch]);
+
+  const rows = useMemo(() => {
+    const list: Row[] = [];
+    for (let i = orderListStart; i < sessionRuns.length; i++) {
+      const record = sessionRuns[i];
+      list.push({ kind: "order", record, sessionIndex: i });
+      if (expanded.has(record.id)) {
+        for (let stopIndex = 0; stopIndex < record.stops.length; stopIndex++) {
+          list.push({ kind: "step", record, sessionIndex: i, stopIndex });
+        }
+      }
+    }
+    return list;
+  }, [sessionRuns, orderListStart, expanded]);
+  const view = useVirtualRows<HTMLDivElement>(rows.length, ROW_HEIGHT, OVERSCAN);
+
+  useLayoutEffect(() => {
+    const target = pendingFocusRef.current;
+    if (target === null) return;
+    const element = view.element?.querySelector<HTMLElement>(`[data-row="${target}"]`);
+    if (element) {
+      element.focus({ preventScroll: true });
+      pendingFocusRef.current = null;
+    }
+  });
 
   if (mode !== "view") return null;
 
   const run = simulation.activeRun;
-  // Static runs finish synchronously the instant they're started — there's
-  // no "still in progress" state for them, unlike an animated run whose
-  // vehicle hasn't reached the last leg yet.
+  const computation = simulation.computation;
   const isPlaying = run !== null && run.mode === "animated" && run.currentLegIndex < run.legs.length;
   const measuredSegments = Object.keys(simulation.edgeUsage).length;
   const measuredSlots = Object.keys(simulation.slotUsage).length;
+  const orderCount = sessionRuns.length - orderListStart;
 
-  // The batch (or, while capturing, the accumulated record) plus whatever is
-  // still queued behind it — one flat list of orders, newest last.
-  const orders: DisplayOrder[] = simulation.sessionRuns.slice(simulation.orderListStart).map((entry, offset) => {
-    const index = simulation.orderListStart + offset;
-    const live = run !== null && run.sessionIndex === index;
-    const playing = live && run.mode === "animated" && run.currentLegIndex < run.legs.length;
-    return {
-      key: entry.id,
-      list: entry.list,
-      // A finished order still has a full route to inspect: replayed from its
-      // record as a completed static run, which is exactly what the scene
-      // would show if you reviewed it.
-      run: live
-        ? run
-        : {
-            list: entry.list,
-            mode: "static",
-            stops: entry.stops,
-            events: entry.events,
-            legs: entry.legs,
-            currentLegIndex: entry.legs.length,
-            isPaused: false,
-            sessionIndex: index,
-          },
-      stops: entry.stops,
-      state: playing ? (run.isPaused ? "paused" : "running") : "done",
-      live,
-      captured: entry.captured,
-      sessionIndex: index,
-    };
-  });
-
-  for (const [i, list] of simulation.queuedLists.entries()) {
-    orders.push({
-      key: `queued-${list.id}-${i}`,
-      list,
-      run: null,
-      stops: list.stops,
-      state: "queued",
-      live: false,
-      captured: false,
-      sessionIndex: null,
-    });
-  }
-
-  const toggleExpanded = (key: string) => {
+  const toggleExpanded = (id: string) => {
     setExpanded((current) => {
       const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
 
-  /**
-   * Selecting an order also puts its route back on screen — except while a
-   * run is actually playing, when reviewing would cancel the rest of the
-   * batch (showSessionRun drops the queue). Looking at the list must never
-   * interrupt the thing the list is describing.
-   */
-  const selectOrder = (order: DisplayOrder) => {
-    if (isPlaying || order.sessionIndex === null || order.live) return;
-    simulation.showSessionRun(order.sessionIndex);
+  /** Selecting an order puts its route on screen, unless it's already there. */
+  const selectOrder = (sessionIndex: number) => {
+    if (run?.sessionIndex === sessionIndex) return;
+    simulation.showSessionRun(sessionIndex);
   };
 
   /** Arrow keys walk the flat row list — orders and any expanded steps alike — letting the whole batch be scanned without the mouse. */
   const onKeyDown = (event: React.KeyboardEvent) => {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    const rows = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>("[data-row]") ?? []);
     if (rows.length === 0) return;
     event.preventDefault();
-    const current = rows.indexOf(document.activeElement as HTMLElement);
+    const active = document.activeElement as HTMLElement | null;
+    const current = active?.dataset.row !== undefined ? Number(active.dataset.row) : -1;
     const next =
       current === -1
         ? 0
         : event.key === "ArrowDown"
           ? Math.min(rows.length - 1, current + 1)
           : Math.max(0, current - 1);
-    rows[next]?.focus();
+    const box = view.element;
+    if (box) {
+      const top = next * ROW_HEIGHT;
+      if (top < box.scrollTop) box.scrollTop = top;
+      else if (top + ROW_HEIGHT > box.scrollTop + box.clientHeight) box.scrollTop = top + ROW_HEIGHT - box.clientHeight;
+      view.setScrollTop(box.scrollTop);
+    }
+    const element = box?.querySelector<HTMLElement>(`[data-row="${next}"]`);
+    if (element) element.focus({ preventScroll: true });
+    else pendingFocusRef.current = next;
+  };
+
+  const renderRow = (row: Row, index: number) => {
+    const live = run !== null && run.sessionIndex === row.sessionIndex;
+
+    if (row.kind === "order") {
+      const { record } = row;
+      const open = expanded.has(record.id);
+      const playing = live && isPlaying;
+      return (
+        <button
+          key={`order-${record.id}`}
+          className={live ? "orders__row orders__row--active" : "orders__row"}
+          data-row={index}
+          onClick={() => {
+            toggleExpanded(record.id);
+            selectOrder(row.sessionIndex);
+          }}
+          title={live ? "Expand its operations" : "Expand its operations and show its route"}
+        >
+          <span className="orders__caret">{open ? "▾" : "▸"}</span>
+          {record.captured && <span className="orders__dot" title="Measured into the heatmaps" />}
+          <span className="orders__name">{record.list.label}</span>
+          <ModeBadge list={record.list} />
+          <span className={playing ? "orders__state orders__state--running" : "orders__state"}>
+            {playing ? (run.isPaused ? "paused" : "running") : live ? "shown" : "done"}
+          </span>
+        </button>
+      );
+    }
+
+    const { record, stopIndex } = row;
+    const stop = record.stops[stopIndex];
+    // currentLegIndex is the leg being *traveled*, so the forklift is
+    // standing at (or heading away from) stop currentLegIndex: anything
+    // before it is done, that one is where it is now.
+    const state = !live
+      ? "queued"
+      : stopIndex < run.currentLegIndex
+        ? "done"
+        : stopIndex === run.currentLegIndex
+          ? "current"
+          : "todo";
+    return (
+      <div className="orders__step-item" key={`step-${record.id}-${stopIndex}`}>
+        <button
+          className={`orders__step orders__step--${state}`}
+          data-row={index}
+          // Leg i-1 is the one that arrives at stop i — only meaningful for
+          // the run actually drawn.
+          onMouseEnter={(e) => {
+            simulation.setHoveredStep({ stop, legIndex: live && stopIndex > 0 ? stopIndex - 1 : null });
+            setAnchor(e.currentTarget.getBoundingClientRect());
+          }}
+          onMouseLeave={() => simulation.setHoveredStep(null)}
+          onFocus={(e) => setAnchor(e.currentTarget.getBoundingClientRect())}
+          onClick={() => (live ? simulation.goToStep(stopIndex) : selectOrder(row.sessionIndex))}
+          title={live ? "Jump the forklift to this step" : "Show this order's route"}
+        >
+          <span className="orders__step-index">{stopIndex + 1}</span>
+          <span className="orders__step-verb">{stepVerb(record.events[stopIndex], stopIndex, record.stops.length)}</span>
+          <span className="orders__step-target">{stop.id}</span>
+        </button>
+        <StepMetrics record={record} stopIndex={stopIndex} anchor={anchor} />
+      </div>
+    );
   };
 
   return (
@@ -338,7 +316,7 @@ export function RunConsole() {
             title={
               simulation.captureArmed
                 ? "Stop adding runs to the heatmaps"
-                : "Start adding every run played to the path and slot heatmaps"
+                : "Start adding every run computed to the path and slot heatmaps"
             }
           >
             <span className="capture__dot" />
@@ -404,7 +382,12 @@ export function RunConsole() {
           >
             ⏭
           </button>
-          <button className="picking-panel__transport-btn" disabled={!run} onClick={simulation.stop} title="Stop">
+          <button
+            className="picking-panel__transport-btn"
+            disabled={!run && !computation}
+            onClick={simulation.stop}
+            title="Stop"
+          >
             ⏹
           </button>
         </div>
@@ -413,7 +396,7 @@ export function RunConsole() {
         <div className="run-console__line">
           <label
             className="run-console__animate"
-            title="Drive the route instead of showing it complete. Never changes the route or its metrics."
+            title="Drive the route shown instead of drawing it complete. Never changes the route or its metrics."
           >
             <input
               type="checkbox"
@@ -453,19 +436,25 @@ export function RunConsole() {
             <span>Follow</span>
           </label>
           <span className="run-console__status">
-            {run ? (
+            {computation ? (
               <>
-                <strong>{run.list.label}</strong>{" "}
+                <strong>Computing routes</strong>{" "}
                 <span>
-                  {simulation.reviewedRunId
-                    ? "reviewing"
-                    : run.isPaused
-                      ? "paused"
-                      : isPlaying
-                        ? "running"
-                        : "done"}
+                  {formatCount(computation.done)} / {formatCount(computation.total)}
                 </span>
               </>
+            ) : run ? (
+              <>
+                <strong>{run.list.label}</strong>{" "}
+                <span>{run.isPaused ? "paused" : isPlaying ? "running" : "done"}</span>
+              </>
+            ) : lastBatch?.error ? (
+              <span>Route computation failed</span>
+            ) : lastBatch ? (
+              <span>
+                {formatCount(lastBatch.lists)} list{lastBatch.lists === 1 ? "" : "s"} computed in{" "}
+                {lastBatch.seconds < 10 ? lastBatch.seconds.toFixed(1) : Math.round(lastBatch.seconds)} s
+              </span>
             ) : (
               <span>Nothing running</span>
             )}
@@ -475,10 +464,10 @@ export function RunConsole() {
 
       {!collapsed && (
         <div className="run-console__body">
-          {orders.length > 0 ? (
+          {orderCount > 0 ? (
             <>
               <div className="orders__head">
-                <span className="orders__head-title">Orders ({orders.length})</span>
+                <span className="orders__head-title">Orders ({formatCount(orderCount)})</span>
                 {simulation.captureArmed && <span className="orders__capturing">recording</span>}
                 <button
                   className="capture__clear"
@@ -490,61 +479,19 @@ export function RunConsole() {
               </div>
 
               {/* tabIndex so the arrow keys work straight after clicking in
-                  the list area, before any row has been focused. */}
-              <div className="orders__scroll" ref={scrollRef} tabIndex={0} onKeyDown={onKeyDown}>
-                {orders.map((order) => {
-                  const open = expanded.has(order.key);
-                  return (
-                    <div key={order.key}>
-                      <button
-                        className={
-                          order.live
-                            ? "orders__row orders__row--active"
-                            : order.state === "queued"
-                              ? "orders__row orders__row--queued"
-                              : "orders__row"
-                        }
-                        data-row
-                        onClick={() => {
-                          toggleExpanded(order.key);
-                          selectOrder(order);
-                        }}
-                        title={
-                          order.state === "queued"
-                            ? "Waiting to run — expand to preview its stops"
-                            : isPlaying
-                              ? "Expand to see its operations"
-                              : "Expand its operations and show its route"
-                        }
-                      >
-                        <span className="orders__caret">{open ? "▾" : "▸"}</span>
-                        {order.captured && <span className="orders__dot" title="Measured into the heatmaps" />}
-                        <span className="orders__name">{order.list.label}</span>
-                        <ModeBadge list={order.list} />
-                        <span
-                          className={
-                            order.state === "running"
-                              ? "orders__state orders__state--running"
-                              : "orders__state"
-                          }
-                        >
-                          {order.state}
-                        </span>
-                      </button>
-
-                      {open &&
-                        (order.run ? (
-                          <RunSteps
-                            run={order.run}
-                            live={order.live}
-                            onSelect={(index) => (order.live ? simulation.goToStep(index) : selectOrder(order))}
-                          />
-                        ) : (
-                          <QueuedSteps stops={order.stops} />
-                        ))}
-                    </div>
-                  );
-                })}
+                  the list area, before any row has been focused. Spacers stand
+                  in for the rows out of view (not a transform: the step
+                  tooltips are position: fixed, which a transform would trap). */}
+              <div
+                className="orders__scroll"
+                ref={view.ref}
+                tabIndex={0}
+                onKeyDown={onKeyDown}
+                onScroll={view.onScroll}
+              >
+                <div style={{ height: view.before }} />
+                {rows.slice(view.first, view.last).map((row, offset) => renderRow(row, view.first + offset))}
+                <div style={{ height: view.after }} />
               </div>
             </>
           ) : (

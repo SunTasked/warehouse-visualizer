@@ -4,6 +4,68 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-14 — Batch route computation for thousands of picking lists
+
+- **Request:** the owner will run thousands of lists and can't wait for each to be computed
+  and displayed before the next. Show a progress bar counting lists processed, then the
+  lists with none selected. They also asked for ideas to speed up computation, including
+  reworking the plan's data structure.
+- **Specs:** §5.3 gets a new "Computing thousands of lists" subsection; the playback,
+  transport, pathfinding and semantics paragraphs are updated; one decision log entry.
+  README: the generator.
+- **Measured first** (Node benchmark, 5,000 generated CML lists): the old router took
+  0.21 ms a leg, so about 6 s of routing, plus the 600 ms spacing and a history entry per
+  pallet — at least 50 minutes in the app.
+- **Router** (`pathGraph.ts`):
+  - `PathGraph`, compressed adjacency in typed arrays;
+  - a binary-heap Dijkstra whose tree is kept per source node;
+  - `connectPoint` over each segment once, returning `{node | edge + t}`;
+  - `routeBetween` taking the best of up to four tree lookups and returning flat
+    directed-hop node pairs.
+
+  Parity against the previous router, on 8,948 pairs:
+  - route lengths identical, and turn counts too;
+  - 27 equal-length ties now take the other corridor.
+
+  About 0.007 ms a leg.
+- **Engine** (`runEngine.ts`, new): `RoutePlanner` (memoised stop joins), and `Batch` with
+  copy-on-write stock and integer-keyed heatmap tallies, returning a `RunCost` per list.
+  `runRecord` rebuilds stops and events on the page. The worker protocol types live there too.
+- **Worker** (`src/workers/runWorker.ts`): 40 ms slices, progress, cancel. `geometry.ts` no
+  longer imports three.js.
+- **SimulationContext rewritten:**
+  - `runLists` (a promise), `computation`, `cancelComputation`, `lastBatch`;
+  - `landBatch` makes one `applySimulatedStock` commit (new in EditorContext, which gains
+    `appendEntry`; `pickPalletAuto` is removed);
+  - `showRun` re-routes on the main thread, and `goToStep` is pure navigation;
+  - the queue, `playList`/`playQueue`, `reviewedRunId`/`reviewRun` and `showPanel` are removed.
+- **UI:**
+  - PickingListPanel shows `RunProgress` in place of the catalogue while computing, clears
+    the ticks when a batch lands, and memoises its rows. A single Play shows its run.
+  - RunConsole has a virtualized flat row list, a status line for computing or the last
+    batch's time, and opens when a batch lands. A step hover only blinks a leg of the run on
+    screen, fixing a wrong-leg blink for other orders.
+- **Found by profiling in Playwright (CDP):** a 5,000-list landing still froze the page
+  1.6–5 s, almost all DOM `setAttribute`/`appendChild` — the catalogue remounting 5,000 rows
+  and the board's splits drawing 5,000. The board took 4.2 s to open, and 20,000 catalogue
+  rows 7.8 s before the page hung. The fix is the `useVirtualRows` hook: fixed-pitch rows,
+  spacers, lists of up to 150 rows rendered whole. It's used by the catalogue (rows a fixed
+  52 px, stops ellipsized), the order list and the splits; the board now scores only while
+  shown. After: 5,000 lists land in 0.29 s, the board opens in 0.23 s, the 20,000-row
+  catalogue renders in 70 ms, and 20,000 lists land in 0.6 s.
+- **Trimmed the worker's reply** to costs only (the lists, stops and events were being
+  cloned back).
+- **`scripts/generate_picking_lists.mjs`** (new): valid lists against a running pallet count,
+  seeded, written to `data/` by default.
+- **Not built, suggested to the owner:**
+  - store each slot's aisle join (segment and position) in the plan at import time;
+  - move to an explicit node/edge corridor format with per-edge attributes (one-way,
+    restrictions) for multi-forklift work;
+  - return costs as transferable typed arrays once batches reach hundreds of thousands (a
+    20,000-list result is about 45 MB of cloned objects);
+  - break equal-length ties by fewer turns;
+  - persist large captures in IndexedDB.
+
 ## 2026-09-13 (cont'd) — Owner review: straight links, camera kept during runs, Follow, capture prompt, plant zoom and edge hints, controls legend
 
 - Feedback, six items:

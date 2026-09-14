@@ -52,13 +52,22 @@ export function AnalyticsBoard() {
     [simulation.capturedRuns],
   );
 
-  const metrics = useMemo(() => scoreCapture(currentRuns, analytics.settings), [currentRuns, analytics.settings]);
+  // Scored only while the board is showing: a batch lands thousands of runs
+  // at once, and re-scoring them behind a hidden tab only slows the landing.
+  const showing = analytics.tab === "performances";
+  const metrics = useMemo(
+    () => scoreCapture(showing ? currentRuns : [], analytics.settings),
+    [showing, currentRuns, analytics.settings],
+  );
   // Snapshots are re-scored under the *current* settings, never the ones in
   // force when they were taken — otherwise a comparison would mix two time
   // models and the deltas would mean nothing.
   const snapshotMetrics = useMemo(
-    () => analytics.snapshots.map((snap) => ({ snap, metrics: scoreCapture(snap.runs, analytics.settings) })),
-    [analytics.snapshots, analytics.settings],
+    () =>
+      showing
+        ? analytics.snapshots.map((snap) => ({ snap, metrics: scoreCapture(snap.runs, analytics.settings) }))
+        : [],
+    [showing, analytics.snapshots, analytics.settings],
   );
 
   if (analytics.tab !== "performances") return null;

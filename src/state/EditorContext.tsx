@@ -69,6 +69,23 @@ interface EditorState {
   carriedEdits: boolean;
 }
 
+/**
+ * Records `warehouse` as one committed history entry after the cursor,
+ * dropping any redo tail. If the saved entry sits in that tail, rebases onto
+ * the new entry's parent and carries forward any edits lost with it.
+ */
+function appendEntry(s: EditorState, warehouse: Warehouse, label: string, origin: HistoryOrigin): EditorState {
+  const truncated = s.entries.slice(0, s.cursor + 1);
+  const baselineDropped = s.baseline > s.cursor;
+  return {
+    warehouse,
+    entries: [...truncated, { warehouse, label, origin }],
+    cursor: truncated.length,
+    baseline: baselineDropped ? s.cursor : s.baseline,
+    carriedEdits: s.carriedEdits || (baselineDropped && editsBetween(s.entries, s.cursor, s.baseline)),
+  };
+}
+
 /** Whether any edit-mode entry lies between two history positions — in either direction, since undoing past a save point unsaves too. */
 function editsBetween(entries: HistoryEntry[], a: number, b: number): boolean {
   for (let i = Math.min(a, b) + 1; i <= Math.max(a, b); i++) {
@@ -120,11 +137,12 @@ interface EditorContextValue {
   /** Removes one pallet from a sub-slot. Commits immediately. */
   removePallet: (slotId: string, subSlotIndex: number, palletIndex: number) => void;
   /**
-   * Picks one pallet from a slot for the forklift simulation (§5.3): the
-   * first (shallowest) occupied sub-slot's topmost pallet. Commits
-   * immediately. Returns false (no-op) if the slot has nothing to pick.
+   * Lands a finished batch of picking lists (§5.3): replaces the sub-slots of
+   * every slot it changed, as one history entry of simulation origin — so a
+   * batch of thousands of lists is one step to undo, and "Reset warehouse"
+   * still steps back over it.
    */
-  pickPalletAuto: (slotId: string) => boolean;
+  applySimulatedStock: (stock: Record<string, SubSlot[]>, label: string) => void;
   /** Resizes one pallet's item count (1-10). Live-mutate only — caller commits. */
   setPalletItemCount: (slotId: string, subSlotIndex: number, palletIndex: number, count: number) => void;
   /** Renames a single slot's id, checking for collisions and following the selection. Live-mutate only — caller commits. */
@@ -244,18 +262,13 @@ export function EditorProvider({
     // Outside edit mode, the only thing that commits is the simulation
     // moving stock. Read at call time, not inside the updater.
     const origin: HistoryOrigin = modeRef.current === "edit" ? "edit" : "simulation";
+    setState((s) => appendEntry(s, s.warehouse, label, origin));
+  }, []);
+
+  const applySimulatedStock = useCallback((stock: Record<string, SubSlot[]>, label: string) => {
     setState((s) => {
-      const truncated = s.entries.slice(0, s.cursor + 1);
-      // If the saved entry sits in the redo tail about to be dropped, rebase
-      // onto this entry's parent and carry forward any edits lost with it.
-      const baselineDropped = s.baseline > s.cursor;
-      return {
-        warehouse: s.warehouse,
-        entries: [...truncated, { warehouse: s.warehouse, label, origin }],
-        cursor: truncated.length,
-        baseline: baselineDropped ? s.cursor : s.baseline,
-        carriedEdits: s.carriedEdits || (baselineDropped && editsBetween(s.entries, s.cursor, s.baseline)),
-      };
+      const slots = s.warehouse.slots.map((slot) => (stock[slot.id] ? { ...slot, subSlots: stock[slot.id] } : slot));
+      return appendEntry(s, { ...s.warehouse, slots }, label, "simulation");
     });
   }, []);
 
@@ -391,29 +404,6 @@ export function EditorProvider({
       commit(`Remove pallet from ${slotId}`);
     },
     [mutateWarehouse, commit],
-  );
-
-  // Mirrors addPalletAuto's deepest-first scan in reverse: the first
-  // (shallowest) sub-slot that actually has something, topmost pallet —
-  // the one a forklift could reach without unstacking anything else.
-  const pickPalletAuto = useCallback(
-    (slotId: string): boolean => {
-      const slot = warehouse.slots.find((s) => s.id === slotId);
-      const sourceIndex = (slot?.subSlots ?? []).findIndex((ss) => ss.pallets.length > 0);
-      if (sourceIndex === -1) {
-        console.warn(`pickPalletAuto: slot ${slotId} has no pallet to pick`);
-        return false;
-      }
-      mutateWarehouse((current) => ({
-        ...current,
-        slots: current.slots.map((s) =>
-          s.id !== slotId ? s : mapSubSlot(s, sourceIndex, (ss) => ({ ...ss, pallets: ss.pallets.slice(0, -1) })),
-        ),
-      }));
-      commit(`Pick pallet from ${slotId}`);
-      return true;
-    },
-    [warehouse, mutateWarehouse, commit],
   );
 
   // Resizes one pallet's item count (1-10). Live-mutate only — caller commits on blur.
@@ -592,7 +582,7 @@ export function EditorProvider({
       setSlotDepth,
       addPalletAuto,
       removePallet,
-      pickPalletAuto,
+      applySimulatedStock,
       setPalletItemCount,
       renameSlot,
       deleteSlots,
@@ -631,7 +621,7 @@ export function EditorProvider({
       setSlotDepth,
       addPalletAuto,
       removePallet,
-      pickPalletAuto,
+      applySimulatedStock,
       setPalletItemCount,
       renameSlot,
       deleteSlots,

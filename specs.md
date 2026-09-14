@@ -591,9 +591,10 @@ eyeball results in 3D rather than deciding blind.
 
 The first *dynamic* layer on top of the static physical layout (§5.1): a single forklift
 follows picking lists — ordered work orders — over the existing path network,
-**actually mutating the live warehouse inventory** as it goes (a pallet disappears from
-a slot the instant it's picked, appears the instant it's stored), not just an animation
-over unchanged data. Explicitly scoped to one forklift at a time; multiple simultaneous
+**actually mutating the warehouse inventory** (a pallet leaves a slot when it's picked and
+arrives when it's stored), not just an animation over unchanged data. Since 2026-09-14 the
+lists run are computed first and their stock changes land together when the batch finishes
+(see "Computing thousands of lists" at the end of this section). Explicitly scoped to one forklift at a time; multiple simultaneous
 forklifts with aisle-priority/direction rules are known future work (see §9), not built
 now.
 
@@ -612,9 +613,9 @@ that out; the prepended stop is just an ordinary depot stop under the same event
 below (a picking run's first "deliver" is a no-op since nothing is held yet). Reading
 direction is the same regardless of mode — only what each stop *does* changes
 (`planEvents()`):
-- **picking**: a `slot` stop removes one real pallet (front-to-back, topmost tier —
-  `EditorContext.tsx`'s new `pickPalletAuto`, the deepest-first `addPalletAuto` scan
-  run in reverse) and adds it to the forklift's held load; a `depot` stop delivers
+- **picking**: a `slot` stop removes one real pallet (front-to-back, topmost tier — the
+  deepest-first `addPalletAuto` scan run in reverse, now applied by `runEngine.ts`'s
+  `Batch`) and adds it to the forklift's held load; a `depot` stop delivers
   (drops) everything currently held, resetting load to 0.
 - **storing**: a `depot` stop loads up to 3 *synthetic* pallets — specifically
   `min(3, consecutive slot stops before the next depot stop or end of list)`, so the
@@ -622,8 +623,9 @@ direction is the same regardless of mode — only what each stop *does* changes
   tracked inventory of its own to remove them from); a `slot` stop stores one held
   pallet there (the existing `addPalletAuto`, unchanged) and decrements held load.
 
-No validation UI — an authored list is trusted to respect the hard-3 capacity; a
-pick/store that can't be satisfied is skipped with a `console.warn`, not a crash.
+No validation UI — an authored list is trusted to respect the hard-3 capacity; a pick
+that finds its slot empty, or a stop the plan doesn't have, is skipped — reported in one
+`console.warn` per batch — not a crash.
 
 **Pathfinding** (`src/lib/pathGraph.ts`): `buildPathGraph(paths)` dedupes every `Path`'s
 `points` into graph nodes (keyed by rounded coordinate — safe with no fuzzy matching
@@ -645,37 +647,32 @@ points rather than their snapped network points, the polyline automatically ends
 short notch off the aisle into the slot, with no separate mechanism needed for that (a
 directly-requested UX detail). A slot's world entry position — the notch/routing target
 — is `src/lib/geometry.ts`'s new `slotEntryPoint()`, derived with the same verified
-rotation convention `focusBounds.ts` uses for camera framing.
+rotation convention `focusBounds.ts` uses for camera framing. Since 2026-09-14 the graph is
+compiled (`PathGraph`: integer nodes, typed arrays, one shortest-path tree kept per source
+node) and each stop's join onto it is worked out once and kept — see "Computing thousands
+of lists" below.
 
 **Two playback modes, both required, switched via a toggle** (not a single choice, per
-explicit user preference) in `SimulationContext.tsx`:
-- **static**: `playList` applies every stop's event immediately and highlights the full
-  route at once — no vehicle, "fast, pragmatic."
-- **animated**: stop 0's event applies immediately (the forklift "starts" already
-  there); a Canvas-nested `Vehicle` (`src/components/Forklift.tsx`) advances a *ref*
+explicit user preference) in `SimulationContext.tsx` — since 2026-09-14 both are ways of
+*showing* a run already computed:
+- **static**: the shown run's full route is highlighted at once — no vehicle, "fast,
+  pragmatic."
+- **animated**: a Canvas-nested `Vehicle` (`src/components/Forklift.tsx`) advances a *ref*
   (`progressRef`, not React state — avoids a re-render every frame) each `useFrame` tick
   by `speed * delta`, interpolating position/facing along the current leg's polyline;
-  reaching a leg's end calls `goToStep(current + 1)` (see below) to apply that stop's
-  event and advance.
-- "Played one after the other": `playQueue(lists)` chains multiple lists through the
-  same single-forklift mechanism, auto-advancing on completion (a brief `setTimeout`
-  pause between *static* runs specifically, so each one is actually visible rather than
-  only the last one in a queue ever appearing on screen — static finishes synchronously,
-  so without this only the final list's route would ever render). Starting any run calls
-  `ViewFocusContext`'s `reset()` first, so a cross-building route isn't truncated by the
-  per-building visibility rules in §5.1.
+  reaching a leg's end calls `goToStep(current + 1)` (see below) to advance.
+- Several lists run as one batch, in order, computed off the main thread and listed
+  together (see "Computing thousands of lists"). Showing a run calls `ViewFocusContext`'s
+  `revealPlant()` first, so a cross-building route isn't truncated by the per-building
+  visibility rules in §5.1.
 
 **Transport controls** (music-player style, per explicit user request) — a single
 `goToStep(target)` in `SimulationContext.tsx` backs all of Play/Pause, Next/Previous, and
-the step slider (and the animated vehicle's own natural leg-completion): moving
-*forward* applies every leg's arrival event along the way, exactly as real simulation
-progress (a slider drag that skips several stops still picks/stores/delivers/loads at
-each one, same as if the animation had played through them); moving *backward* only
-repositions the displayed vehicle — it does **not** undo any pallet mutation already
-applied. There's no general "undo the exact pallet that was picked" mechanism, so
-scrubbing back is a navigation aid for reviewing the route (matching what was asked —
-"brings the forklift to the next/previous slot"), not a data-consistent rewind; see open
-question 18. `isPaused` on the active run just gates whether `Vehicle`'s `useFrame`
+the step slider (and the animated vehicle's own natural leg-completion). It is pure
+navigation in both directions: a run's picks and stores landed with its batch, so moving
+forward or back only repositions the displayed vehicle. (Until 2026-09-14 moving forward
+applied each arrival's event and moving back couldn't undo them — open question 18, now
+moot.) `isPaused` on the active run just gates whether `Vehicle`'s `useFrame`
 advances `progressRef` — Play/Pause never resets it, so resuming continues exactly where
 it left off.
 
@@ -821,6 +818,106 @@ Three more feedback-driven fixes on top of the above:
 Verified via Playwright: no dead-end wall run-in on `Path-Main`; a clean rectangular jog
 (no diagonal) at the A02→DS01 reversal junction at multiple zoom levels; the legend now
 reads green→amber→red. `tsc --noEmit -p .` clean throughout.
+
+#### Computing thousands of lists: routes off the main thread (2026-09-14)
+
+The plant owner will run thousands of lists at a time, and can't wait for each to be
+computed, drawn and followed by the next. Running lists now computes all of them first: a
+progress bar with Cancel stands in for the catalogue, counting lists done. When the batch
+lands, its orders fill the run console, which opens with none selected. The catalogue's
+ticks are cleared and nothing is drawn until an order is clicked. A single list's Play is
+the same computation, with its route shown as soon as it lands.
+
+**Where the time was.**
+- **Joining stops to the network:** each leg's `routeBetween` projected both stops onto all
+  ~570 directed edges.
+- **Per-leg setup:** it copied the whole adjacency `Map` and ran Dijkstra with a linear scan
+  for the nearest node, about 0.21 ms a leg on CML.
+- **Stock:** every pick or store then committed a history entry, copying the 4,910-slot
+  array.
+- **Pacing:** static runs were spaced 600 ms apart so each could be seen, which alone made
+  5,000 lists at least 50 minutes.
+
+**Engine** (`src/lib/runEngine.ts`, no React).
+- **`RoutePlanner`:** compiles the plan once. `PathGraph` (pathGraph.ts) keeps integer
+  nodes, coordinates in typed arrays, each corridor segment once, and compressed adjacency.
+  Its binary-heap Dijkstra computes a node's shortest-path tree the first time a route leaves
+  from it, then keeps it. Each stop's join onto the network is also computed once and kept.
+  A leg is the best of at most four tree lookups (either end of each stop's segment) plus a
+  walk back along `previous`: about 0.007 ms.
+- **`Batch`:** works the lists in order against a copy-on-write stock: a slot's sub-slots
+  are copied the first time the batch changes them, and picks and stores follow the editor's
+  own fill rules. It tallies heatmap counts by integer edge ids.
+- **What comes back:** only each list's cost (`RunCost`: leg profiles and handling). The
+  page rebuilds stops and events from the list itself (`runRecord`). No route geometry is
+  kept either: a run's legs are recomputed on the main thread, in milliseconds, when it's
+  shown.
+
+**Worker** (`src/workers/runWorker.ts`). It runs a `Batch` in 40 ms slices, posting progress
+after each and yielding, which is also how a cancel gets read. `SimulationContext.runLists`
+sends the layout (paths, slots with their stock, facilities) and the lists. On `done` it
+lands the result:
+- the session's runs;
+- one `applySimulatedStock` history entry of simulation origin, so a 20,000-list batch is
+  one undo step and Reset warehouse still steps back over it;
+- the heatmap tallies, if capture was armed;
+- one summary warning for empty picks or unknown stops, instead of one per stop.
+
+`geometry.ts` no longer imports three.js, so the worker doesn't load it.
+
+**Replay, not re-execution.** A run's stock changes land with its batch. Showing, animating,
+stepping and scrubbing a run are therefore pure navigation (`goToStep` applies nothing), and
+Animate re-drives the run on screen. Removed: the queue, `playList`/`playQueue`,
+`reviewedRunId` and the editor's `pickPalletAuto`. The one thing given up is watching stock
+change as the forklift reaches each slot.
+
+**Rendering thousands.** A profile of a 5,000-list landing put the routes and the reply
+handler under 50 ms of main-thread time, but 4–5 s in DOM `setAttribute` and `appendChild`.
+The catalogue remounted 5,000 rows after the progress bar, and the board's per-run splits
+drew 5,000 more. `useVirtualRows` windows a list of fixed-pitch rows:
+- only the rows in view, plus an overscan, are rendered;
+- spacers stand in for the rest — not a transform, which would break the step tooltips'
+  `position: fixed`;
+- lists of up to 150 rows still render whole, so the browser's find reaches every row.
+
+The catalogue uses it (rows now a fixed 52 px, stops on one line with the full sequence as
+a tooltip), and so do the console's order list and the board's splits. The board also
+scores runs only while its tab is showing.
+
+**Routes are unchanged.** Compared with the previous router on 8,948 distinct stop pairs
+from 5,000 generated lists:
+- every route length was identical (largest difference 6e-14 m), and so was every turn
+  count;
+- 27 pairs had two equally short routes and now take the other one, so for those the heatmap
+  credits the other corridor.
+
+On 6,486 pairs from 20,000 lists, the same held, with 8 such ties.
+
+**Test data.** `scripts/generate_picking_lists.mjs` writes N valid lists for a plan, by
+default into the gitignored `data/`. It stores into and picks from one building at a time
+against a running pallet count, so every pick finds a pallet and no sub-slot passes three
+tiers. Load the result with Overview → Load → Picking lists.
+
+Verified: `tsc --noEmit` clean. Playwright on the GPU, zero console errors and no warnings:
+
+| Case | Result |
+|---|---|
+| CML's 16 lists | land in 0.2 s (previously about 9 s of paced playback); ticks cleared, 16 orders, none shown |
+| 5,000 generated lists | 0.29 s from click to orders listed, 0.1 s of it computing; worst frame 50 ms |
+| 5,000 lists, capture armed | 0.37 s; 570 segments and 3,778 slots measured |
+| 20,000 lists | 0.6 s, five progress updates, worst frame 100 ms |
+| Catalogue of 20,000 lists | 70 ms to render, 15 rows in the DOM |
+| Performances board, 5,000 runs | 0.23 s |
+
+Behaviour checks:
+- A Cancel at 0 / 20,000 leaves the ticks and the previous orders alone.
+- A single Play shows its route.
+- The order list keeps 18 rows in the DOM at 5,000 orders.
+- Clicking the last order shows it, and the arrow keys and Animate work.
+- The Test plant's five lists compute, show, animate, move to the next run and reset.
+
+In Node, a batch computes 5,000 lists in about 0.1 s and 20,000 in 0.3 s. The old router's
+routing alone would take about 23 s for those 20,000.
 
 ### 5.4 Layer system, path/slot heatmaps & operations list (decided, v1)
 
@@ -1874,6 +1971,15 @@ from 12B–06F and one from 10H–16G — 16 lists in all.
 ## 10. Decision Log
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
+
+- 2026-09-14 — Picking lists are computed before anything is displayed (§5.3), so thousands
+  can run at once. Running lists routes all of them in a web worker behind a progress bar,
+  then lists their orders in the run console, with none on screen until one is clicked. Each
+  batch's stock changes land as one history entry, and showing or animating a run is replay.
+  The router was rebuilt around a compiled path graph with kept shortest-path trees and
+  memoised stop joins: about 30× faster per leg, with identical route lengths. The catalogue,
+  the order list and the board's per-run splits render only the rows in view. Given up:
+  stock no longer changes as an animated forklift reaches each slot.
 
 - 2026-09-13 — Getting around a large plant (§5.6), from the plant owner's review of CML.
   The plant shot fits the two northernmost buildings instead of the whole plant, with
