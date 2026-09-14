@@ -1,15 +1,18 @@
 import { useEditor } from "../state/EditorContext";
 import { useViewFocus } from "../state/ViewFocusContext";
+import { useSimulation } from "../state/SimulationContext";
 
 /** Small HTML tooltip shown in view mode while hovering a slot (browsing at
  * plant/warehouse level — no card once a specific slot is already focused). */
 export function HoverCard() {
   const { warehouse } = useEditor();
   const { hover, focus } = useViewFocus();
+  const { planner } = useSimulation();
   if (!hover || (focus.level !== "plant" && focus.level !== "warehouse")) return null;
 
   const slot = warehouse.slots.find((s) => s.id === hover.slotId);
   if (!slot) return null;
+  const join = planner.joinOf({ kind: "slot", id: slot.id });
 
   const subSlots = slot.subSlots ?? [];
   const depth = subSlots.length || 1;
@@ -33,6 +36,14 @@ export function HoverCard() {
           {slot.x}m, {slot.y}m
         </span>
       </div>
+      {join?.place && (
+        <div className="hover-card__row" title={join.explicit ? "As the plan states it" : "Not in the plan: the nearest corridor in front"}>
+          <span>Aisle</span>
+          <span>
+            {join.place.corridor} · {join.place.offset.toFixed(1)} m{join.explicit ? "" : " (nearest)"}
+          </span>
+        </div>
+      )}
       <div className="hover-card__row">
         <span>Depth</span>
         <span>{depth}</span>

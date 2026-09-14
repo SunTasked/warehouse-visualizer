@@ -56,7 +56,9 @@ Both are listed under **Overview → Presets** and load in one click.
   with its no-access zones marked (empty stock — its picking lists receive before they
   pick), with the plan imported from
   the plant's Excel floor plan by `python scripts/import_plan_xlsx.py` (needs `openpyxl`)
-  and checked by `python scripts/check_plan.py schema/CML.plan.json`. The workbook itself
+  and checked by `python scripts/check_plan.py schema/CML.plan.json`. Its corridors are named
+  after the plant's own codes (aisle `AA`, `13A.CENTRAL`, the link `13A-12B`) and every slot
+  states the aisle it is worked from — the **Slot access** layer draws each join. The workbook itself
   lives in `data/`, which is gitignored — it carries real operational records. See
   specs.md §5.7 for how the plan is read.
 - **Thousands of lists** — `node scripts/generate_picking_lists.mjs --plan schema/CML.plan.json

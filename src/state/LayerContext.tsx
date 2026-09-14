@@ -17,6 +17,7 @@ export const LAYER_IDS = [
   "pallets",
   "facilities",
   "paths",
+  "access",
   "route",
   "pathHeatmap",
   "slotHeatmap",
@@ -33,6 +34,10 @@ export const LAYER_LABELS: Record<LayerId, { label: string; hint: string }> = {
   pallets: { label: "Pallets", hint: "Racks and the pallets stored in them" },
   facilities: { label: "Facilities", hint: "Lift stations, delivery spaces, no-access zones" },
   paths: { label: "Paths", hint: "The corridor network" },
+  access: {
+    label: "Slot access",
+    hint: "Where each slot joins its corridor — teal as the plan states it, amber where the nearest corridor is used instead",
+  },
   route: { label: "Route", hint: "Active picking run and forklift" },
   pathHeatmap: { label: "Path heatmap", hint: "Captured traffic, per direction" },
   slotHeatmap: { label: "Slot heatmap", hint: "Captured picks and stores per slot" },
@@ -48,6 +53,9 @@ const DEFAULT_VISIBILITY: Record<LayerId, boolean> = {
   pallets: false,
   facilities: true,
   paths: true,
+  // On: it's how the plan's slot-to-aisle assignments get checked, and it
+  // mostly sits between rack fronts and corridor centrelines.
+  access: true,
   route: true,
   pathHeatmap: false,
   slotHeatmap: false,

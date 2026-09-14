@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/SunTasked/warehouse-visualizer/schema/warehouse.schema.json",
-  "title": "Warehouse Configuration (physical layout, v4)",
-  "description": "Physical layer of a warehouse: building walls, doors, circulation paths, a carriage lift station, a delivery space, storage slot footprints, and each slot's physical depth. Coordinates are in meters (1 unit = 1m), origin at the bottom-left of the site, +X right, +Y up. This describes what physically exists (the building), not what's currently stocked (see warehouse.content.schema.json). Doors/paths/liftStations/deliverySpaces are literal physical/visual objects (an opening, a corridor marking, a piece of equipment's footprint) — distinct from the future walkable/simulation graph (routing, lane direction/capacity) sketched in specs.md, which is a separate, not-yet-built layer that may later reference or formalize path connectivity for actual routing. A path's `points` are already authored so that any point shared with another path or a door is an exact coincident coordinate — see specs.md's graph-readiness convention. A config file is loaded first; its content file (referencing this file's `id` as `warehouseId`) is loaded second and merged in.",
+  "title": "Warehouse Configuration (physical layout, v5)",
+  "description": "Physical layer of a warehouse: building walls, doors, the corridor network, lift stations, delivery spaces, storage slot footprints, and each slot's physical depth. Coordinates are in meters (1 unit = 1m), origin at the bottom-left of the site, +X right, +Y up. This describes what physically exists (the building), not what's currently stocked (see warehouse.content.schema.json). The corridor network is named junctions and corridors listing the junctions they run through: two corridors connect exactly when they name the same junction. Slots and pads state the corridor they are worked from (`access`). A config file is loaded first; its content file (referencing this file's `id` as `warehouseId`) is loaded second and merged in.",
   "type": "object",
   "required": ["id", "name", "units", "walls", "slotDefaults", "slots"],
   "additionalProperties": false,
@@ -30,9 +30,19 @@
       "description": "Openings in a building's wall to the exterior or to another building. Optional — absent in files predating this field, treated as empty.",
       "items": { "$ref": "#/definitions/door" }
     },
+    "junctions": {
+      "type": "array",
+      "description": "The corridor network's named points: where corridors meet, end, bend or pass through a door. Names follow the plant's convention (specs.md §5.7), e.g. \"13A.CENTRAL+AA\", \"AA.E\", \"13A.S\".",
+      "items": { "$ref": "#/definitions/junction" }
+    },
+    "corridors": {
+      "type": "array",
+      "description": "Named corridors, each the junctions it runs through in order, e.g. aisle \"AA\", \"13A.CENTRAL\", the link \"13A-12B\".",
+      "items": { "$ref": "#/definitions/corridor" }
+    },
     "paths": {
       "type": "array",
-      "description": "Corridors connecting slot entry points (and doors, and the lift station) together. Optional — absent in files predating this field, treated as empty.",
+      "description": "Legacy corridor format (polylines connected only by exactly coincident coordinates). Read, and converted to junctions and corridors, when `corridors` is absent; never written.",
       "items": { "$ref": "#/definitions/path" }
     },
     "liftStations": {
@@ -114,6 +124,49 @@
         }
       }
     },
+    "junction": {
+      "type": "object",
+      "required": ["id", "x", "y"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "buildingId": {
+          "type": "string",
+          "description": "The building it stands in (a door's junction: the door's building). Omitted outdoors."
+        }
+      }
+    },
+    "corridor": {
+      "type": "object",
+      "required": ["id", "junctions"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "junctions": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "type": "string" },
+          "description": "Junction ids, in order along the corridor."
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Corridor width in meters. Defaults to the renderer's PATH_DEFAULT_WIDTH when omitted."
+        }
+      }
+    },
+    "access": {
+      "type": "object",
+      "required": ["corridor", "offset"],
+      "additionalProperties": false,
+      "description": "Where a slot or pad joins the corridor network. Without it the app uses the nearest corridor (in front of a slot).",
+      "properties": {
+        "corridor": { "type": "string", "description": "A corridors[].id." },
+        "offset": { "type": "number", "minimum": 0, "description": "Meters along the corridor from its first junction." }
+      }
+    },
     "path": {
       "type": "object",
       "required": ["id", "points", "buildingIds"],
@@ -155,7 +208,8 @@
         "x": { "type": "number" },
         "y": { "type": "number" },
         "rotationDeg": { "type": "number", "default": 0 },
-        "buildingId": { "type": "string" }
+        "buildingId": { "type": "string" },
+        "access": { "$ref": "#/definitions/access" }
       }
     },
     "deliverySpace": {
@@ -167,7 +221,8 @@
         "x": { "type": "number" },
         "y": { "type": "number" },
         "rotationDeg": { "type": "number", "default": 0 },
-        "buildingId": { "type": "string" }
+        "buildingId": { "type": "string" },
+        "access": { "$ref": "#/definitions/access" }
       }
     },
     "inaccessibleZone": {
@@ -228,6 +283,10 @@
           "minimum": 1,
           "default": 1,
           "description": "Number of sub-slot depth positions (front-to-back), each occupying its own full slotDefaults footprint (a depth-3 slot spans 3x the standard footprint, not the standard footprint split three ways). A physical/structural property, independent of what's currently stocked there — see warehouse.content.schema.json for that."
+        },
+        "access": {
+          "$ref": "#/definitions/access",
+          "description": "The corridor the slot is worked from — for a CML import, the aisle its label is written in."
         }
       }
     }

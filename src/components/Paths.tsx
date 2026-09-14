@@ -5,7 +5,6 @@ import { useViewFocus, type Focus } from "../state/ViewFocusContext";
 import { useSimulation } from "../state/SimulationContext";
 import { useLayers } from "../state/LayerContext";
 import { isAnyBuildingVisible } from "../lib/visibility";
-import { nodeKey } from "../lib/pathGraph";
 import { rightOf } from "../lib/offset";
 import { usageColor, usageRange } from "../lib/usageColor";
 
@@ -152,12 +151,13 @@ interface SegmentUsage {
   backward: number;
 }
 
+/** A segment's traffic each way, keyed on the junctions at its two ends — as the batch tallies it. */
 function segmentUsage(path: Path, originalIndex: number, edgeUsage: Record<string, number>): SegmentUsage {
-  const a = path.points[originalIndex];
-  const b = path.points[originalIndex + 1];
+  const a = path.junctionIds[originalIndex];
+  const b = path.junctionIds[originalIndex + 1];
   return {
-    forward: edgeUsage[`${nodeKey(a)}→${nodeKey(b)}`] ?? 0,
-    backward: edgeUsage[`${nodeKey(b)}→${nodeKey(a)}`] ?? 0,
+    forward: edgeUsage[`${a}→${b}`] ?? 0,
+    backward: edgeUsage[`${b}→${a}`] ?? 0,
   };
 }
 

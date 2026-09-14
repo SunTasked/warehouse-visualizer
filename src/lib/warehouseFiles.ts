@@ -6,6 +6,7 @@ import type {
   WarehouseConfig,
   WarehouseContent,
 } from "../types/warehouse";
+import { junctionsFromPaths, resolvePaths } from "./corridors";
 
 /**
  * Combines a physical-layout config with its (optional) inventory content
@@ -16,6 +17,10 @@ import type {
  * Content is padded up to the config's declared depth (missing positions
  * treated as empty) and never truncated, so a mismatch between the two files
  * never silently drops data.
+ *
+ * A plan still in the older `paths` format gets its junctions and corridors
+ * worked out here (src/lib/corridors.ts), so it opens — and saves — in the
+ * current one.
  */
 export function mergeWarehouse(config: WarehouseConfig, content: WarehouseContent | null): Warehouse {
   const contentBySlotId = new Map((content?.slots ?? []).map((s) => [s.slotId, s.subSlots]));
@@ -31,8 +36,12 @@ export function mergeWarehouse(config: WarehouseConfig, content: WarehouseConten
         pallets: fromContent?.[i]?.pallets ?? [],
       }));
     }
-    return { id: sc.id, x: sc.x, y: sc.y, rotationDeg: sc.rotationDeg, subSlots };
+    return { id: sc.id, x: sc.x, y: sc.y, rotationDeg: sc.rotationDeg, subSlots, access: sc.access };
   });
+
+  const network = config.corridors
+    ? { junctions: config.junctions ?? [], corridors: config.corridors }
+    : junctionsFromPaths(config.paths ?? [], config.doors ?? []);
 
   return {
     id: config.id,
@@ -40,7 +49,9 @@ export function mergeWarehouse(config: WarehouseConfig, content: WarehouseConten
     units: config.units,
     walls: config.walls,
     doors: config.doors ?? [],
-    paths: config.paths ?? [],
+    junctions: network.junctions,
+    corridors: network.corridors,
+    paths: resolvePaths(network.junctions, network.corridors),
     liftStations: config.liftStations ?? [],
     deliverySpaces: config.deliverySpaces ?? [],
     inaccessibleZones: config.inaccessibleZones ?? [],
@@ -65,7 +76,8 @@ export function splitWarehouse(warehouse: Warehouse): {
     units: warehouse.units,
     walls: warehouse.walls,
     doors: warehouse.doors,
-    paths: warehouse.paths,
+    junctions: warehouse.junctions,
+    corridors: warehouse.corridors,
     liftStations: warehouse.liftStations,
     deliverySpaces: warehouse.deliverySpaces,
     // Only written when there are any, so plans without zones save unchanged.
@@ -76,6 +88,7 @@ export function splitWarehouse(warehouse: Warehouse): {
       const base: SlotConfig = { id: s.id, x: s.x, y: s.y };
       if (s.rotationDeg) base.rotationDeg = s.rotationDeg;
       if (depth && depth > 1) base.depth = depth;
+      if (s.access) base.access = s.access;
       return base;
     }),
   };

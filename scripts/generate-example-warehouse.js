@@ -34,10 +34,13 @@
 // door facing the main building's south door, connected by a bridging path
 // so its slots are reachable from the main building.
 //
-// Every path point that's meant to connect to another path or a door is an
-// *exact* coincident coordinate with it (not just a visual overlap) — see
-// the Path type's doc comment in src/types/warehouse.ts for why (graph
-// readiness for future chariot pathfinding).
+// Corridors are named junctions and the corridors running through them (see
+// the Junction and Corridor types in src/types/warehouse.ts): two corridors
+// connect by naming the same junction. Junction names follow the plan
+// convention (specs.md §5.7) — meeting points after the corridors meeting
+// there, dead ends after their corridor and compass direction, bends after
+// their corridor and place along it, doors after the door — and every slot
+// and pad states the corridor it's worked from (`access`).
 //
 // Run: node scripts/generate-example-warehouse.js
 
@@ -117,6 +120,7 @@ function buildGroup({ prefix, facing, depth, along, alongAxis, perpValue }) {
     const slot = { id, x, y };
     if (rotationDeg !== 0) slot.rotationDeg = rotationDeg;
     if (depth > 1) slot.depth = depth;
+    // Access is filled in below, once the corridors exist.
     slots.push(slot);
     if (palletCount > 0) {
       contents.push({ slotId: id, subSlots: subSlotsContent(id, depth, palletCount) });
@@ -225,7 +229,34 @@ const doors = [
 const liftStations = [{ id: "CL01", x: 6, y: 4, rotationDeg: 0, buildingId: MAIN_BUILDING_ID }];
 const deliverySpaces = [{ id: "DS01", x: 14, y: 4, rotationDeg: 0, buildingId: MAIN_BUILDING_ID }];
 
-const paths = [
+const inMain = (id, x, y) => ({ id, x, y, buildingId: MAIN_BUILDING_ID });
+const inAnnex = (id, x, y) => ({ id, x, y, buildingId: ANNEX_BUILDING_ID });
+
+const junctions = [
+  // MAIN: the A/B aisle and on round the N/M block.
+  inMain("MAIN.W", 2, 13),
+  inMain("MAIN+SERVICE", 24, 13),
+  inMain("MAIN:2", 25, 13),
+  inMain("MAIN:3", 25, 19),
+  inMain("MAIN:4", 33, 19),
+  inMain("MAIN.S", 33, 2),
+  // SERVICE: from MAIN down past the pads to the south door.
+  inMain("SERVICE:1", 24, 6),
+  inMain("SERVICE+DELIVERY", 14, 6),
+  inMain("SERVICE+LIFT", 10, 6),
+  inMain("Door-South", 10, 0),
+  // The pads' spurs.
+  inMain("LIFT:1", 6, 6),
+  inMain("LIFT.S", 6, 5),
+  inMain("DELIVERY.S", 14, 5),
+  // The annex.
+  inAnnex("Door-Annex-North", 10, -3),
+  inAnnex("ANNEX+ANNEX-AISLE", 10, -7),
+  inAnnex("ANNEX-AISLE.W", 1, -7),
+  inAnnex("ANNEX-AISLE.E", 13, -7),
+];
+
+const corridors = [
   // Main east-west aisle (y=13, the A/B aisle). Starts at x=2 — flush with
   // A01/B01's own west edge (x=[2,6]), not the building's west wall at x=0 —
   // there's nothing west of that edge to reach (no door there — see
@@ -237,72 +268,68 @@ const paths = [
   // means centering exactly on x=26 would still overlap the block by 0.75m)
   // up to y=19 (clear north of the whole N/M block, which tops out at y=18),
   // across to x=33, then down the N/M internal aisle itself.
-  {
-    id: "Path-Main",
-    points: [
-      { x: 2, y: 13 },
-      { x: 24, y: 13 },
-      { x: 25, y: 13 },
-      { x: 25, y: 19 },
-      { x: 33, y: 19 },
-      { x: 33, y: 2 },
-    ],
-    buildingIds: [MAIN_BUILDING_ID],
-  },
-  // Service branch: tees off Path-Main at (24,13) — clear of the B block
-  // (whose slots are contiguous, x=[2,22], with no internal gap — this is
-  // the only clear vertical strip between B and the N/M block) — down to
-  // y=6 (clear south of B, whose south edge is y=8), then west to x=10 (the
-  // gap between CL01/DS01), then straight down through that gap to the
-  // south door.
+  { id: "MAIN", junctions: ["MAIN.W", "MAIN+SERVICE", "MAIN:2", "MAIN:3", "MAIN:4", "MAIN.S"] },
+  // Service branch: tees off MAIN at (24,13) — clear of the B block (whose
+  // slots are contiguous, x=[2,22], with no internal gap — this is the only
+  // clear vertical strip between B and the N/M block) — down to y=6 (clear
+  // south of B, whose south edge is y=8), then west to x=10 (the gap between
+  // CL01/DS01), then straight down through that gap to the south door.
   //
-  // The (14,6) vertex carries no turn: it exists so the delivery spur can
-  // tee off *here*, where it actually meets this corridor. Without it the
-  // spur had to start back at (10,6) and retrace east along ground this
-  // path already covers — two paths describing one strip of floor, and a
-  // forced U-turn for anything approaching DS01 from the east, which had to
-  // overshoot to x=10 and come back.
-  {
-    id: "Path-Service",
-    points: [
-      { x: 24, y: 13 },
-      { x: 24, y: 6 },
-      { x: 14, y: 6 },
-      { x: 10, y: 6 },
-      { x: 10, y: 0 },
-    ],
-    buildingIds: [MAIN_BUILDING_ID],
-  },
-  // Short spurs from the service branch to each box's north edge (y=5) —
-  // "connected to a path" by touching, not by running through it. Each
-  // starts at its own tee point on the service branch and covers only
-  // ground that branch doesn't.
-  { id: "Path-Lift-Spur", points: [{ x: 10, y: 6 }, { x: 6, y: 6 }, { x: 6, y: 5 }], buildingIds: [MAIN_BUILDING_ID] },
-  {
-    id: "Path-Delivery-Spur",
-    points: [{ x: 14, y: 6 }, { x: 14, y: 5 }],
-    buildingIds: [MAIN_BUILDING_ID],
-  },
-  // Cross-building connector: the main building's south door straight down
-  // to the annex's north door, across the 3m gap between them. Truncated to
-  // a stub + arrow (Paths.tsx) once only one of the two buildings is focused.
-  {
-    id: "Path-Bridge",
-    points: [{ x: 10, y: 0 }, { x: 10, y: -3 }],
-    buildingIds: [MAIN_BUILDING_ID, ANNEX_BUILDING_ID],
-    endpointBuildingIds: [MAIN_BUILDING_ID, ANNEX_BUILDING_ID],
-  },
+  // SERVICE+DELIVERY carries no turn: it exists so the delivery spur can tee
+  // off *here*, where it actually meets this corridor.
+  { id: "SERVICE", junctions: ["MAIN+SERVICE", "SERVICE:1", "SERVICE+DELIVERY", "SERVICE+LIFT", "Door-South"] },
+  // Short spurs from the service branch to each pad's north edge (y=5) —
+  // connected to a corridor by touching, not by running through it.
+  { id: "LIFT", junctions: ["SERVICE+LIFT", "LIFT:1", "LIFT.S"] },
+  { id: "DELIVERY", junctions: ["SERVICE+DELIVERY", "DELIVERY.S"] },
+  // Between buildings: the main building's south door straight down to the
+  // annex's north door, across the 3m gap. Truncated to a stub + arrow
+  // (Paths.tsx) once only one of the two buildings is focused.
+  { id: "BRIDGE", junctions: ["Door-South", "Door-Annex-North"] },
   // Inside the annex: its door down to the C-slots' aisle. The aisle sits at
   // y=-7, a clear meter north of the slots' own entry edge (y=-8) — same
-  // reasoning as Path-Main's x=25 jog: centering exactly on the entry edge
-  // would still overlap the slots by half the path's own width.
-  { id: "Path-Annex-Connector", points: [{ x: 10, y: -3 }, { x: 10, y: -7 }], buildingIds: [ANNEX_BUILDING_ID] },
-  {
-    id: "Path-Annex-Aisle",
-    points: [{ x: 1, y: -7 }, { x: 10, y: -7 }, { x: 13, y: -7 }],
-    buildingIds: [ANNEX_BUILDING_ID],
-  },
+  // reasoning as MAIN's x=25 jog.
+  { id: "ANNEX", junctions: ["Door-Annex-North", "ANNEX+ANNEX-AISLE"] },
+  { id: "ANNEX-AISLE", junctions: ["ANNEX-AISLE.W", "ANNEX+ANNEX-AISLE", "ANNEX-AISLE.E"] },
 ];
+
+/** `point` joined to the nearest point along a corridor, as an access: the corridor and the metres along it. */
+function accessOnto(corridorId, point) {
+  const at = new Map(junctions.map((j) => [j.id, j]));
+  const points = corridors.find((c) => c.id === corridorId).junctions.map((id) => at.get(id));
+  let best = null;
+  let along = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const length = Math.hypot(b.x - a.x, b.y - a.y);
+    const t = length === 0 ? 0 : Math.max(0, Math.min(1, ((point.x - a.x) * (b.x - a.x) + (point.y - a.y) * (b.y - a.y)) / (length * length)));
+    const distance = Math.hypot(a.x + t * (b.x - a.x) - point.x, a.y + t * (b.y - a.y) - point.y);
+    if (!best || distance < best.distance) best = { distance, offset: along + t * length };
+    along += length;
+  }
+  return { corridor: corridorId, offset: Math.round(best.offset * 1000) / 1000 };
+}
+
+/** A slot's entry edge — where it meets its aisle (geometry.ts's slotEntryPoint). */
+function entryPoint(slot) {
+  const rotation = ((slot.rotationDeg ?? 0) * Math.PI) / 180;
+  return { x: slot.x - (CELL_DEPTH / 2) * Math.sin(rotation), y: slot.y + (CELL_DEPTH / 2) * Math.cos(rotation) };
+}
+
+// Which corridor works each group: A and B face each other across MAIN's
+// east-west run, N and M across its north-south one, C across the annex aisle.
+for (const [group, corridor] of [
+  [groupA, "MAIN"],
+  [groupB, "MAIN"],
+  [groupN, "MAIN"],
+  [groupM, "MAIN"],
+  [groupC, "ANNEX-AISLE"],
+]) {
+  for (const slot of group.slots) slot.access = accessOnto(corridor, entryPoint(slot));
+}
+liftStations[0].access = accessOnto("LIFT", liftStations[0]);
+deliverySpaces[0].access = accessOnto("DELIVERY", deliverySpaces[0]);
 
 const config = {
   id: "bat-13a",
@@ -332,7 +359,8 @@ const config = {
     },
   ],
   doors,
-  paths,
+  junctions,
+  corridors,
   liftStations,
   deliverySpaces,
   slotDefaults: { width: WIDTH, height: CELL_DEPTH },

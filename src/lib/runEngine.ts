@@ -1,7 +1,7 @@
-import type { Point, Slot, SlotSize, SubSlot, Warehouse } from "../types/warehouse";
+import type { Access, Point, Slot, SlotSize, SubSlot, Warehouse } from "../types/warehouse";
 import type { PickingList, PickingStop } from "../types/simulation";
 import type { LegProfile, StopHandling } from "./timeModel";
-import { PathGraph, connectPoint, routeBetween, type Connection, type Route } from "./pathGraph";
+import { PathGraph, TURN_COS_THRESHOLD, connectPoint, routeBetween, type Connection, type Route } from "./pathGraph";
 import { slotEntryPoint, slotFacing } from "./geometry";
 
 /**
@@ -65,9 +65,6 @@ export function runRecord(list: PickingList, homeId: string | undefined, cost: R
 
 /** Capacity a storing run loads up to at a depot — matches the hard 3-pallet limit the lists are authored against (specs.md §5.3). */
 export const FORKLIFT_CAPACITY = 3;
-
-/** A turn sharp enough to cost the forklift time — anything gentler is taken in stride. */
-const TURN_COS_THRESHOLD = Math.cos(Math.PI / 6); // 30°
 
 /**
  * The forklift always starts *and* ends its journey at its home lift station
@@ -163,9 +160,15 @@ function polylineLength(points: Point[]): number {
 }
 
 /** Where a stop is, and where it joins the corridors. */
-interface Join {
+export interface StopJoin {
+  /** The stop's own point: a slot's entry edge, a facility's centre. */
   point: Point;
+  /** Where it joins the network; null when the plan has no corridors. */
   connection: Connection | null;
+  /** That join as the plan would state it: a corridor and the distance along it. */
+  place: Access | null;
+  /** Whether the plan states it (`access`), rather than the router picking the nearest corridor. */
+  explicit: boolean;
 }
 
 /**
@@ -177,16 +180,17 @@ interface Join {
 export class RoutePlanner {
   readonly graph: PathGraph;
   private readonly slots = new Map<string, Slot>();
-  private readonly depots = new Map<string, Point>();
+  private readonly depots = new Map<string, { point: Point; access?: Access }>();
   private readonly slotDefaults: SlotSize;
-  private readonly joins = new Map<string, Join | null>();
+  private readonly joins = new Map<string, StopJoin | null>();
 
   constructor(layout: WarehouseLayout) {
     this.graph = new PathGraph(layout.paths);
     for (const slot of layout.slots) this.slots.set(slot.id, slot);
     // Lift stations are looked up first, so they win an id shared with a delivery space.
-    for (const space of layout.deliverySpaces) this.depots.set(space.id, { x: space.x, y: space.y });
-    for (const lift of layout.liftStations) this.depots.set(lift.id, { x: lift.x, y: lift.y });
+    for (const depot of [...layout.deliverySpaces, ...layout.liftStations]) {
+      this.depots.set(depot.id, { point: { x: depot.x, y: depot.y }, access: depot.access });
+    }
     this.slotDefaults = layout.slotDefaults;
   }
 
@@ -194,22 +198,29 @@ export class RoutePlanner {
     return this.slots.get(id);
   }
 
-  private join(stop: PickingStop): Join | null {
+  /** The stated access when the plan has one (and its corridor exists); otherwise the nearest corridor — in front of it, for a slot. */
+  private resolve(point: Point, access: Access | undefined, facing?: Point): StopJoin {
+    if (access) {
+      const connection = this.graph.joinAlong(access);
+      if (connection) return { point, connection, place: access, explicit: true };
+    }
+    const connection = connectPoint(this.graph, point, facing);
+    return { point, connection, place: connection ? this.graph.placeOf(connection) : null, explicit: false };
+  }
+
+  /** Where a stop is and how it joins the network, or null for an id the plan doesn't have. Worked out once per stop and kept. */
+  joinOf(stop: PickingStop): StopJoin | null {
     const key = `${stop.kind}:${stop.id}`;
     const known = this.joins.get(key);
     if (known !== undefined) return known;
 
-    let join: Join | null = null;
+    let join: StopJoin | null = null;
     if (stop.kind === "slot") {
       const slot = this.slots.get(stop.id);
-      if (slot) {
-        // A slot joins the aisle it opens onto (see connectPoint's facing).
-        const point = slotEntryPoint(slot, this.slotDefaults);
-        join = { point, connection: connectPoint(this.graph, point, slotFacing(slot)) };
-      }
+      if (slot) join = this.resolve(slotEntryPoint(slot, this.slotDefaults), slot.access, slotFacing(slot));
     } else {
-      const point = this.depots.get(stop.id);
-      if (point) join = { point, connection: connectPoint(this.graph, point) };
+      const depot = this.depots.get(stop.id);
+      if (depot) join = this.resolve(depot.point, depot.access);
     }
     this.joins.set(key, join);
     return join;
@@ -217,13 +228,13 @@ export class RoutePlanner {
 
   /** Whether the plan has anything by this stop's id. */
   knows(stop: PickingStop): boolean {
-    return this.join(stop) !== null;
+    return this.joinOf(stop) !== null;
   }
 
   /** One leg's route, or null when either end names nothing in the plan. */
   route(from: PickingStop, to: PickingStop): Route | null {
-    const a = this.join(from);
-    const b = this.join(to);
+    const a = this.joinOf(from);
+    const b = this.joinOf(to);
     if (!a || !b) return null;
     return routeBetween(this.graph, a.point, a.connection, b.point, b.connection);
   }
@@ -245,7 +256,7 @@ export interface BatchResult {
   runs: RunCost[];
   /** The new sub-slots of every slot the batch stored into or picked from — applied to the warehouse in one go. */
   stock: Record<string, SubSlot[]>;
-  /** Directed per-segment travel tallies keyed `"${nodeKeyA}→${nodeKeyB}"`, as the path heatmap reads them. Empty unless captured. */
+  /** Directed per-segment travel tallies keyed `"${junctionA}→${junctionB}"`, as the path heatmap reads them. Empty unless captured. */
   edgeUsage: Record<string, number>;
   /** One tally per pick or store at a slot. Empty unless captured. */
   slotUsage: Record<string, number>;

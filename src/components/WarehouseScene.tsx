@@ -26,6 +26,7 @@ import { LiftStations } from "./LiftStations";
 import { DeliverySpaces } from "./DeliverySpaces";
 import { InaccessibleZones } from "./InaccessibleZones";
 import { Slots } from "./Slots";
+import { SlotAccess } from "./SlotAccess";
 import { DragPlane } from "./DragPlane";
 import { Forklift } from "./Forklift";
 import { SlotHeatmap } from "./SlotHeatmap";
@@ -356,6 +357,7 @@ export function WarehouseScene() {
           </>
         )}
         <Paths paths={warehouse.paths} />
+        {layers.isVisible("access") && <SlotAccess />}
         {layers.isVisible("facilities") && (
           <>
             <LiftStations stations={warehouse.liftStations} />

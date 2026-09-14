@@ -73,29 +73,72 @@ export interface Door {
 }
 
 /**
- * Every point where two paths meet, branch, or a path starts/ends at a door
- * MUST appear as an exact coincident point (same x,y) in every path's
- * `points` list that touches it, not just a visual overlap — this is what
- * lets a future graph-extraction step (for chariot pathfinding, e.g. BFS)
- * mechanically dedupe identical points into shared node ids and turn each
- * path's consecutive points into edges, without any new schema on top of
- * this one. See specs.md §5.1.
+ * A named point of the corridor network: where corridors meet, where one
+ * ends, where one passes through a door, or where one bends. Corridors list
+ * junctions by id, so two corridors connect exactly when they name the same
+ * junction — never because two coordinates happen to coincide (specs.md §5.1).
+ * `buildingId` is the building it stands in; a junction outdoors (a bend in a
+ * link between buildings) has none.
+ */
+export interface Junction {
+  id: string;
+  x: number;
+  y: number;
+  buildingId?: string;
+}
+
+/** One named corridor — aisle AA, 13A's central aisle, the link from 13A to 12B — as the junctions it runs through, in order. */
+export interface Corridor {
+  id: string;
+  junctions: string[];
+  /** Corridor width in meters. Default PATH_DEFAULT_WIDTH (src/components/Paths.tsx). */
+  width?: number;
+}
+
+/**
+ * Where a slot or facility joins the corridor network: `offset` meters along
+ * `corridor`, measured from its first junction. Stated in the plan, so which
+ * aisle serves a slot is something the plan says — and can be checked —
+ * rather than something the router infers from geometry.
+ */
+export interface Access {
+  corridor: string;
+  offset: number;
+}
+
+/**
+ * A corridor resolved for drawing and routing: its junctions' coordinates in
+ * order. Derived from `junctions` and `corridors` (src/lib/corridors.ts), never
+ * saved.
  */
 export interface Path {
   id: string;
   /** Polyline, like an open WallLoop. */
   points: Point[];
-  /** Corridor width in meters. Default PATH_DEFAULT_WIDTH (src/components/Paths.tsx). */
+  /** The junction at each point — what the routing graph and the path heatmap are keyed on. */
+  junctionIds: string[];
   width?: number;
-  /** Usually one building; two for a connector that crosses between buildings. */
+  /** The buildings its junctions stand in: usually one, two for a link between buildings. */
   buildingIds: string[];
   /**
-   * Cross-building connectors only (buildingIds.length > 1): which building
-   * owns `points[0]` and which owns the last point, in that order. Lets
-   * Paths.tsx truncate the path to a short stub + arrow at whichever end's
-   * building is currently focused, instead of drawing into a building that's
-   * hidden at that focus level.
+   * Links between buildings only: which building owns `points[0]` and which
+   * the last point. Lets Paths.tsx truncate the path to a short stub + arrow
+   * at whichever end's building is currently focused, instead of drawing into
+   * a building that's hidden at that focus level.
    */
+  endpointBuildingIds?: [string, string];
+}
+
+/**
+ * The corridor format before junctions: polylines that connected only where
+ * two of them shared an exact coordinate. Still read, and converted on load
+ * (src/lib/corridors.ts), so older plan files open; never written.
+ */
+export interface LegacyPath {
+  id: string;
+  points: Point[];
+  width?: number;
+  buildingIds: string[];
   endpointBuildingIds?: [string, string];
 }
 
@@ -105,6 +148,8 @@ export interface LiftStation {
   y: number;
   rotationDeg?: number;
   buildingId: string;
+  /** Where it joins the corridors. Without it, the router uses the nearest point on any corridor. */
+  access?: Access;
 }
 
 /** Same footprint as LiftStation (6x2, see src/components/DeliverySpaces.tsx) — a separate concept, just sharing the same fixed-pad rendering. */
@@ -114,6 +159,8 @@ export interface DeliverySpace {
   y: number;
   rotationDeg?: number;
   buildingId: string;
+  /** Where it joins the corridors. Without it, the router uses the nearest point on any corridor. */
+  access?: Access;
 }
 
 /**
@@ -150,6 +197,8 @@ export interface SlotConfig {
    * own full slotDefaults footprint. Default 1 (no depth subdivision).
    */
   depth?: number;
+  /** The corridor the slot is worked from. Without it, the router uses the nearest corridor in front of the slot. */
+  access?: Access;
 }
 
 export interface WarehouseConfig {
@@ -159,7 +208,11 @@ export interface WarehouseConfig {
   walls: WallLoop[];
   /** Optional — absent in files predating this addition, treated as empty. */
   doors?: Door[];
-  paths?: Path[];
+  /** The corridor network's named points. */
+  junctions?: Junction[];
+  corridors?: Corridor[];
+  /** Legacy corridor format, read only when `corridors` is absent. */
+  paths?: LegacyPath[];
   liftStations?: LiftStation[];
   deliverySpaces?: DeliverySpace[];
   /** Optional — absent in files predating this addition, treated as empty. */
@@ -215,6 +268,7 @@ export interface Slot {
    * subSlots.length. Undefined = depth 1, no storage detail merged in.
    */
   subSlots?: SubSlot[];
+  access?: Access;
 }
 
 export interface Warehouse {
@@ -223,6 +277,9 @@ export interface Warehouse {
   units: "m";
   walls: WallLoop[];
   doors: Door[];
+  junctions: Junction[];
+  corridors: Corridor[];
+  /** The corridors resolved to polylines — derived from `junctions` and `corridors`, for drawing and routing. */
   paths: Path[];
   liftStations: LiftStation[];
   deliverySpaces: DeliverySpace[];

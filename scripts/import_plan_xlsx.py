@@ -93,9 +93,44 @@ Every building gets a lift station and a delivery space on the clear floor
 south of its last rack, beside the corridor that runs along that strip; the
 first building's lift station is where the forklift starts. Neither is in
 the workbook.
+
+--------------------------------------------------------------------------
+How the corridor network is named
+--------------------------------------------------------------------------
+The plan stores corridors as named junctions and the corridors running
+through them, so a connection is something the plan states rather than two
+coordinates that happen to coincide. Names follow the plant's own codes:
+
+  Corridors
+    AA            an aisle: the location prefix it serves (AA01, AA02, ...);
+                  building letter A is 13A, so the name is plant-wide unique
+    HA.1, HA.2    one aisle letter labelling two separate aisles (10H)
+    13A.CENTRAL   a building's central aisle - the one the links run along
+                  (16G's is its east-west cross-aisle)
+    13A.DOCK      the corridor along the dock strip, beside the pads
+    16G.EXIT      16G's way from its dock out to its south wall
+    HA.2.SPUR     the short spur joining an aisle that can't reach the
+                  central aisle to one that does
+    13A-12B       the link from one building's south door to the next one's
+                  north door
+
+  Junctions
+    13A.S, 12B.N  a door: building and wall side
+    13A.CENTRAL+AA
+                  where corridors meet, listed link, central, dock, exit,
+                  aisle, spur - so "13A's central aisle at aisle AA"
+    AA.E          a dead end: its corridor and the compass way it points
+    13A-12B:2     a bend partway along one corridor (index along it)
+
+Every slot states the corridor it is worked from (`access`: the corridor
+and the metres along it from its first junction): the aisle its label is
+written in, which is the sheet's own statement of it. Only where that aisle
+didn't become a corridor does the slot get the nearest corridor in front of
+it. Pads get their nearest corridor, the dock corridor beside them.
 """
 import argparse
 import json
+import math
 import re
 import zipfile
 from collections import defaultdict
@@ -717,6 +752,7 @@ def import_building(ws, sheet_name, sheet_zones, north_link_x=None, south_link=F
     dock_y = y_bot(last_rack) - CLEAR - PATH_W / 2
     paths = []
     north_door = south_door = None
+    h_cor, v_cor = [], []
 
     if not transposed:
         # --- aisles run east-west ---------------------------------------------
@@ -889,6 +925,20 @@ def import_building(ws, sheet_name, sheet_zones, north_link_x=None, south_link=F
         p["buildingIds"] = [building_id]
     paths = [p for p in paths if len(p["points"]) > 1]
 
+    # Which corridor serves each slot: the aisle its label is written in - the
+    # sheet's own statement of it - whenever that aisle became a corridor.
+    emitted = {p["id"] for p in paths}
+    serving = {}
+    for code, loc in locations.items():
+        label_row, label_col = loc["label"]
+        prefix = code[:2]
+        if loc["face"] in "NS":
+            match = next((h["id"] for h in h_cor if h["id"].split("-")[1] == prefix and label_row in h["rows"]), None)
+        else:
+            match = next((v["id"] for v in v_cor if v["id"].split("-")[1] == prefix and label_col in v["cols"]), None)
+        if match in emitted:
+            serving[code] = match
+
     # Pads sit south of the dock corridor, beside where the trunk (or, north-
     # south, the westernmost aisle) meets it.
     pad_y = dock_y - PATH_W / 2 - PAD_GAP - PAD_D / 2
@@ -898,12 +948,135 @@ def import_building(ws, sheet_name, sheet_zones, north_link_x=None, south_link=F
         "height": height,
         "slots": slots,
         "paths": paths,
+        "serving": serving,
         "zones": zones_out,
         "north_door": north_door,
         "south_door": south_door,
         "lift": (pad_x + 6, pad_y),
         "delivery": (pad_x + 18, pad_y),
     }
+
+
+# ---------------------------------------------------------------------------
+# Naming the network, and where slots join it
+# ---------------------------------------------------------------------------
+def corridor_name(path_id):
+    """A corridor's plan name, by the convention in the module docstring."""
+    m = re.fullmatch(r"(spur-)?aisle-([A-Z]{2})(?:-(\d+))?", path_id)
+    if m:
+        return m.group(2) + (f".{m.group(3)}" if m.group(3) else "") + (".SPUR" if m.group(1) else "")
+    for prefix, suffix in (("trunk-", ".CENTRAL"), ("dock-", ".DOCK"), ("exit-", ".EXIT")):
+        if path_id.startswith(prefix):
+            return path_id[len(prefix):] + suffix
+    return path_id.removeprefix("link-")
+
+
+def _rank(corridor):
+    """Listing order of corridors in a junction's name: link, central, dock, exit, aisle, spur."""
+    if corridor.endswith(".CENTRAL"):
+        return 1
+    if corridor.endswith(".DOCK"):
+        return 2
+    if corridor.endswith(".EXIT"):
+        return 3
+    if corridor.endswith(".SPUR"):
+        return 5
+    if "." not in corridor and "-" in corridor:
+        return 0  # a link between buildings
+    return 4  # an aisle
+
+
+def _compass(before, point):
+    dx, dy = point[0] - before[0], point[1] - before[1]
+    if abs(dx) >= abs(dy):
+        return "E" if dx >= 0 else "W"
+    return "N" if dy >= 0 else "S"
+
+
+def name_network(paths, doors):
+    """-> (junctions, corridors): the corridor polylines as named junctions and the corridors through them."""
+    def key(p):
+        return (round(p[0], 3), round(p[1], 3))
+
+    door_at = {key(d["point"]): d for d in doors}
+    sites = {}
+    for p in paths:
+        cid, pts = corridor_name(p["id"]), p["points"]
+        for i, pt in enumerate(pts):
+            site = sites.setdefault(key(pt), {"corridors": [], "within": None, "end": None, "bend": None})
+            if cid not in site["corridors"]:
+                site["corridors"].append(cid)
+            if len(p["buildingIds"]) == 1 and site["within"] is None:
+                site["within"] = p["buildingIds"][0]
+            if i in (0, len(pts) - 1):
+                site["end"] = site["end"] or (cid, pts[1] if i == 0 else pts[-2])
+            else:
+                site["bend"] = site["bend"] or (cid, i)
+
+    junctions, id_at, taken = [], {}, set()
+    for k, site in sites.items():
+        door = door_at.get(k)
+        if door:
+            name = door["id"].removeprefix("Door-").replace("-", ".")  # Door-13A-S -> 13A.S
+        elif len(site["corridors"]) > 1:
+            name = "+".join(sorted(site["corridors"], key=lambda c: (_rank(c), c)))
+        elif site["end"]:
+            name = f"{site['end'][0]}.{_compass(site['end'][1], k)}"
+        else:
+            name = f"{site['bend'][0]}:{site['bend'][1]}"
+        jid, n = name, 2
+        while jid in taken:
+            jid, n = f"{name}~{n}", n + 1
+        taken.add(jid)
+        id_at[k] = jid
+        building = door["buildingId"] if door else site["within"]
+        junctions.append({"id": jid, "x": k[0], "y": k[1], **({"buildingId": building} if building else {})})
+
+    corridors = []
+    for p in paths:
+        ids = []
+        for pt in p["points"]:
+            if not ids or ids[-1] != id_at[key(pt)]:
+                ids.append(id_at[key(pt)])
+        corridors.append({"id": corridor_name(p["id"]), "junctions": ids, "width": PATH_W})
+    if len({c["id"] for c in corridors}) != len(corridors):
+        raise SystemExit("two corridors got the same name")
+    return junctions, corridors
+
+
+def _project(p, a, b):
+    """-> (the nearest point to p on segment ab, how far along ab it is, 0..1)."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length_sq = dx * dx + dy * dy
+    t = 0.0 if length_sq == 0 else max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length_sq))
+    return (a[0] + t * dx, a[1] + t * dy), t
+
+
+def polyline_offset(points, p):
+    """-> (distance from p to the polyline, metres along it to the nearest point)."""
+    best, along = None, 0.0
+    for a, b in zip(points, points[1:]):
+        q, t = _project(p, a, b)
+        d = math.dist(p, q)
+        if best is None or d < best[0] - 1e-9:
+            best = (d, along + t * math.dist(a, b))
+        along += math.dist(a, b)
+    return best
+
+
+def nearest_corridor(lines, p, facing=None):
+    """The corridor nearest a point - among those in front of it, when a facing is given and any are."""
+    best = front = None
+    for cid, pts in lines.items():
+        for a, b in zip(pts, pts[1:]):
+            q, _ = _project(p, a, b)
+            d = math.dist(p, q)
+            if best is None or d < best[0]:
+                best = (d, cid)
+            ahead = facing is None or (q[0] - p[0]) * facing[0] + (q[1] - p[1]) * facing[1] >= -1e-6
+            if facing is not None and ahead and (front is None or d < front[0]):
+                front = (d, cid)
+    return (front or best)[1]
 
 
 def main():
@@ -961,7 +1134,7 @@ def main():
             "closed": True,
             "points": [(0.0, dy), (b["width"], dy), (b["width"], dy + b["height"]), (0.0, dy + b["height"])],
         })
-        slots.extend({**s, "x": s["x"] + dx, "y": s["y"] + dy} for s in b["slots"])
+        slots.extend({**s, "x": s["x"] + dx, "y": s["y"] + dy, "_serving": b["serving"].get(s["id"])} for s in b["slots"])
         paths.extend({**p, "points": [(x + dx, y + dy) for x, y in p["points"]]} for p in b["paths"])
         zones.extend({**z, "x": z["x"] + dx, "y": z["y"] + dy, "buildingId": b["id"]} for z in b["zones"])
         for side, door in (("N", b["north_door"]), ("S", b["south_door"])):
@@ -995,7 +1168,33 @@ def main():
 
     def placed(items):
         return [{"id": f["id"], "x": r3(f["point"][0]), "y": r3(f["point"][1]), **({"rotationDeg": 0} if "Door" in f["id"] else {}),
-                 "buildingId": f["buildingId"]} for f in items]
+                 "buildingId": f["buildingId"], **({"access": f["access"]} if "access" in f else {})} for f in items]
+
+    # The corridor network, named (see the module docstring).
+    junctions, corridors = name_network(paths, doors)
+    at = {j["id"]: (j["x"], j["y"]) for j in junctions}
+    lines = {c["id"]: [at[j] for j in c["junctions"]] for c in corridors}
+
+    # Where each slot is worked from: the aisle its label is written in, or -
+    # only where that aisle isn't a corridor - the nearest corridor in front.
+    labelled = []
+    for s in slots:
+        th = math.radians(s.get("rotationDeg", 0))
+        entry = (s["x"] - POS_D / 2 * math.sin(th), s["y"] + POS_D / 2 * math.cos(th))
+        serving = s.pop("_serving", None)
+        corridor = corridor_name(serving) if serving else None
+        if corridor in lines:
+            labelled.append(s["id"])
+        else:
+            corridor = nearest_corridor(lines, entry, (-math.sin(th), math.cos(th)))
+        s["access"] = {"corridor": corridor, "offset": r3(polyline_offset(lines[corridor], entry)[1])}
+    for f in lifts + deliveries:
+        corridor = nearest_corridor(lines, f["point"])
+        f["access"] = {"corridor": corridor, "offset": r3(polyline_offset(lines[corridor], f["point"])[1])}
+    unlabelled = sorted(set(s["id"] for s in slots) - set(labelled))
+    if unlabelled:
+        print(f"  {len(unlabelled)} slots joined to the nearest corridor in front, their label's aisle not being a corridor: "
+              f"{unlabelled[:12]}")
 
     config = {
         "id": args.id,
@@ -1003,12 +1202,8 @@ def main():
         "units": "m",
         "walls": [{**w, "points": fmt(w["points"])} for w in walls],
         "doors": placed(doors),
-        # Key order as the app's own files have it: id, points, width, buildingIds.
-        "paths": [
-            {"id": p["id"], "points": fmt(p["points"]), "width": PATH_W, "buildingIds": p["buildingIds"],
-             **({"endpointBuildingIds": p["endpointBuildingIds"]} if "endpointBuildingIds" in p else {})}
-            for p in paths
-        ],
+        "junctions": junctions,
+        "corridors": corridors,
         "liftStations": placed(lifts),
         "deliverySpaces": placed(deliveries),
         "inaccessibleZones": [
@@ -1029,7 +1224,8 @@ def main():
     out = root / args.out
     out.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {args.out}  ({len(buildings)} buildings, {len(slots)} slots, "
-          f"{len(config['paths'])} paths, {len(zones)} zones)")
+          f"{len(junctions)} junctions, {len(corridors)} corridors, {len(zones)} zones; "
+          f"{len(labelled)} slots worked from their labelled aisle)")
 
     # Explicit rather than derived from the plan's filename: deriving it once
     # silently pointed the empty content file at the plan itself.

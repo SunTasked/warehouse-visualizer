@@ -264,8 +264,10 @@ Continue?`);
                 <span>{warehouse.slots.length}</span>
               </div>
               <div className="app__info-row">
-                <span>Paths</span>
-                <span>{warehouse.paths.length}</span>
+                <span>Corridors · junctions</span>
+                <span>
+                  {warehouse.corridors.length} · {warehouse.junctions.length}
+                </span>
               </div>
               <div className="app__info-row">
                 <span>Doors</span>

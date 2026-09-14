@@ -64,158 +64,167 @@
       "buildingId": "Annex"
     }
   ],
-  "paths": [
+  "junctions": [
     {
-      "id": "Path-Main",
-      "points": [
-        {
-          "x": 2,
-          "y": 13
-        },
-        {
-          "x": 24,
-          "y": 13
-        },
-        {
-          "x": 25,
-          "y": 13
-        },
-        {
-          "x": 25,
-          "y": 19
-        },
-        {
-          "x": 33,
-          "y": 19
-        },
-        {
-          "x": 33,
-          "y": 2
-        }
-      ],
-      "buildingIds": [
-        "Main warehouse"
+      "id": "MAIN.W",
+      "x": 2,
+      "y": 13,
+      "buildingId": "Main warehouse"
+    },
+    {
+      "id": "MAIN+SERVICE",
+      "x": 24,
+      "y": 13,
+      "buildingId": "Main warehouse"
+    },
+    {
+      "id": "MAIN:2",
+      "x": 25,
+      "y": 13,
+      "buildingId": "Main warehouse"
+    },
+    {
+      "id": "MAIN:3",
+      "x": 25,
+      "y": 19,
+      "buildingId": "Main warehouse"
+    },
+    {
+      "id": "MAIN:4",
+      "x": 33,
+      "y": 19,
+      "buildingId": "Main warehouse"
+    },
+    {
+      "id": "MAIN.S",
+      "x": 33,
+      "y": 2,
+      "buildingId": "Main warehouse"
+    },
+    {
+      "id": "SERVICE:1",
+      "x": 24,
+      "y": 6,
+      "buildingId": "Main warehouse"
+    },
+    {
+      "id": "SERVICE+DELIVERY",
+      "x": 14,
+      "y": 6,
+      "buildingId": "Main warehouse"
+    },
+    {
+      "id": "SERVICE+LIFT",
+      "x": 10,
+      "y": 6,
+      "buildingId": "Main warehouse"
+    },
+    {
+      "id": "Door-South",
+      "x": 10,
+      "y": 0,
+      "buildingId": "Main warehouse"
+    },
+    {
+      "id": "LIFT:1",
+      "x": 6,
+      "y": 6,
+      "buildingId": "Main warehouse"
+    },
+    {
+      "id": "LIFT.S",
+      "x": 6,
+      "y": 5,
+      "buildingId": "Main warehouse"
+    },
+    {
+      "id": "DELIVERY.S",
+      "x": 14,
+      "y": 5,
+      "buildingId": "Main warehouse"
+    },
+    {
+      "id": "Door-Annex-North",
+      "x": 10,
+      "y": -3,
+      "buildingId": "Annex"
+    },
+    {
+      "id": "ANNEX+ANNEX-AISLE",
+      "x": 10,
+      "y": -7,
+      "buildingId": "Annex"
+    },
+    {
+      "id": "ANNEX-AISLE.W",
+      "x": 1,
+      "y": -7,
+      "buildingId": "Annex"
+    },
+    {
+      "id": "ANNEX-AISLE.E",
+      "x": 13,
+      "y": -7,
+      "buildingId": "Annex"
+    }
+  ],
+  "corridors": [
+    {
+      "id": "MAIN",
+      "junctions": [
+        "MAIN.W",
+        "MAIN+SERVICE",
+        "MAIN:2",
+        "MAIN:3",
+        "MAIN:4",
+        "MAIN.S"
       ]
     },
     {
-      "id": "Path-Service",
-      "points": [
-        {
-          "x": 24,
-          "y": 13
-        },
-        {
-          "x": 24,
-          "y": 6
-        },
-        {
-          "x": 14,
-          "y": 6
-        },
-        {
-          "x": 10,
-          "y": 6
-        },
-        {
-          "x": 10,
-          "y": 0
-        }
-      ],
-      "buildingIds": [
-        "Main warehouse"
+      "id": "SERVICE",
+      "junctions": [
+        "MAIN+SERVICE",
+        "SERVICE:1",
+        "SERVICE+DELIVERY",
+        "SERVICE+LIFT",
+        "Door-South"
       ]
     },
     {
-      "id": "Path-Lift-Spur",
-      "points": [
-        {
-          "x": 10,
-          "y": 6
-        },
-        {
-          "x": 6,
-          "y": 6
-        },
-        {
-          "x": 6,
-          "y": 5
-        }
-      ],
-      "buildingIds": [
-        "Main warehouse"
+      "id": "LIFT",
+      "junctions": [
+        "SERVICE+LIFT",
+        "LIFT:1",
+        "LIFT.S"
       ]
     },
     {
-      "id": "Path-Delivery-Spur",
-      "points": [
-        {
-          "x": 14,
-          "y": 6
-        },
-        {
-          "x": 14,
-          "y": 5
-        }
-      ],
-      "buildingIds": [
-        "Main warehouse"
+      "id": "DELIVERY",
+      "junctions": [
+        "SERVICE+DELIVERY",
+        "DELIVERY.S"
       ]
     },
     {
-      "id": "Path-Bridge",
-      "points": [
-        {
-          "x": 10,
-          "y": 0
-        },
-        {
-          "x": 10,
-          "y": -3
-        }
-      ],
-      "buildingIds": [
-        "Main warehouse",
-        "Annex"
-      ],
-      "endpointBuildingIds": [
-        "Main warehouse",
-        "Annex"
+      "id": "BRIDGE",
+      "junctions": [
+        "Door-South",
+        "Door-Annex-North"
       ]
     },
     {
-      "id": "Path-Annex-Connector",
-      "points": [
-        {
-          "x": 10,
-          "y": -3
-        },
-        {
-          "x": 10,
-          "y": -7
-        }
-      ],
-      "buildingIds": [
-        "Annex"
+      "id": "ANNEX",
+      "junctions": [
+        "Door-Annex-North",
+        "ANNEX+ANNEX-AISLE"
       ]
     },
     {
-      "id": "Path-Annex-Aisle",
-      "points": [
-        {
-          "x": 1,
-          "y": -7
-        },
-        {
-          "x": 10,
-          "y": -7
-        },
-        {
-          "x": 13,
-          "y": -7
-        }
-      ],
-      "buildingIds": [
-        "Annex"
+      "id": "ANNEX-AISLE",
+      "junctions": [
+        "ANNEX-AISLE.W",
+        "ANNEX+ANNEX-AISLE",
+        "ANNEX-AISLE.E"
       ]
     }
   ],
@@ -225,7 +234,11 @@
       "x": 6,
       "y": 4,
       "rotationDeg": 0,
-      "buildingId": "Main warehouse"
+      "buildingId": "Main warehouse",
+      "access": {
+        "corridor": "LIFT",
+        "offset": 5
+      }
     }
   ],
   "deliverySpaces": [
@@ -234,7 +247,11 @@
       "x": 14,
       "y": 4,
       "rotationDeg": 0,
-      "buildingId": "Main warehouse"
+      "buildingId": "Main warehouse",
+      "access": {
+        "corridor": "DELIVERY",
+        "offset": 1
+      }
     }
   ],
   "slotDefaults": {
@@ -247,139 +264,223 @@
       "x": 4,
       "y": 15,
       "rotationDeg": 180,
-      "depth": 3
+      "depth": 3,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 2
+      }
     },
     {
       "id": "A02",
       "x": 8,
       "y": 15,
       "rotationDeg": 180,
-      "depth": 3
+      "depth": 3,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 6
+      }
     },
     {
       "id": "A03",
       "x": 12,
       "y": 15,
       "rotationDeg": 180,
-      "depth": 3
+      "depth": 3,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 10
+      }
     },
     {
       "id": "A04",
       "x": 16,
       "y": 15,
       "rotationDeg": 180,
-      "depth": 3
+      "depth": 3,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 14
+      }
     },
     {
       "id": "A05",
       "x": 20,
       "y": 15,
       "rotationDeg": 180,
-      "depth": 3
+      "depth": 3,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 18
+      }
     },
     {
       "id": "B01",
       "x": 4,
       "y": 11,
-      "depth": 2
+      "depth": 2,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 2
+      }
     },
     {
       "id": "B02",
       "x": 8,
       "y": 11,
-      "depth": 2
+      "depth": 2,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 6
+      }
     },
     {
       "id": "B03",
       "x": 12,
       "y": 11,
-      "depth": 2
+      "depth": 2,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 10
+      }
     },
     {
       "id": "B04",
       "x": 16,
       "y": 11,
-      "depth": 2
+      "depth": 2,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 14
+      }
     },
     {
       "id": "B05",
       "x": 20,
       "y": 11,
-      "depth": 2
+      "depth": 2,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 18
+      }
     },
     {
       "id": "N01",
       "x": 31,
       "y": 4,
       "rotationDeg": 270,
-      "depth": 3
+      "depth": 3,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 52
+      }
     },
     {
       "id": "N02",
       "x": 31,
       "y": 8,
       "rotationDeg": 270,
-      "depth": 3
+      "depth": 3,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 48
+      }
     },
     {
       "id": "N03",
       "x": 31,
       "y": 12,
       "rotationDeg": 270,
-      "depth": 3
+      "depth": 3,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 44
+      }
     },
     {
       "id": "N04",
       "x": 31,
       "y": 16,
       "rotationDeg": 270,
-      "depth": 3
+      "depth": 3,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 40
+      }
     },
     {
       "id": "M01",
       "x": 35,
       "y": 4,
       "rotationDeg": 90,
-      "depth": 2
+      "depth": 2,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 52
+      }
     },
     {
       "id": "M02",
       "x": 35,
       "y": 8,
       "rotationDeg": 90,
-      "depth": 2
+      "depth": 2,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 48
+      }
     },
     {
       "id": "M03",
       "x": 35,
       "y": 12,
       "rotationDeg": 90,
-      "depth": 2
+      "depth": 2,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 44
+      }
     },
     {
       "id": "M04",
       "x": 35,
       "y": 16,
       "rotationDeg": 90,
-      "depth": 2
+      "depth": 2,
+      "access": {
+        "corridor": "MAIN",
+        "offset": 40
+      }
     },
     {
       "id": "C01",
       "x": 3,
       "y": -9,
-      "depth": 2
+      "depth": 2,
+      "access": {
+        "corridor": "ANNEX-AISLE",
+        "offset": 2
+      }
     },
     {
       "id": "C02",
       "x": 7,
       "y": -9,
-      "depth": 2
+      "depth": 2,
+      "access": {
+        "corridor": "ANNEX-AISLE",
+        "offset": 6
+      }
     },
     {
       "id": "C03",
       "x": 11,
       "y": -9,
-      "depth": 2
+      "depth": 2,
+      "access": {
+        "corridor": "ANNEX-AISLE",
+        "offset": 10
+      }
     }
   ]
 }

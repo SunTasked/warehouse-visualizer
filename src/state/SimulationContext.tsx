@@ -88,6 +88,8 @@ export interface BatchSummary {
 
 interface SimulationContextValue {
   pickingLists: PickingList[];
+  /** Routes over the warehouse on screen, and says where each slot and facility joins the corridors (the Slot access layer, the hover card). */
+  planner: RoutePlanner;
   /**
    * Works lists through in the route worker: routes, stock and measurements
    * for all of them, with `computation` reporting progress, then lands the
@@ -123,7 +125,7 @@ interface SimulationContextValue {
   progressRef: MutableRefObject<number>;
   /** Non-null while a Next-step fast-forward is in flight: the m/s that finishes the current leg's *remaining* distance in FAST_FORWARD_SECONDS. A ref for the same reason progressRef is. */
   fastForwardSpeedRef: MutableRefObject<number | null>;
-  /** Directed per-segment travel tallies keyed `"${nodeKeyA}→${nodeKeyB}"` — read by Paths.tsx for the path heatmap. Only accumulates while capture is armed. */
+  /** Directed per-segment travel tallies keyed `"${junctionA}→${junctionB}"` — read by Paths.tsx for the path heatmap. Only accumulates while capture is armed. */
   edgeUsage: Record<string, number>;
   /** Per-slot interaction tallies (one per pick or store) — read by SlotHeatmap.tsx. Only accumulates while capture is armed. */
   slotUsage: Record<string, number>;
@@ -553,6 +555,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
       // Plant data, loaded with the plan and content (EditorContext) —
       // presets or Overview → Load → Picking lists.
       pickingLists: editor.pickingLists,
+      planner,
       runLists,
       computation,
       cancelComputation,
@@ -592,6 +595,7 @@ export function SimulationProvider({ children }: { children: ReactNode }) {
     }),
     [
       editor.pickingLists,
+      planner,
       runLists,
       computation,
       cancelComputation,

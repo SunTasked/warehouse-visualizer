@@ -4,6 +4,70 @@ Chronological session log, maintained by the `context-keeper` agent. Newest entr
 top. This is a log of what happened each session — the current-state snapshot lives in
 `specs.md`.
 
+## 2026-09-14 (cont'd) — Named corridor network, stated slot access, fewest-turns tie-break
+
+- **Request:** implement three of the performance round's suggestions.
+  1. Store each slot's aisle in the plan, with a visual connection between slot and aisle to
+     check it.
+  2. Store the corridors as named junctions and links, with a naming convention suited to CML.
+  3. Among equal-length routes, prefer fewer turns.
+- **Specs:** §5.1 (corridor network paragraph), §5.3 (pathfinding rewritten), §5.7 (link
+  names; a new "Naming the corridor network, and which aisle works each slot" subsection;
+  result and checker text); one decision log entry. README: the naming and the layer.
+- **Format** (schema v5): `junctions` `{id, x, y, buildingId?}` and `corridors`
+  `{id, junctions[], width?}`; `access {corridor, offset}` on slots, lift stations and
+  delivery spaces. `paths` is legacy, read only.
+  - `src/lib/corridors.ts` has `resolvePaths` (derives `Warehouse.paths`, now carrying
+    `junctionIds`; buildingIds and endpointBuildingIds come from the junctions) and
+    `junctionsFromPaths` (legacy conversion, same naming convention).
+  - `warehouseFiles.ts` merges and splits the new fields.
+- **CML naming convention:**
+  - aisles by location prefix (`AA`; split aisles `HA.1`/`HA.2`);
+  - `13A.CENTRAL`, `13A.DOCK`, `16G.EXIT`, `HA.2.SPUR`, links `13A-12B`;
+  - junctions: doors `13A.S`, meetings `13A.CENTRAL+AA` (ordered link, central, dock, exit,
+    aisle, spur), dead ends `AA.E`, bends `corridor:i`, collisions `~n` (none occur).
+
+  The result is 271 junctions and 138 corridors.
+- **Importer:** `import_building` returns `serving` (each location's corridor: the
+  h_cor/v_cor cluster its label cell belongs to). `main` names the network (`name_network`),
+  sets every slot's access by projecting its entry onto that corridor, with nearest-in-front
+  as the fallback (unused: all 4,910 slots are labelled), and gives pads their nearest
+  corridor.
+- **Router** (`pathGraph.ts`):
+  - nodes by junction id;
+  - `joinAlong(access)`, and `placeOf(connection)` for guessed joins;
+  - trees over directed segments per (start node, arrival-heading turn mask), with lengths
+    in integer micrometres, tie tolerance 10 µm and lexicographic (length, turns);
+  - `routeBetween` picks the best departure, arrival and incoming segment, counting notch
+    turns like `legProfile`;
+  - `TURN_COS_THRESHOLD` exported, and `runEngine` imports it.
+
+  `RoutePlanner.joinOf` returns `{point, connection, place, explicit}`. SimulationContext
+  exposes `planner`.
+- **UI:**
+  - `SlotAccess.tsx`: a new layer "Slot access", default on, drawing instanced bars and
+    dots, teal when stated and amber when guessed, with a bold bar for the hovered slot;
+  - hover card and Inspector: an aisle line;
+  - Paths heatmap: keyed by junction ids;
+  - header info card: counts corridors and junctions.
+- **Checker:** junction and corridor integrity (unknown refs, fewer than two junctions, two
+  junctions sharing a position, unused junctions); access validity (corridor exists, offset
+  within length, join in front); notches from the stated join; doors at junctions; network
+  connectivity by junction id. It warns on slots without access, and on slots worked from a
+  corridor other than the nearest in front (17 in CML).
+- **Test plant generator:** hand-named junctions (`MAIN+SERVICE`, `MAIN:2`, `Door-South`,
+  `ANNEX-AISLE.W`…), corridors `MAIN`, `SERVICE`, `LIFT`, `DELIVERY`, `BRIDGE`, `ANNEX`,
+  `ANNEX-AISLE`, and access for all 21 slots and both pads.
+- **Findings:**
+  - 19 slots now join a different corridor than before: 18 were joined sideways to their
+    building's central aisle, and HA76 to its spur.
+  - Route comparison on 17,896 stop pairs: the tie-break alone leaves every length identical
+    and gives 21 legs fewer turns. The stated access changes only legs touching those 19
+    slots (67 in length, up to 8.2 m; 44 by one turn).
+- **Verified:** `tsc` clean, build OK (worker 13 kB), checker OK on both plans, save round
+  trip, Playwright with zero errors (layer, hover cards, Inspector, heatmap, legacy plan
+  showing amber sideways joins).
+
 ## 2026-09-14 — Batch route computation for thousands of picking lists
 
 - **Request:** the owner will run thousands of lists and can't wait for each to be computed

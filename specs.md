@@ -319,9 +319,10 @@ down (clicks appeared to do nothing, with no error) before finding it.
 #### Doors, paths, the carriage lift station & the delivery space
 
 Four physical/circulation element types, all optional arrays on the config file
-(`doors`/`paths`/`liftStations`/`deliverySpaces`, absent = empty — old files keep loading
+(`doors`/`junctions`+`corridors`/`liftStations`/`deliverySpaces`, absent = empty — old files keep loading
 unchanged): `Door` (an opening in a building's wall, to the exterior or to another
-building via `leadsTo`), `Path` (a polyline corridor, like an open `WallLoop`),
+building via `leadsTo`), a corridor (named junctions and the corridors through them — see
+below — drawn as a polyline `Path`, like an open `WallLoop`),
 `LiftStation` and `DeliverySpace` (both a fixed 6x2m footprint — a code constant for now,
 not a schema field; separate types/components since they're separate concepts, sharing
 only their box+edges+label rendering via `src/components/FacilityPad.tsx`). These are
@@ -344,14 +345,27 @@ doors/lift station/delivery space. A `Path` instead carries **`buildingIds: stri
 buildings (see the cross-building connector below) — every path used so far but one just
 has a single-entry array.
 
-**Graph-readiness authoring convention** (no new schema type, just a rule the example
-data follows — see the `Path` doc comment in `src/types/warehouse.ts`): any point where
-two paths meet, branch, or a path starts/ends at a door must be an *exact coincident
-coordinate* in every path's `points` list that touches it, not just a visual overlap.
-This is what will let a future graph-extraction step (for chariot pathfinding, e.g. BFS)
-mechanically dedupe identical `(x,y)` points into shared node ids and turn each path's
-consecutive points into distance-weighted edges (per the existing §5.2 `Edge` sketch),
-without needing any new schema on top of what's here today.
+**Corridor network: junctions and corridors** (since 2026-09-14). This replaced the earlier
+graph-readiness rule, under which paths connected wherever they shared an exact
+coordinate. A plan's corridors are now two lists:
+- `junctions`: named points `{id, x, y, buildingId?}` where corridors meet, end, bend or
+  pass through a door;
+- `corridors`: `{id, junctions: [...], width?}`, each the junctions it runs through, in
+  order.
+
+Two corridors connect exactly when they name the same junction. A connection is stated
+rather than inferred from coordinates, so a near miss can't silently cut the network, and
+the checker errors on two junctions sharing a position.
+
+`src/lib/corridors.ts` resolves corridors into the polylines everything draws and routes
+over: `Warehouse.paths`, with each point's `junctionIds`. A corridor's `buildingIds`, and a
+link's `endpointBuildingIds`, come from its junctions' buildings. The same module converts a
+plan still in the old `paths` format when it loads, naming its junctions by the same
+convention (§5.7), so older files open and save in the new format.
+
+Slots, lift stations and delivery spaces carry an optional **`access: {corridor, offset}`**:
+the corridor they're worked from, and the metres along it from its first junction (§5.3).
+The path heatmap is keyed on junction pairs (`"13A.S→12B.N"`).
 
 Rendering (`src/components/Doors.tsx`/`Paths.tsx`/`LiftStations.tsx`/
 `DeliverySpaces.tsx`, wired into `WarehouseScene.tsx` after `Walls`): a door is a green
@@ -627,30 +641,38 @@ No validation UI — an authored list is trusted to respect the hard-3 capacity;
 that finds its slot empty, or a stop the plan doesn't have, is skipped — reported in one
 `console.warn` per batch — not a crash.
 
-**Pathfinding** (`src/lib/pathGraph.ts`): `buildPathGraph(paths)` dedupes every `Path`'s
-`points` into graph nodes (keyed by rounded coordinate — safe with no fuzzy matching
-because of the "exact coincident point" authoring convention already established when
-`paths` were added) and adds a bidirectional, distance-weighted edge per consecutive
-pair — spanning every building already, since a cross-building connector like
-"Path-Bridge" is just another path in the same array. `connectPoint()` projects an
-arbitrary point (a slot's entry, a facility's center) onto the *nearest point along any
-edge*, not just onto existing nodes — using only nodes would route a slot to the nearest
-aisle *end* instead of the nearest aisle *point*, sending every slot along a long aisle
-through the same corner. For a slot it considers only edges *in front of* the slot's entry
-(its facing, `slotFacing()` in `geometry.ts`) when there are any: a rack is entered from the
-aisle it opens onto, and 10H's HA76 had a short aisle behind it a few centimetres nearer
-than its own (§5.7). `routeBetween()` runs **Dijkstra** (deliberately, not literal
-BFS as the original request suggested — edges have real, unequal lengths, so only
-Dijkstra actually minimizes travel distance; BFS would minimize hop-count instead) and
-returns `[from, ...network nodes..., to]` — because `from`/`to` are the *exact* input
-points rather than their snapped network points, the polyline automatically ends with a
-short notch off the aisle into the slot, with no separate mechanism needed for that (a
-directly-requested UX detail). A slot's world entry position — the notch/routing target
-— is `src/lib/geometry.ts`'s new `slotEntryPoint()`, derived with the same verified
-rotation convention `focusBounds.ts` uses for camera framing. Since 2026-09-14 the graph is
-compiled (`PathGraph`: integer nodes, typed arrays, one shortest-path tree kept per source
-node) and each stop's join onto it is worked out once and kept — see "Computing thousands
-of lists" below.
+**Pathfinding** (`src/lib/pathGraph.ts`).
+
+**The graph.** Its nodes are the plan's junctions, and its edges the segments between
+consecutive junctions of each corridor (§5.1). It spans buildings already, since a link is
+just another corridor.
+
+**Joining the network.** A slot or pad joins where its `access` says: `offset` metres along
+the named corridor (`PathGraph.joinAlong`). Only when the plan states no access — a slot
+added in the editor, an older plan — does `connectPoint()` pick a join:
+- the nearest point along any segment, never just the nearest junction, which would send
+  every slot along an aisle through that aisle's end;
+- for a slot, only among corridors in front of its entry (`slotFacing()` in
+  `geometry.ts`). A rack is entered from the aisle it opens onto, and 10H's HA76 had a
+  short aisle behind it a few centimetres nearer than its own (§5.7).
+
+**The route's shape.** `routeBetween()` runs Dijkstra (not BFS: segments have real, unequal
+lengths) and returns `[from, ...junctions..., to]`. Because `from` and `to` are the exact
+slot entry or pad centre, the polyline ends in a short notch into the slot with no separate
+mechanism. A slot's entry is `slotEntryPoint()` in `geometry.ts`.
+
+**Shortest, then fewest turns** (since 2026-09-14). A turn is a direction change over 30°
+(`TURN_COS_THRESHOLD`), the same rule the time model charges for.
+- Whether the next segment is a turn depends on the segment you arrived by, so the graph
+  keeps trees of best routes over *directed segments*, one per start junction and arrival
+  heading.
+- Lengths are summed in whole micrometres, so equal lengths compare equal.
+- A join partway along a segment can leave by either end, and a goal can be reached along
+  any segment into its junction. A leg is the best of those few combinations, the notch
+  turns included.
+
+The trees and each stop's join are kept once computed; see "Computing thousands of lists"
+below.
 
 **Two playback modes, both required, switched via a toggle** (not a single choice, per
 explicit user preference) in `SimulationContext.tsx` — since 2026-09-14 both are ways of
@@ -1765,21 +1787,95 @@ furthest north, then 12B, 08C, 07D, 06F, 10H, 14J, 15K and 16G — west walls al
 apart. 13A keeps its coordinates (south wall on y = 0); the others run into negative y.
 
 They are **linked along their central aisles**, per the owner's review of the first five
-(which had been joined by a road along their west walls). Each trunk carries on through a
-door in its building's south wall (`Door-13A-S`), and a connector crosses the gap to a door
-in the north wall of the building below (`Door-12B-N`), where that building's trunk starts:
-one cross-building connector per pair of neighbours (`link-13A-12B`, …, each with
-`endpointBuildingIds`), the shape the building focus already draws as a stub and arrow.
-Their ends are the doors' own points, so the network joins under the exact-coincident-point
-rule. Every link is straight, at x = 28 m: each building's *contents* are slid east or west,
+(which had been joined by a road along their west walls). Each central aisle carries on
+through a door in its building's south wall (`Door-13A-S`, junction `13A.S`), and a link
+crosses the gap to a door in the north wall of the building below (junction `12B.N`),
+where that building's central aisle starts. There is one link per pair of neighbours
+(`13A-12B`, …), which the building focus draws as a stub and arrow. The link and both
+central aisles name the door junctions, which is what connects them. Every link is
+straight, at x = 28 m: each building's *contents* are slid east or west,
 walls left where they are, until the aisle it is entered by lines up with the door above.
 15K's central band came out 0.6 m east of the others' (narrowed by a train strip on each
 side), and 16G — with no north–south trunk, entered down the aisle that opens onto its north
 wall nearest the door above — 0.15 m west, which had put a jog in both links (owner's
 review). Neither move brings anything near a wall: 15K's racking starts 10 m in from its
-west wall and 16G's ends 3 m short of its east wall. A single-building import
-makes no door and no link. Corridor ids every building has carry its name (`trunk-13A`,
-`dock-13A`); aisle ids already differ (`aisle-AA`, `aisle-BA`).
+west wall and 16G's ends 3 m short of its east wall. A single-building import makes no door
+and no link.
+
+#### Naming the corridor network, and which aisle works each slot (2026-09-14)
+
+Per the plant owner, the network is stored as named junctions and corridors (§5.1), with
+names that read as places in the plant.
+
+| Corridor | What it is |
+|---|---|
+| `AA` | an aisle, named by the location prefix it serves (AA01, AA02…); the building letter makes it unique plant-wide |
+| `HA.1`, `HA.2` | one aisle letter labelling two separate aisles (10H) |
+| `13A.CENTRAL` | a building's central aisle, the one the links run along (for 16G, its cross-aisle) |
+| `13A.DOCK` | the corridor along the dock strip, beside the pads |
+| `16G.EXIT` | 16G's way from its dock out to its south wall |
+| `HA.2.SPUR` | the spur joining an aisle that can't reach the central aisle to one that can |
+| `13A-12B` | the link between two buildings |
+
+| Junction | What it is |
+|---|---|
+| `13A.S`, `12B.N` | a door: building and wall side |
+| `13A.CENTRAL+AA` | where corridors meet, listed in the order link, central, dock, exit, aisle, spur |
+| `AA.E` | a dead end: its corridor and the compass direction it points |
+| `13A-12B:2` | a bend partway along one corridor, by its index along it |
+
+CML comes to 271 junctions and 138 corridors. The importer (`name_network`) names them from
+the corridors it builds; a repeated name would get a `~2` suffix, and none occurs. A plan in
+the older format gets the same treatment on load, with its path ids as corridor names
+(`aisle-AA+trunk-13A`).
+
+**Every slot states its aisle.** A location's label is written inside the aisle that serves
+it, and the importer builds each aisle corridor from exactly those label lines. So for every
+slot it records the aisle its label sits in, e.g. `access: {corridor: "AA", offset: 2.4}`.
+- All 4,910 CML slots get their access this way. Only a slot whose aisle didn't become a
+  corridor would fall back to the nearest corridor in front of it.
+- Pads get their nearest corridor, the dock corridor beside them.
+
+This moved where 19 slots join:
+- 18 sit at the end of an aisle, beside a central aisle that passes nearer than their own
+  aisle's centreline (AC01, AC02, CK28, DH01, DI27, FC01…). The old router had joined them
+  sideways onto the central aisle.
+- HA76 had been joined to the spur beside it.
+
+All 19 are now worked from their own aisle, as the sheet says. The checker lists them as "worked from a
+corridor other than the nearest one in front", 17 by its stricter measure, as a warning to
+look over rather than an error.
+
+**Seeing it.** A "Slot access" layer (`SlotAccess.tsx`, on by default) draws a bar from each
+slot's entry edge, and each pad's centre, to the point where it joins its corridor, with a
+dot there.
+- Teal means the plan states the join; amber means the nearest corridor is used instead.
+- The hovered slot's bar is drawn bold.
+- The whole plant is one instanced mesh of bars and one of dots.
+- The slot hover card and the edit-mode Inspector name the aisle and the metres along it
+  ("AA · 2.4 m", plus "(nearest)" when the join is guessed).
+
+**Routes.** Compared with the previous router on the 17,896 distinct stop pairs of 5,000
+generated lists:
+- **Previous plan, converted on load** (so only the new tie-break differs): every length is
+  identical, and 21 legs take an equally short route with fewer turns, none with more.
+- **New plan:** the only further changes are legs to or from the 19 re-joined slots. 67
+  change length, by up to 8.2 m, and 44 take one more turn, entering the rack from its own
+  aisle.
+
+Verified: `tsc --noEmit` clean and the production build succeeds. `check_plan.py` passes on
+both plans. A save round trip keeps junctions, corridors and access, and writes no `paths`.
+
+In Playwright, with zero console errors:
+- The Slot access layer starts on. A03's hover card reads "Aisle MAIN · 10.0 m", and the
+  edit-mode Inspector "Worked from MAIN at 10.0 m (as the plan states)".
+- In CML, the info card counts 138 corridors and 271 junctions. Hover cards read
+  "AC · 2.4 m", "HA.1 · 48.0 m" and "FP · 0.0 m", and the close-ups show each bar running
+  straight across to its aisle.
+- A capture of all 16 lists feeds the heatmap on junction keys (266 segments), with no
+  warnings.
+- The previous plan file, in the old format, loads with the same counts. AC01's amber bar
+  runs sideways to `trunk-13A`, the join the new plan corrects.
 
 #### Result
 
@@ -1795,13 +1891,20 @@ makes no door and no link. Corridor ids every building has carry its name (`trun
 | 15K | 445 | 1,267 | 1 | 2 × Train | 89.6 × 66.6 m |
 | 16G | 445 | 1,442 | 31 | — | 136.5 × 50.2 m |
 
-4,910 slots, 10,435 lane positions (31,305 pallet places at 3 tiers), 138 corridors, 9
-zones. 15K's walls aren't drawn as the others' are, so its block's whole row range is its
-floor. `scripts/check_plan.py` passes: unique ids; every slot inside exactly one building
-and overlapping none; no corridor centreline through a slot or a zone; every slot has a
-corridor in front of it, and the way out to the nearest one crosses no racking or zone
-(4.1 m at most, KA02); pads inside their building, clear of racking, corridors and zones;
-doors on their walls and on the network; the network in one piece. Three warnings, where a
+4,910 slots, 10,435 lane positions (31,305 pallet places at 3 tiers), 271 junctions, 138
+corridors, 9 zones. 15K's walls aren't drawn as the others' are, so its block's whole row
+range is its floor.
+
+`scripts/check_plan.py` passes:
+- ids are unique;
+- every corridor names existing junctions, and no two junctions share a position;
+- every slot is inside exactly one building and overlaps none;
+- no corridor centreline runs through a slot or a zone;
+- every slot's access names a real corridor within its length, joins in front of the slot,
+  and its way out crosses no racking or zone (4.1 m at most, KA01);
+- pads are inside their building, clear of racking, corridors and zones, with valid access;
+- doors are on their walls and at junctions;
+- the network is in one piece. Three warnings, where a
 corridor's drawn 2.2 m width grazes the racks along an aisle drawn one row wide: 13A's
 aisle K (14 slots, older than these imports), 10H's short east end of aisle A (5) and 15K's
 aisle R (11). The first five buildings' 3,200 slots didn't move; only their trunks and
@@ -1971,6 +2074,19 @@ from 12B–06F and one from 10H–16G — 16 lists in all.
 ## 10. Decision Log
 
 Date-stamped record of decisions that changed scope or direction. Newest first.
+
+- 2026-09-14 — Per the plant owner (§5.1, §5.3, §5.7):
+  - **Corridor format:** the corridor network is stored as named junctions and corridors
+    listing them, instead of paths that connected by sharing exact coordinates. Plans in
+    the older format still load, converted.
+  - **Access:** every slot and pad states the corridor it is worked from (`access`), and the
+    CML importer takes each slot's from the aisle its label is written in.
+  - **Naming:** names follow the plant's codes: aisles by location prefix (`AA`, `HA.2`),
+    `13A.CENTRAL`, `13A.DOCK`, links `13A-12B`, and junctions `13A.CENTRAL+AA`, `AA.E`,
+    `13A.S`.
+  - **Slot access layer:** draws every join, teal when stated and amber when guessed, so
+    the assignments can be checked by eye.
+  - **Routing:** among routes of equal length the router takes the one with fewest turns.
 
 - 2026-09-14 — Picking lists are computed before anything is displayed (§5.3), so thousands
   can run at once. Running lists routes all of them in a web worker behind a progress bar,

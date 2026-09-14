@@ -1,5 +1,6 @@
 import type { FocusEvent } from "react";
 import { useEditor } from "../state/EditorContext";
+import { useSimulation } from "../state/SimulationContext";
 
 export function Inspector() {
   const {
@@ -16,6 +17,7 @@ export function Inspector() {
     clearSelection,
     commit,
   } = useEditor();
+  const { planner } = useSimulation();
   if (mode !== "edit" || selectedSlotIds.size === 0) return null;
 
   const ids = Array.from(selectedSlotIds);
@@ -70,6 +72,17 @@ export function Inspector() {
         {field("x", "X (m)", "1")}
         {field("y", "Y (m)", "1")}
         {field("rotationDeg", "Rotation (°)", "90")}
+
+        {(() => {
+          const join = planner.joinOf({ kind: "slot", id: slot.id });
+          if (!join?.place) return null;
+          return (
+            <p className="inspector__hint">
+              Worked from <strong>{join.place.corridor}</strong> at {join.place.offset.toFixed(1)} m
+              {join.explicit ? " (as the plan states)" : " — not in the plan, so the nearest corridor in front"}
+            </p>
+          );
+        })()}
 
         <label className="inspector__field">
           <span>Depth (sub-slots)</span>
